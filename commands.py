@@ -1,9 +1,13 @@
 import discord
-import mysql.connector
-import mysql.connector.abstracts
+from sqlalchemy import Delete as SQLDelete
+from sqlalchemy import and_ as sql_and
+from sqlalchemy import or_ as sql_or
+from sqlalchemy.dialects.mysql import insert as sql_insert
+from sqlalchemy.orm import Session as SQLSession
 
 import globals
 from bridge import Bridge, bridges
+from database import DBBridge, engine
 
 
 @discord.app_commands.guild_only()
@@ -40,14 +44,11 @@ async def bridge(
         )
         return
 
-    assert globals.conn
-    cur = globals.conn.cursor()
-
-    await create_bridge_and_db(message_channel, target_channel, None, cur)
-    await create_bridge_and_db(target_channel, message_channel, None, cur)
-
-    globals.conn.commit()
-    cur.close()
+    session = SQLSession(engine)
+    await create_bridge_and_db(message_channel, target_channel, None, session)
+    await create_bridge_and_db(target_channel, message_channel, None, session)
+    session.commit()
+    session.close()
 
     await interaction.response.send_message(
         "✅ Bridge created! Try sending a message from either channel 😁",
@@ -171,26 +172,26 @@ async def demolish(
         )
         return
 
-    assert globals.conn
-    cur = globals.conn.cursor()
-
     await demolish_bridges(message_channel, target_channel)
-    cur.execute(
-        """
-        DELETE FROM
-            bridges
-        WHERE
-            (source = %(first_channel)s AND target = %(second_channel)s)
-            OR (source = %(second_channel)s AND target = %(first_channel)s)
-        """,
-        {
-            "first_channel": str(message_channel.id),
-            "second_channel": str(target_channel.id),
-        },
-    )
 
-    globals.conn.commit()
-    cur.close()
+    message_channel_id = str(message_channel.id)
+    target_channel_id = str(target_channel.id)
+    session = SQLSession(engine)
+    delete_demolished_bridges = SQLDelete(DBBridge).where(
+        sql_or(
+            sql_and(
+                DBBridge.source == message_channel_id,
+                DBBridge.target == target_channel_id,
+            ),
+            sql_and(
+                DBBridge.source == target_channel_id,
+                DBBridge.target == message_channel_id,
+            ),
+        )
+    )
+    session.execute(delete_demolished_bridges)
+    session.commit()
+    session.close()
 
     await interaction.response.send_message(
         "✅ Bridges demolished!",
@@ -240,30 +241,22 @@ async def demolish_all(
             else:
                 paired_channels.add(target_id)
 
-    assert globals.conn
-    cur = globals.conn.cursor()
-
     for channel_id in paired_channels:
         await demolish_bridges(channel_id, message_channel)
 
-    exception_str = (  # Unfortunately this kind of injection is the only way to get this to work
-        ""
-        if len(exceptions) == 0
-        else "AND target NOT IN (" + ", ".join(f"'{i}'" for i in exceptions) + ")"
+    session = SQLSession(engine)
+    delete_demolished_bridges = SQLDelete(DBBridge).where(
+        sql_or(
+            DBBridge.target == str(message_channel.id),
+            sql_and(
+                DBBridge.source == str(message_channel.id),
+                DBBridge.target.not_in([str(i) for i in exceptions]),
+            ),
+        )
     )
-    cur.execute(
-        f"""
-        DELETE FROM
-            bridges
-        WHERE
-            target = %(channel)s
-            OR (source = %(channel)s {exception_str})
-        """,
-        {"channel": str(message_channel.id)},
-    )
-
-    globals.conn.commit()
-    cur.close()
+    session.execute(delete_demolished_bridges)
+    session.commit()
+    session.close()
 
     if len(exceptions) == 0:
         await interaction.response.send_message(
@@ -281,7 +274,7 @@ async def create_bridge_and_db(
     source: discord.TextChannel | discord.Thread | int,
     target: discord.TextChannel | discord.Thread | int,
     webhook: discord.Webhook | None = None,
-    cur: mysql.connector.abstracts.MySQLCursorAbstract | None = None,
+    session: SQLSession | None = None,
 ) -> Bridge:
     """Create a one-way Bridge from source channel to target channel in `bridges`, creating a webhook if necessary, then inserts a reference to this new bridge into the database.
 
@@ -289,31 +282,32 @@ async def create_bridge_and_db(
         - `source`: Source channel for the Bridge, or ID of same.
         - `target`: Target channel for the Bridge, or ID of same.
         - `webhook`: Optionally, an already-existing webhook connecting these channels. Defaults to None.
-        - `cur`: Optionally, a cursor for the connection to the database. Defaults to None, in which case creates and closes a new one locally.
+        - `session`: Optionally, a session with the connection to the database. Defaults to None, in which case creates and closes a new one locally.
     """
     bridge = await create_bridge(source, target, webhook)
 
-    assert globals.conn
-    if not cur:
+    if not session:
         close_after = True
-        cur = globals.conn.cursor()
+        session = SQLSession(engine)
     else:
         close_after = False
-    cur.execute(
-        """
-        INSERT INTO bridges (source, target, webhook)
-        VALUES (%(source_id)s, %(target_id)s, %(webhook_id)s)
-        ON DUPLICATE KEY UPDATE webhook = %(webhook_id)s
-        """,
-        {
-            "source_id": str(globals.get_id_from_channel(source)),
-            "target_id": str(globals.get_id_from_channel(target)),
-            "webhook_id": str(bridge.webhook.id),
-        },
+
+    insert_bridge_row = (
+        sql_insert(DBBridge)
+        .values(
+            source=str(globals.get_id_from_channel(source)),
+            target=str(globals.get_id_from_channel(target)),
+            webhook=str(bridge.webhook.id),
+        )
+        .on_duplicate_key_update(  # TODO abstract this away so it doesn't rely on being specifically MySQL?
+            webhook=str(bridge.webhook.id),
+        )
     )
+    session.execute(insert_bridge_row)
+
     if close_after:
-        globals.conn.commit()
-        cur.close()
+        session.commit()
+        session.close()
 
     return bridge
 

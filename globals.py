@@ -3,13 +3,13 @@ from __future__ import annotations
 import json
 
 import discord
-import mysql.connector
-import mysql.connector.abstracts
 
 """
 The format of this variable is
 {
     "app_token": "the app token for the Discord bot",
+    "db_dialect": "database dialect",
+    "db_driver": "database driver",
     "db_host": "database host",
     "db_port": database port,
     "db_user": "database username",
@@ -18,13 +18,6 @@ The format of this variable is
 }
 """
 credentials: dict[str, str | int] = json.load(open("credentials.json"))
-
-# The connection to the database
-conn: (
-    mysql.connector.pooling.PooledMySQLConnection
-    | mysql.connector.abstracts.MySQLConnectionAbstract
-    | None
-) = None
 
 # Variables for connection to the Discord client
 intents = discord.Intents()

@@ -4,12 +4,16 @@ import asyncio
 from typing import TypedDict, cast
 
 import discord
-import mysql.connector
-import mysql.connector.abstracts
+from sqlalchemy import Delete as SQLDelete
+from sqlalchemy import ScalarResult
+from sqlalchemy import Select as SQLSelect
+from sqlalchemy import or_ as sql_or
+from sqlalchemy.orm import Session as SQLSession
 
 import commands
 import globals
 from bridge import bridges
+from database import DBBridge, engine
 
 
 @globals.client.event
@@ -19,25 +23,15 @@ async def on_ready():
         return
 
     # I am going to try to identify all existing bridges
-    # First, I fetch all target channels registered in the db
-    globals.conn = mysql.connector.connect(
-        host=globals.credentials["db_host"],
-        port=globals.credentials["db_port"],
-        user=globals.credentials["db_user"],
-        passwd=globals.credentials["db_pwd"],
-        database=globals.credentials["db_name"],
-        buffered=True,
-        autocommit=False,
-    )
-    cur = globals.conn.cursor()
-    cur.execute(
-        "SELECT source, target, webhook FROM bridges;"
-    )  # columns are "id", "source", "target", and "webhook", where "id" is a primary key and ("source", "target") have a uniqueness constraint
-
-    registered_bridges = cast(list[tuple[str, str, str]], cur.fetchall())
+    session = SQLSession(engine)
+    registered_bridges: ScalarResult[DBBridge] = session.scalars(SQLSelect(DBBridge))
     invalid_channels: set[str] = set()
     invalid_webhooks: set[str] = set()
-    for source_id_str, target_id_str, webhook_id_str in registered_bridges:
+    for bridge in registered_bridges:
+        source_id_str = bridge.source
+        target_id_str = bridge.target
+        webhook_id_str = bridge.webhook
+
         if webhook_id_str in invalid_webhooks:
             continue
 
@@ -68,29 +62,24 @@ async def on_ready():
 
             if source_channel and target_channel:
                 # There *should* be a webhook there and I have access to the channels
-                await commands.create_bridge_and_db(source_id, target_id, None, cur)
+                await commands.create_bridge_and_db(source_id, target_id, None, session)
 
     if len(invalid_channels) > 0:
-        cur.executemany(
-            """
-            DELETE FROM bridges
-            WHERE source = %(channel_id)s
-                OR target = %(channel_id)s
-            """,
-            [{"channel_id": channel_id_str} for channel_id_str in invalid_channels],
+        delete_invalid_channels = SQLDelete(DBBridge).where(
+            sql_or(
+                DBBridge.source.in_(invalid_channels),
+                DBBridge.target.in_(invalid_channels),
+            )
         )
+        session.execute(delete_invalid_channels)
 
     if len(invalid_webhooks) > 0:
-        cur.executemany(
-            """
-            DELETE FROM bridges
-            WHERE webhook = %s
-            """,
-            [(webhook_id_str,) for webhook_id_str in invalid_webhooks],
+        delete_invalid_webhooks = SQLDelete(DBBridge).where(
+            DBBridge.webhook.in_(invalid_webhooks)
         )
+        session.execute(delete_invalid_webhooks)
 
-    globals.conn.commit()
-    cur.close()
+    session.commit()
 
     await globals.command_tree.sync()
     print(f"{globals.client.user} is connected to the following servers:\n")
