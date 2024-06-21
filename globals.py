@@ -17,7 +17,7 @@ The format of this variable is
     "db_name": "database name"
 }
 """
-credentials: dict[str, str | int]
+credentials: dict[str, str | int] = json.load(open("credentials.json"))
 
 # The connection to the database
 conn: (
@@ -26,37 +26,21 @@ conn: (
     | None
 ) = None
 
-# This variable will be set to True at the end of init() to make sure nothing that relies on the globals uses them before they are ready
-globals_are_initialised: bool = False
-
 # Variables for connection to the Discord client
-intents: discord.Intents
-client: discord.Client
-command_tree: discord.app_commands.CommandTree
+intents = discord.Intents()
+intents.emojis_and_stickers = True
+intents.guilds = True
+intents.members = True
+intents.message_content = True
+intents.messages = True
+intents.reactions = True
+intents.typing = True
+intents.webhooks = True
+client = discord.Client(intents=intents)
+command_tree = discord.app_commands.CommandTree(client)
 is_ready: bool = (
     False  # This one is set to True once the bot has been initialised in main.py
 )
-
-
-def init():
-    """Initialise all global variables."""
-    global intents, client, command_tree, credentials, globals_are_initialised
-
-    intents = discord.Intents()
-    intents.emojis_and_stickers = True
-    intents.guilds = True
-    intents.members = True
-    intents.message_content = True
-    intents.messages = True
-    intents.reactions = True
-    intents.typing = True
-    intents.webhooks = True
-    client = discord.Client(intents=intents)
-    command_tree = discord.app_commands.CommandTree(client)
-
-    credentials = json.load(open("credentials.json"))
-
-    globals_are_initialised = True
 
 
 def mention_to_channel(

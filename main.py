@@ -20,9 +20,6 @@ async def on_ready():
     if globals.is_ready:
         return
 
-    while not globals.globals_are_initialised:
-        await asyncio.sleep(1)
-
     # The names of webhooks created by the Bridges class are formatted like: `:bridge: (src_id tgt_id)`
     webhook_name_parser = re.compile(r"^:bridge: \((?P<src>\d+) (?P<tgt>\d+)\)$")
 
@@ -583,5 +580,4 @@ async def demolish_bridge_one_sided(
     await bridges.demolish_bridge(source, target)
 
 
-globals.init()
 globals.client.run(cast(str, globals.credentials["app_token"]), reconnect=True)
