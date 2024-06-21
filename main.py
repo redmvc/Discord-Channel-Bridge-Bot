@@ -1,10 +1,13 @@
 from __future__ import annotations
-from bridge import Bridges
-import discord
+
 import json
-import mysql.connector
 import re
 from typing import cast
+
+import discord
+import mysql.connector
+
+from bridge import Bridges
 
 # Create the client connection
 intents = discord.Intents()
