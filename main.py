@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 from typing import TypedDict, cast
 
 import discord
@@ -113,15 +112,7 @@ async def on_message(message: discord.Message):
         # Don't bridge messages from webhooks
         return
 
-    # I need to wait until the on_ready event is done before processing any messages
-    time_waited = 0
-    while not globals.is_ready and time_waited < 100:
-        await asyncio.sleep(1)
-        time_waited += 1
-    if time_waited >= 100:
-        # somethin' real funky going on here
-        # I don't have error handling yet though
-        print("Taking forever to get ready.")
+    if not await globals.wait_until_ready():
         return
 
     outbound_bridges = bridges.get_outbound_bridges(message.channel.id)
@@ -215,15 +206,7 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
     if not isinstance(message_channel, (discord.TextChannel, discord.Thread)):
         return
 
-    # I need to wait until the on_ready event is done before processing any messages
-    time_waited = 0
-    while not globals.is_ready and time_waited < 100:
-        await asyncio.sleep(1)
-        time_waited += 1
-    if time_waited >= 100:
-        # somethin' real funky going on here
-        # I don't have error handling yet though
-        print("Taking forever to get ready.")
+    if not await globals.wait_until_ready():
         return
 
     outbound_bridges = bridges.get_outbound_bridges(message_channel.id)
@@ -272,15 +255,7 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
     if not isinstance(message_channel, (discord.TextChannel, discord.Thread)):
         return
 
-    # I need to wait until the on_ready event is done before processing any messages
-    time_waited = 0
-    while not globals.is_ready and time_waited < 100:
-        await asyncio.sleep(1)
-        time_waited += 1
-    if time_waited >= 100:
-        # somethin' real funky going on here
-        # I don't have error handling yet though
-        print("Taking forever to get ready.")
+    if not await globals.wait_until_ready():
         return
 
     outbound_bridges = bridges.get_outbound_bridges(message_channel.id)

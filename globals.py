@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 
 import discord
@@ -105,3 +106,21 @@ def get_id_from_channel(
     if isinstance(channel_or_id, int):
         return channel_or_id
     return channel_or_id.id
+
+
+async def wait_until_ready() -> bool:
+    """Returns True when the bot is ready or False if it times out."""
+    if is_ready:
+        return True
+
+    time_waited = 0
+    while not is_ready and time_waited < 100:
+        await asyncio.sleep(1)
+        time_waited += 1
+
+    if time_waited >= 100:
+        # somethin' real funky going on here
+        # I don't have error handling yet though
+        print("Taking forever to get ready.")
+        return False
+    return True
