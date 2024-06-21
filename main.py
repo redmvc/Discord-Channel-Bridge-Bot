@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import re
 from typing import TypedDict, cast
 
@@ -9,37 +8,17 @@ import discord
 import mysql.connector
 import mysql.connector.abstracts
 
+import globals
 from bridge import Bridges
 
-# Create the client connection
-intents = discord.Intents()
-intents.emojis_and_stickers = True
-intents.guilds = True
-intents.members = True
-intents.message_content = True
-intents.messages = True
-intents.reactions = True
-intents.typing = True
-intents.webhooks = True
-client = discord.Client(intents=intents)
-command_tree = discord.app_commands.CommandTree(client)
-credentials = json.load(open("credentials.json"))
 
-is_ready = False  # whether the bot is ready and doesn't need to be readied again
-conn: (
-    mysql.connector.pooling.PooledMySQLConnection
-    | mysql.connector.abstracts.MySQLConnectionAbstract
-    | None
-) = None  # the connection to the database
-outbound_bridges: dict[int, Bridges] = {}
-inbound_bridges: dict[int, dict[int, Bridges]] = {}
-
-
-@client.event
+@globals.client.event
 async def on_ready():
-    global is_ready, conn, outbound_bridges, inbound_bridges
-    if is_ready:
+    if globals.is_ready:
         return
+
+    while not globals.globals_are_initialised:
+        await asyncio.sleep(1)
 
     # The names of webhooks created by the Bridges class are formatted like: `:bridge: (src_id tgt_id)`
     webhook_name_parser = re.compile(r"^:bridge: \((?P<src>\d+) (?P<tgt>\d+)\)$")
@@ -47,11 +26,11 @@ async def on_ready():
     # I am going to try to identify all existing bridges
     # First, I fetch all target channels registered in the db
     conn = mysql.connector.connect(
-        host=credentials["db_host"],
-        port=credentials["db_port"],
-        user=credentials["db_user"],
-        passwd=credentials["db_pwd"],
-        database=credentials["db_name"],
+        host=globals.credentials["db_host"],
+        port=globals.credentials["db_port"],
+        user=globals.credentials["db_user"],
+        passwd=globals.credentials["db_pwd"],
+        database=globals.credentials["db_name"],
         buffered=True,
         autocommit=False,
     )
@@ -64,7 +43,7 @@ async def on_ready():
         # Only the channel IDs are stored, so I have to find the appropriate channel for this bridge
         target_id_str = cast(tuple[str], target_id)[0]
         target_id = int(target_id_str)
-        target = client.get_channel(target_id)
+        target = globals.client.get_channel(target_id)
         if not isinstance(target, (discord.TextChannel, discord.Thread)):
             # This ID isn't a valid bridged ID, I'll remove it from my database
             cur.execute("DELETE FROM bridges WHERE target = %s;", (target_id_str,))
@@ -128,16 +107,16 @@ async def on_ready():
 
     cur.close()
 
-    await command_tree.sync()
-    print(f"{client.user} is connected to the following servers:\n")
-    for server in client.guilds:
+    await globals.command_tree.sync()
+    print(f"{globals.client.user} is connected to the following servers:\n")
+    for server in globals.client.guilds:
         print(f"{server.name}(id: {server.id})")
 
-    is_ready = True
+    globals.is_ready = True
 
 
 @discord.app_commands.guild_only()
-@command_tree.command(
+@globals.command_tree.command(
     name="bridge",
     description="Create a two-way bridge between two channels.",
 )
@@ -170,9 +149,8 @@ async def bridge(
         )
         return
 
-    global conn
-    assert conn
-    cur = conn.cursor()
+    assert globals.conn
+    cur = globals.conn.cursor()
 
     await create_bridge(message_channel, target_channel)
     cur.execute(
@@ -203,7 +181,7 @@ async def bridge(
         {"source_id": str(target_channel.id), "target_id": str(message_channel.id)},
     )
 
-    conn.commit()
+    globals.conn.commit()
     cur.close()
 
     await interaction.response.send_message(
@@ -213,7 +191,7 @@ async def bridge(
 
 
 @discord.app_commands.guild_only()
-@command_tree.command(
+@globals.command_tree.command(
     name="outbound",
     description="Create an outbound bridge from this channel to target channel.",
 )
@@ -246,9 +224,8 @@ async def outbound(
         )
         return
 
-    global conn
-    assert conn
-    cur = conn.cursor()
+    assert globals.conn
+    cur = globals.conn.cursor()
 
     await create_bridge(message_channel, target_channel)
     cur.execute(
@@ -265,7 +242,7 @@ async def outbound(
         {"source_id": str(message_channel.id), "target_id": str(target_channel.id)},
     )
 
-    conn.commit()
+    globals.conn.commit()
     cur.close()
 
     await interaction.response.send_message(
@@ -275,7 +252,7 @@ async def outbound(
 
 
 @discord.app_commands.guild_only()
-@command_tree.command(
+@globals.command_tree.command(
     name="inbound",
     description="Create an inbound bridge from source channel to this channel.",
 )
@@ -308,9 +285,8 @@ async def inbound(
         )
         return
 
-    global conn
-    assert conn
-    cur = conn.cursor()
+    assert globals.conn
+    cur = globals.conn.cursor()
 
     await create_bridge(source_channel, message_channel)
     cur.execute(
@@ -326,7 +302,7 @@ async def inbound(
         {"source_id": str(source_channel.id), "target_id": str(message_channel.id)},
     )
 
-    conn.commit()
+    globals.conn.commit()
     cur.close()
 
     await interaction.response.send_message(
@@ -336,7 +312,7 @@ async def inbound(
 
 
 @discord.app_commands.guild_only()
-@command_tree.command(
+@globals.command_tree.command(
     name="demolish",
     description="Demolish all bridges between this and target channel.",
 )
@@ -369,9 +345,8 @@ async def demolish(
         )
         return
 
-    global conn
-    assert conn
-    cur = conn.cursor()
+    assert globals.conn
+    cur = globals.conn.cursor()
 
     await demolish_bridges(message_channel, target_channel)
     cur.execute(
@@ -388,7 +363,7 @@ async def demolish(
         },
     )
 
-    conn.commit()
+    globals.conn.commit()
     cur.close()
 
     await interaction.response.send_message(
@@ -398,7 +373,7 @@ async def demolish(
 
 
 @discord.app_commands.guild_only()
-@command_tree.command(
+@globals.command_tree.command(
     name="demolish_all",
     description="Demolish all bridges to and from this channel.",
 )
@@ -420,11 +395,11 @@ async def demolish_all(
         return
 
     # I'll make a list of all channels that are currently bridged to or from this channel
-    paired_channels = set(inbound_bridges[message_channel.id].keys())
-    outbound = outbound_bridges[message_channel.id]
+    paired_channels = set(globals.inbound_bridges[message_channel.id].keys())
+    outbound = globals.outbound_bridges[message_channel.id]
     exceptions: set[int] = set()
     for target_id in outbound.get_webhooks().keys():
-        target_channel = client.get_channel(target_id)
+        target_channel = globals.client.get_channel(target_id)
         assert isinstance(target_channel, (discord.TextChannel, discord.Thread))
         if not target_channel.permissions_for(interaction.user).manage_webhooks:
             # If I don't have Manage Webhooks permission in the target, I can't destroy the bridge from there
@@ -432,9 +407,8 @@ async def demolish_all(
         else:
             paired_channels.add(target_id)
 
-    global conn
-    assert conn
-    cur = conn.cursor()
+    assert globals.conn
+    cur = globals.conn.cursor()
 
     for channel_id in paired_channels:
         await demolish_bridges(channel_id, message_channel)
@@ -457,7 +431,7 @@ async def demolish_all(
         },
     )
 
-    conn.commit()
+    globals.conn.commit()
     cur.close()
 
     if len(exceptions) == 0:
@@ -472,7 +446,7 @@ async def demolish_all(
         )
 
 
-@client.event
+@globals.client.event
 async def on_message(message: discord.Message):
     if not isinstance(message.channel, (discord.TextChannel, discord.Thread)):
         return
@@ -484,7 +458,7 @@ async def on_message(message: discord.Message):
     # I need to wait until the on_ready event is done before processing any messages
     global is_ready
     time_waited = 0
-    while not is_ready and time_waited < 100:
+    while not globals.is_ready and time_waited < 100:
         await asyncio.sleep(1)
         time_waited += 1
     if time_waited >= 100:
@@ -493,7 +467,7 @@ async def on_message(message: discord.Message):
         print("Taking forever to get ready.")
         return
 
-    bridge = outbound_bridges.get(message.channel.id)
+    bridge = globals.outbound_bridges.get(message.channel.id)
     if not bridge:
         return
 
@@ -554,7 +528,7 @@ def get_channel(
             )
         except ValueError:
             return None
-    return client.get_channel(channel_id)
+    return globals.client.get_channel(channel_id)
 
 
 async def create_bridge(
@@ -570,16 +544,18 @@ async def create_bridge(
         source_id = source.id
 
     if isinstance(target, int):
-        target = cast(discord.TextChannel | discord.Thread, client.get_channel(target))
+        target = cast(
+            discord.TextChannel | discord.Thread, globals.client.get_channel(target)
+        )
     assert isinstance(target, discord.TextChannel | discord.Thread)
 
-    if not outbound_bridges.get(source_id):
-        outbound_bridges[source_id] = Bridges(source_id)
-    await outbound_bridges[source_id].add_target(target, webhook)
+    if not globals.outbound_bridges.get(source_id):
+        globals.outbound_bridges[source_id] = Bridges(source_id)
+    await globals.outbound_bridges[source_id].add_target(target, webhook)
 
-    if not inbound_bridges.get(target.id):
-        inbound_bridges[target.id] = {}
-    inbound_bridges[target.id][source_id] = outbound_bridges[source_id]
+    if not globals.inbound_bridges.get(target.id):
+        globals.inbound_bridges[target.id] = {}
+    globals.inbound_bridges[target.id][source_id] = globals.outbound_bridges[source_id]
 
 
 async def demolish_bridges(
@@ -601,14 +577,15 @@ async def demolish_bridges(
 
 
 async def demolish_bridge_one_sided(source_id, target_id):
-    if outbound_bridges.get(source_id):
-        bridge = outbound_bridges[source_id]
+    if globals.outbound_bridges.get(source_id):
+        bridge = globals.outbound_bridges[source_id]
         await bridge.demolish(target_id)
         if len(bridge.get_webhooks()) == 0:
-            del outbound_bridges[source_id]
+            del globals.outbound_bridges[source_id]
 
-    if inbound_bridges.get(target_id):
-        del inbound_bridges[target_id][source_id]
+    if globals.inbound_bridges.get(target_id):
+        del globals.inbound_bridges[target_id][source_id]
 
 
-client.run(credentials["app_token"], reconnect=True)
+globals.init()
+globals.client.run(cast(str, globals.credentials["app_token"]), reconnect=True)
