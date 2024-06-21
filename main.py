@@ -22,6 +22,7 @@ intents.reactions = True
 intents.typing = True
 intents.webhooks = True
 client = discord.Client(intents=intents)
+command_tree = discord.app_commands.CommandTree(client)
 credentials = json.load(open("credentials.json"))
 
 is_ready = False  # whether the bot is ready and doesn't need to be readied again
@@ -127,6 +128,7 @@ async def on_ready():
 
     cur.close()
 
+    await command_tree.sync()
     print(f"{client.user} is connected to the following servers:\n")
     for server in client.guilds:
         print(f"{server.name}(id: {server.id})")
