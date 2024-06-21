@@ -177,6 +177,7 @@ async def bridge(
             FROM bridges
             WHERE source = %(source_id)s
                 AND target = %(target_id)s
+        )
         """,
         {"source_id": str(target_channel.id), "target_id": str(message_channel.id)},
     )
@@ -298,6 +299,7 @@ async def inbound(
             FROM bridges
             WHERE source = %(source_id)s
                 AND target = %(target_id)s
+        )
         """,
         {"source_id": str(source_channel.id), "target_id": str(message_channel.id)},
     )
