@@ -22,3 +22,13 @@ class DBBridge(DBBase):
     source: Mapped[str] = mapped_column(String(32), nullable=False)
     target: Mapped[str] = mapped_column(String(32), nullable=False)
     webhook: Mapped[str] = mapped_column(String(32))
+
+
+class DBMessageMap(DBBase):
+    __tablename__ = "message_mappings"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    source_message: Mapped[str] = mapped_column(String(32), nullable=False)
+    source_channel: Mapped[str] = mapped_column(String(32), nullable=False)
+    target_message: Mapped[str] = mapped_column(String(32), nullable=False)
+    target_channel: Mapped[str] = mapped_column(String(32), nullable=False)
