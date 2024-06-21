@@ -25,7 +25,7 @@ async def on_ready():
 
     # I am going to try to identify all existing bridges
     # First, I fetch all target channels registered in the db
-    conn = mysql.connector.connect(
+    globals.conn = mysql.connector.connect(
         host=globals.credentials["db_host"],
         port=globals.credentials["db_port"],
         user=globals.credentials["db_user"],
@@ -34,7 +34,7 @@ async def on_ready():
         buffered=True,
         autocommit=False,
     )
-    cur = conn.cursor()
+    cur = globals.conn.cursor()
     cur.execute(
         "SELECT UNIQUE(target) FROM bridges;"
     )  # columns are "id", "source", and "target"
@@ -47,7 +47,7 @@ async def on_ready():
         if not isinstance(target, (discord.TextChannel, discord.Thread)):
             # This ID isn't a valid bridged ID, I'll remove it from my database
             cur.execute("DELETE FROM bridges WHERE target = %s;", (target_id_str,))
-            conn.commit()
+            globals.conn.commit()
             continue
 
         # And the channel its webhooks will be attached to
@@ -57,7 +57,7 @@ async def on_ready():
         if not isinstance(webhook_channel, discord.TextChannel):
             # This ID isn't a valid bridged ID, I'll remove it from my database
             cur.execute("DELETE FROM bridges WHERE target = %s;", (target_id_str,))
-            conn.commit()
+            globals.conn.commit()
             continue
 
         # Then I get all webhooks attached to that channel whose target ID (stored in their names) is the current ID
@@ -103,7 +103,7 @@ async def on_ready():
                     """,
                     (bridge_id,),
                 )
-                conn.commit()
+                globals.conn.commit()
 
     cur.close()
 
