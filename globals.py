@@ -78,4 +78,18 @@ def mention_to_channel(
             )
         except ValueError:
             return None
-    return client.get_channel(channel_id)
+    return get_channel_from_id(channel_id)
+
+
+def get_channel_from_id(
+    channel_or_id: (
+        discord.guild.GuildChannel | discord.Thread | discord.abc.PrivateChannel | int
+    ),
+) -> discord.guild.GuildChannel | discord.Thread | discord.abc.PrivateChannel | None:
+    global client
+    if isinstance(channel_or_id, int):
+        channel = client.get_channel(channel_or_id)
+    else:
+        channel = channel_or_id
+
+    return channel

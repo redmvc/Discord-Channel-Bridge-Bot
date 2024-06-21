@@ -43,7 +43,7 @@ async def on_ready():
         # Only the channel IDs are stored, so I have to find the appropriate channel for this bridge
         target_id_str = cast(tuple[str], target_id)[0]
         target_id = int(target_id_str)
-        target = globals.client.get_channel(target_id)
+        target = globals.get_channel_from_id(target_id)
         if not isinstance(target, (discord.TextChannel, discord.Thread)):
             # This ID isn't a valid bridged ID, I'll remove it from my database
             cur.execute("DELETE FROM bridges WHERE target = %s;", (target_id_str,))
@@ -399,7 +399,7 @@ async def demolish_all(
     outbound = globals.outbound_bridges[message_channel.id]
     exceptions: set[int] = set()
     for target_id in outbound.get_webhooks().keys():
-        target_channel = globals.client.get_channel(target_id)
+        target_channel = globals.get_channel_from_id(target_id)
         assert isinstance(target_channel, (discord.TextChannel, discord.Thread))
         if not target_channel.permissions_for(interaction.user).manage_webhooks:
             # If I don't have Manage Webhooks permission in the target, I can't destroy the bridge from there
@@ -525,10 +525,9 @@ async def create_bridge(
     else:
         source_id = source.id
 
-    if isinstance(target, int):
-        target = cast(
-            discord.TextChannel | discord.Thread, globals.client.get_channel(target)
-        )
+    target = cast(
+        discord.TextChannel | discord.Thread, globals.get_channel_from_id(target)
+    )
     assert isinstance(target, discord.TextChannel | discord.Thread)
 
     if not globals.outbound_bridges.get(source_id):
