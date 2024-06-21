@@ -169,7 +169,7 @@ async def create_bridge(
     await outbound_bridges[source_id].add_target(target, webhook)
 
     if not inbound_bridges.get(target.id):
-        inbound_bridges[target.id]
+        inbound_bridges[target.id] = {}
     inbound_bridges[target.id][source_id] = outbound_bridges[source_id]
 
 
