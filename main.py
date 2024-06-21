@@ -60,11 +60,12 @@ async def on_ready():
     target_ids = cur.fetchall()
     for target_id in target_ids:
         # Only the channel IDs are stored, so I have to find the appropriate channel for this bridge
-        target_id = cast(tuple[int], target_id)[0]
+        target_id_str = cast(tuple[str], target_id)[0]
+        target_id = int(target_id_str)
         target = client.get_channel(target_id)
         if not isinstance(target, (discord.TextChannel, discord.Thread)):
             # This ID isn't a valid bridged ID, I'll remove it from my database
-            cur.execute("DELETE FROM bridges WHERE target = %s;", (target_id,))
+            cur.execute("DELETE FROM bridges WHERE target = %s;", (target_id_str,))
             conn.commit()
             continue
 
@@ -74,7 +75,7 @@ async def on_ready():
         )
         if not isinstance(webhook_channel, discord.TextChannel):
             # This ID isn't a valid bridged ID, I'll remove it from my database
-            cur.execute("DELETE FROM bridges WHERE target = %s;", (target_id,))
+            cur.execute("DELETE FROM bridges WHERE target = %s;", (target_id_str,))
             conn.commit()
             continue
 
@@ -86,7 +87,7 @@ async def on_ready():
             if webhook.name
             and (match := webhook_name_parser.fullmatch(webhook.name))
             and match
-            and match.group("tgt") == str(target_id)
+            and match.group("tgt") == target_id_str
         ]
 
         # Next I get every bridge that has this channel/thread as its target
@@ -99,14 +100,15 @@ async def on_ready():
             WHERE
                 target = %s;
             """,
-            (target_id,),
+            (target_id_str,),
         )
         bridges = cur.fetchall()
         for bridge in bridges:
-            bridge_id, source_id = cast(tuple[int, int], bridge)
+            bridge_id, source_id_str = cast(tuple[int, str], bridge)
+            source_id = int(source_id_str)
             # I try to find a webhook that has the same source as this bridge's entry
             webhook = next(
-                iter([w for w, src in webhooks if src == str(source_id)]), None
+                iter([w for w, src in webhooks if src == source_id_str]), None
             )
             if webhook:
                 # Found the webhook, so I'm going to store it in my list of bridges
