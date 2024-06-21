@@ -531,10 +531,7 @@ async def create_bridge(
     #### Asserts:
         - `isinstance(target, discord.TextChannel | discord.Thread)`
     """
-    if isinstance(source, int):
-        source_id = source
-    else:
-        source_id = source.id
+    source_id = globals.get_id_from_channel(source)
 
     target = cast(
         discord.TextChannel | discord.Thread, globals.get_channel_from_id(target)
@@ -560,15 +557,8 @@ async def demolish_bridges(
         - `source`: One end of the Bridge, or ID of same.
         - `target`: The other end of the Bridge, or ID of same.
     """
-    if isinstance(source, int):
-        source_id = source
-    else:
-        source_id = source.id
-
-    if isinstance(target, int):
-        target_id = target
-    else:
-        target_id = target.id
+    source_id = globals.get_id_from_channel(source)
+    target_id = globals.get_id_from_channel(target)
 
     await demolish_bridge_one_sided(source_id, target_id)
     await demolish_bridge_one_sided(target_id, source_id)
