@@ -221,3 +221,6 @@ class Bridges:
         """
 
         return self._inbound_bridges.get(globals.get_id_from_channel(target))
+
+
+bridges = Bridges()
