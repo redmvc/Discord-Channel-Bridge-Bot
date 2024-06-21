@@ -288,8 +288,8 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
     session.execute(
         SQLDelete(DBMessageMap).where(
             sql_or(
-                DBMessageMap.source_message == payload.message_id,
-                DBMessageMap.target_message == payload.message_id,
+                DBMessageMap.source_message == str(payload.message_id),
+                DBMessageMap.target_message == str(payload.message_id),
             )
         )
     )
