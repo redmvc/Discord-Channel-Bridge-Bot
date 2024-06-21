@@ -34,6 +34,10 @@ async def bridge(
         )
         return
 
+    if target_channel.id == message_channel.id:
+        await interaction.response.send_message("You can't bridge a channel to itself.")
+        return
+
     assert isinstance(interaction.user, discord.Member)
     if (
         not message_channel.permissions_for(interaction.user).manage_webhooks
@@ -80,6 +84,10 @@ async def outbound(
         )
         return
 
+    if target_channel.id == message_channel.id:
+        await interaction.response.send_message("You can't bridge a channel to itself.")
+        return
+
     assert isinstance(interaction.user, discord.Member)
     if (
         not message_channel.permissions_for(interaction.user).manage_webhooks
@@ -119,6 +127,10 @@ async def inbound(
         await interaction.response.send_message(
             "Unsupported argument passed. Please pass a channel reference, ID, or link."
         )
+        return
+
+    if source_channel.id == message_channel.id:
+        await interaction.response.send_message("You can't bridge a channel to itself.")
         return
 
     assert isinstance(interaction.user, discord.Member)
