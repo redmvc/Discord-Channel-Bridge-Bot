@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session as SQLSession
 
 import globals
 from bridge import Bridge, bridges
-from database import DBBridge, engine
+from database import DBBridge, DBMessageMap, engine
 
 
 @discord.app_commands.guild_only()
@@ -177,6 +177,7 @@ async def demolish(
     message_channel_id = str(message_channel.id)
     target_channel_id = str(target_channel.id)
     session = SQLSession(engine)
+
     delete_demolished_bridges = SQLDelete(DBBridge).where(
         sql_or(
             sql_and(
@@ -190,6 +191,21 @@ async def demolish(
         )
     )
     session.execute(delete_demolished_bridges)
+
+    delete_demolished_messages = SQLDelete(DBMessageMap).where(
+        sql_or(
+            sql_and(
+                DBMessageMap.source_channel == message_channel_id,
+                DBMessageMap.target_channel == target_channel_id,
+            ),
+            sql_and(
+                DBMessageMap.source_channel == target_channel_id,
+                DBMessageMap.target_channel == message_channel_id,
+            ),
+        )
+    )
+    session.execute(delete_demolished_messages)
+
     session.commit()
     session.close()
 
@@ -245,16 +261,31 @@ async def demolish_all(
         await demolish_bridges(channel_id, message_channel)
 
     session = SQLSession(engine)
+    message_channel_id = str(message_channel.id)
+    exceptions_list = [str(i) for i in exceptions]
+
     delete_demolished_bridges = SQLDelete(DBBridge).where(
         sql_or(
-            DBBridge.target == str(message_channel.id),
+            DBBridge.target == message_channel_id,
             sql_and(
-                DBBridge.source == str(message_channel.id),
-                DBBridge.target.not_in([str(i) for i in exceptions]),
+                DBBridge.source == message_channel_id,
+                DBBridge.target.not_in(exceptions_list),
             ),
         )
     )
     session.execute(delete_demolished_bridges)
+
+    delete_demolished_messages = SQLDelete(DBMessageMap).where(
+        sql_or(
+            DBMessageMap.target_channel == message_channel_id,
+            sql_and(
+                DBMessageMap.source_channel == message_channel_id,
+                DBMessageMap.target_channel.not_in(exceptions_list),
+            ),
+        )
+    )
+    session.execute(delete_demolished_messages)
+
     session.commit()
     session.close()
 

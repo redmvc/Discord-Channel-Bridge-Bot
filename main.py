@@ -73,6 +73,14 @@ async def on_ready():
         )
         session.execute(delete_invalid_channels)
 
+        delete_invalid_messages = SQLDelete(DBMessageMap).where(
+            sql_or(
+                DBMessageMap.source_channel.in_(invalid_channels),
+                DBMessageMap.target_channel.in_(invalid_channels),
+            )
+        )
+        session.execute(delete_invalid_messages)
+
     if len(invalid_webhooks) > 0:
         delete_invalid_webhooks = SQLDelete(DBBridge).where(
             DBBridge.webhook.in_(invalid_webhooks)
