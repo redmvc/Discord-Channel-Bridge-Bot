@@ -68,6 +68,9 @@ def mention_to_channel(
     global client
     if link_or_mention.startswith("https://discord.com/channels"):
         try:
+            while link_or_mention.endswith("/"):
+                link_or_mention = link_or_mention[:-1]
+
             channel_id = int(link_or_mention.rsplit("/")[-1])
         except ValueError:
             return None
