@@ -356,9 +356,7 @@ async def demolish_all(
             target = %(channel)s
             OR (source = %(channel)s {exception_str})
         """,
-        {
-            "channel": str(message_channel.id),
-        },
+        {"channel": str(message_channel.id)},
     )
 
     globals.conn.commit()
