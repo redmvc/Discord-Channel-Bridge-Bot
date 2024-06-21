@@ -312,6 +312,68 @@ async def inbound(
     )
 
 
+@discord.app_commands.guild_only()
+@command_tree.command(
+    name="demolish",
+    description="Demolish all bridges between this and target channel.",
+)
+async def demolish(
+    interaction: discord.Interaction,
+    target: str,
+):
+    message_channel = interaction.channel
+    if not isinstance(message_channel, (discord.TextChannel, discord.Thread)):
+        await interaction.response.send_message(
+            "Please run this command from a text channel or a thread."
+        )
+        return
+
+    target_channel = get_channel(target)
+    if not isinstance(target_channel, (discord.TextChannel, discord.Thread)):
+        # The argument passed needs to be a channel or thread
+        await interaction.response.send_message(
+            "Unsupported argument passed. Please pass a channel reference, ID, or link."
+        )
+        return
+
+    assert isinstance(interaction.user, discord.Member)
+    if (
+        not message_channel.permissions_for(interaction.user).manage_webhooks
+        or not target_channel.permissions_for(interaction.user).manage_webhooks
+    ):
+        await interaction.response.send_message(
+            "Please make sure you have 'Manage Webhooks' permission in both this and target channels."
+        )
+        return
+
+    global conn
+    assert conn
+    cur = conn.cursor()
+
+    await demolish_bridges(message_channel, target_channel)
+    cur.execute(
+        """
+        DELETE FROM
+            bridges
+        WHERE
+            (source = %(first_channel)s AND target = %(second_channel)s)
+            OR (source = %(second_channel)s AND target = %(first_channel)s)
+        """,
+        {
+            "first_channel": str(message_channel.id),
+            "second_channel": str(target_channel.id),
+        },
+    )
+
+    conn.commit()
+    cur.close()
+
+    await interaction.response.send_message(
+        "✅ Bridges demolished!",
+        ephemeral=True,
+    )
+
+
 @client.event
 async def on_message(message: discord.Message):
     if not isinstance(message.channel, (discord.TextChannel, discord.Thread)):
