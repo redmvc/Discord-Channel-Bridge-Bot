@@ -16,6 +16,10 @@ from bridge import bridges
 from database import DBBridge, DBMessageMap, engine
 
 
+class ThreadSplat(TypedDict, total=False):
+    thread: discord.Thread
+
+
 @globals.client.event
 async def on_ready():
     """Called when the client is done preparing the data received from Discord. Usually after login is successful and the Client.guilds and co. are filled up."""
@@ -149,9 +153,6 @@ async def on_message(message: discord.Message):
             tgt_member_name = message.author.display_name
             tgt_avatar_url = message.author.display_avatar
 
-        class ThreadSplat(TypedDict, total=False):
-            thread: discord.Thread
-
         thread_splat: ThreadSplat = {}
         if target_id != target_channel.id:
             thread = target_channel.get_thread(target_id)
@@ -194,6 +195,68 @@ async def on_message(message: discord.Message):
         ]
     )
     session.commit()
+    session.close()
+
+
+@globals.client.event
+async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
+    """Called when a message is edited. Unlike `on_message_edit()`, this is called regardless of the state of the internal message cache.
+
+    #### Args:
+        - `payload`: The raw event payload data.
+    """
+    updated_message_content = payload.data.get("content")
+    if not updated_message_content or updated_message_content == "":
+        # Not a content edit
+        return
+
+    source_channel_id = payload.channel_id
+    message_channel = globals.get_channel_from_id(source_channel_id)
+    if not isinstance(message_channel, (discord.TextChannel, discord.Thread)):
+        return
+
+    # I need to wait until the on_ready event is done before processing any messages
+    time_waited = 0
+    while not globals.is_ready and time_waited < 100:
+        await asyncio.sleep(1)
+        time_waited += 1
+    if time_waited >= 100:
+        # somethin' real funky going on here
+        # I don't have error handling yet though
+        print("Taking forever to get ready.")
+        return
+
+    outbound_bridges = bridges.get_outbound_bridges(message_channel.id)
+    if not outbound_bridges:
+        return
+
+    # Find all messages matching this one
+    session = SQLSession(engine)
+    bridged_messages: ScalarResult[DBMessageMap] = session.scalars(
+        SQLSelect(DBMessageMap).where(DBMessageMap.source_message == payload.message_id)
+    )
+    for message_row in bridged_messages:
+        target_channel_id = int(message_row.target_channel)
+        bridge = bridges.get_one_way_bridge(source_channel_id, target_channel_id)
+        if not bridge:
+            continue
+
+        bridged_channel = globals.get_channel_from_id(target_channel_id)
+        if not isinstance(bridged_channel, (discord.TextChannel, discord.Thread)):
+            continue
+
+        thread_splat: ThreadSplat = {}
+        if isinstance(bridged_channel, discord.Thread):
+            if not isinstance(bridged_channel.parent, discord.TextChannel):
+                continue
+            thread_splat = {"thread": bridged_channel}
+
+        await bridge.webhook.edit_message(
+            message_id=int(message_row.target_message),
+            content=updated_message_content,
+            **thread_splat,
+        )
+
     session.close()
 
 
