@@ -14,12 +14,19 @@ intents.webhooks = True
 client = discord.Client(intents=intents)
 credentials = json.load(open("credentials.json"))
 
+is_ready = False  # whether the bot is ready and doesn't need to be readied again
 
 @client.event
 async def on_ready():
-    print(f"{client.user} is connected to the following server:\n")
+    global is_ready
+    if is_ready:
+        return
+
+    print(f"{client.user} is connected to the following servers:\n")
     for server in client.guilds:
         print(f"{server.name}(id: {server.id})")
+
+    is_ready = True
 
 
 @client.event
