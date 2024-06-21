@@ -6,6 +6,7 @@ import discord
 from sqlalchemy import Delete as SQLDelete
 from sqlalchemy import ScalarResult
 from sqlalchemy import Select as SQLSelect
+from sqlalchemy import and_ as sql_and
 from sqlalchemy import or_ as sql_or
 from sqlalchemy.orm import Session as SQLSession
 
@@ -295,6 +296,102 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
     )
 
     session.commit()
+    session.close()
+
+
+@globals.client.event
+async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
+    """Called when a message has a reaction added. Unlike `on_reaction_add()`, this is called regardless of the state of the internal message cache.
+
+    #### Args:
+        - `payload`: The raw event payload data.
+    """
+    if not await globals.wait_until_ready():
+        return
+
+    if not globals.client.user or payload.user_id == globals.client.user.id:
+        # Don't bridge my own reaction
+        return
+
+    outbound_bridges = bridges.get_outbound_bridges(payload.channel_id)
+    inbound_bridges = bridges.get_inbound_bridges(payload.channel_id)
+    if not outbound_bridges and not inbound_bridges:
+        return
+
+    # Check whether I have access to the emoji
+    reaction_emoji: discord.Emoji | discord.PartialEmoji | str | None
+    reaction_emoji = payload.emoji
+    if reaction_emoji.is_custom_emoji():
+        # Custom emoji, I need to check whether it exists and is available to me
+        if reaction_emoji.id:
+            reaction_emoji = globals.client.get_emoji(reaction_emoji.id)
+            if not reaction_emoji:
+                return
+
+            if not reaction_emoji.available:
+                # TODO set up a personal emoji server to add emoji to
+                return
+        else:
+            return
+    else:
+        # It's a standard emoji, it's fine
+        reaction_emoji = reaction_emoji.name
+
+    # Find all messages matching this one
+    # First, check whether this message is bridged, in which case I need to find its source
+    session = SQLSession(engine)
+    source_message_map = session.scalars(
+        SQLSelect(DBMessageMap).where(
+            DBMessageMap.target_message == str(payload.message_id),
+        )
+    ).first()
+    message_id_to_skip: int | None = None
+    if isinstance(source_message_map, DBMessageMap):
+        # This message was bridged, so find the original one, react to it, and then find any other bridged messages from it
+        source_channel = globals.get_channel_from_id(source_message_map.source_channel)
+        if not source_channel:
+            return
+
+        source_message_id = int(source_message_map.source_message)
+        source_message = await source_channel.fetch_message(source_message_id)
+        if source_message:
+            await source_message.add_reaction(reaction_emoji)
+
+        message_id_to_skip = (
+            payload.message_id
+        )  # Don't add a reaction back to this message
+    else:
+        # This message is (or might be) the source
+        source_message_id = payload.message_id
+
+    outbound_bridges = bridges.get_outbound_bridges(source_message_id)
+    if not outbound_bridges:
+        session.close()
+        return
+
+    bridged_messages: ScalarResult[DBMessageMap] = session.scalars(
+        SQLSelect(DBMessageMap).where(
+            sql_and(
+                DBMessageMap.source_message == str(source_message_id),
+                DBMessageMap.target_message != str(message_id_to_skip),
+            )
+        )
+    )
+    for message_row in bridged_messages:
+        target_message_id = int(message_row.target_message)
+        target_channel_id = int(message_row.target_channel)
+
+        bridge = outbound_bridges.get(target_channel_id)
+        if not bridge:
+            continue
+
+        bridged_channel = globals.get_channel_from_id(target_channel_id)
+        if not isinstance(bridged_channel, (discord.TextChannel, discord.Thread)):
+            continue
+
+        bridged_message = await bridged_channel.fetch_message(target_message_id)
+        await bridged_message.add_reaction(reaction_emoji)
+
     session.close()
 
 
