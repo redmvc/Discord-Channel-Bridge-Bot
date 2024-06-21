@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import re
-from typing import cast
+from typing import TypedDict, cast
 
 import discord
 import mysql.connector
@@ -135,7 +136,69 @@ async def on_ready():
 
 @client.event
 async def on_message(message: discord.Message):
-    print(message.content)
+    if not isinstance(message.channel, (discord.TextChannel, discord.Thread)):
+        return
+
+    if message.webhook_id:
+        # Don't bridge messages from webhooks
+        return
+
+    # I need to wait until the on_ready event is done before processing any messages
+    global is_ready
+    time_waited = 0
+    while not is_ready and time_waited < 100:
+        await asyncio.sleep(1)
+        time_waited += 1
+    if time_waited >= 100:
+        # somethin' real funky going on here
+        # I don't have error handling yet though
+        print("Taking forever to get ready.")
+        return
+
+    bridge = outbound_bridges.get(message.channel.id)
+    if not bridge:
+        return
+
+    # Send a message out to each target webhook
+    outbound_webhooks = bridge.get_webhooks()
+    for target_id, webhook in outbound_webhooks.items():
+        target_channel = webhook.channel
+        if not target_channel:
+            continue
+
+        assert isinstance(target_channel, discord.TextChannel)
+
+        # attachments = []  # TODO
+        # should_spoiler = message.channel.is_nsfw() and not target_channel.is_nsfw()
+
+        tgt_member = target_channel.guild.get_member(message.author.id)
+        if tgt_member:
+            tgt_member_name = tgt_member.display_name
+            tgt_avatar_url = tgt_member.display_avatar
+        else:
+            tgt_member_name = message.author.display_name
+            tgt_avatar_url = message.author.display_avatar
+
+        class ThreadSplat(TypedDict, total=False):
+            thread: discord.Thread
+
+        thread_splat: ThreadSplat = {}
+        if target_id != target_channel.id:
+            thread = target_channel.get_thread(target_id)
+            assert thread
+            thread_splat = {"thread": thread}
+
+        await webhook.send(
+            content=message.content,
+            allowed_mentions=discord.AllowedMentions(
+                users=True, roles=False, everyone=False
+            ),
+            avatar_url=tgt_avatar_url,
+            username=tgt_member_name,
+            wait=True,
+            **thread_splat,
+        )
+        # TODO replies
 
 
 def get_channel(
