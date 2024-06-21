@@ -215,7 +215,7 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
     )
     for message_row in bridged_messages:
         target_channel_id = int(message_row.target_channel)
-        bridge = outbound_bridges[target_channel_id]
+        bridge = outbound_bridges.get(target_channel_id)
         if not bridge:
             continue
 
@@ -264,7 +264,7 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
         )
         for message_row in bridged_messages:
             target_channel_id = int(message_row.target_channel)
-            bridge = outbound_bridges[target_channel_id]
+            bridge = outbound_bridges.get(target_channel_id)
             if not bridge:
                 continue
 
