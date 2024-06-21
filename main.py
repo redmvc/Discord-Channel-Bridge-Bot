@@ -64,4 +64,33 @@ async def create_bridge(
     inbound_bridges[target.id][source_id] = outbound_bridges[source_id]
 
 
+async def demolish_bridges(
+    source: discord.TextChannel | discord.Thread | int,
+    target: discord.TextChannel | discord.Thread | int,
+):
+    if isinstance(source, int):
+        source_id = source
+    else:
+        source_id = source.id
+
+    if isinstance(target, int):
+        target_id = target
+    else:
+        target_id = target.id
+
+    await demolish_bridge_one_sided(source_id, target_id)
+    await demolish_bridge_one_sided(target_id, source_id)
+
+
+async def demolish_bridge_one_sided(source_id, target_id):
+    if outbound_bridges.get(source_id):
+        bridge = outbound_bridges[source_id]
+        await bridge.demolish(target_id)
+        if len(bridge.get_webhooks()) == 0:
+            del outbound_bridges[source_id]
+
+    if inbound_bridges.get(target_id):
+        del inbound_bridges[target_id][source_id]
+
+
 client.run(credentials["app_token"], reconnect=True)
