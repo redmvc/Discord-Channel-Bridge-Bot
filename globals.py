@@ -43,6 +43,7 @@ is_ready: bool = (
 
 
 def init():
+    """Initialise all global variables."""
     global intents, client, command_tree, credentials, globals_are_initialised
 
     intents = discord.Intents()
@@ -65,6 +66,14 @@ def init():
 def mention_to_channel(
     link_or_mention: str,
 ) -> discord.guild.GuildChannel | discord.Thread | discord.abc.PrivateChannel | None:
+    """Return the channel referenced by a channel mention or a Discord link to a channel.
+
+    #### Args:
+        - `link_or_mention`: Either a mention of a Discord channel (`<#channel_id>`) or a Discord link to it (`https://discord.com/channels/server_id/channel_id`).
+
+    #### Returns:
+        - The channel whose ID is given by `channel_id`.
+    """
     global client
     if link_or_mention.startswith("https://discord.com/channels"):
         try:
@@ -89,6 +98,14 @@ def get_channel_from_id(
         discord.guild.GuildChannel | discord.Thread | discord.abc.PrivateChannel | int
     ),
 ) -> discord.guild.GuildChannel | discord.Thread | discord.abc.PrivateChannel | None:
+    """Ensure that this function's argument is a valid Discord channel, when it may instead be a channel ID.
+
+    #### Args:
+        - `channel_or_id`: Either a Discord channel or an ID of same.
+
+    #### Returns:
+        - If the argument is a channel, returns it unchanged; otherwise, returns a channel with the ID passed.
+    """
     global client
     if isinstance(channel_or_id, int):
         channel = client.get_channel(channel_or_id)

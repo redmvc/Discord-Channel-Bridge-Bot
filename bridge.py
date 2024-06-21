@@ -9,11 +9,22 @@ class Bridges:
         self.targets: dict[int, discord.Webhook] = {}
 
     def get_webhooks(self) -> dict[int, discord.Webhook]:
+        """#### Returns:
+        - `dict[int, discord.Webhook]`: A dict whose keys are target channel IDs and whose values are webhooks in them.
+        """
         return self.targets
 
     def get_webhook(
         self, target: discord.TextChannel | discord.Thread | int
     ) -> tuple[int, discord.Webhook | None]:
+        """Return the webhook associated with a target channel.
+
+        #### Args:
+            - `target`: The target channel, or ID of same
+
+        #### Returns:
+            - A tuple whose first element is the target channel ID and the second element is the webhook.
+        """
         if not isinstance(target, int):
             target = target.id
 
@@ -24,6 +35,15 @@ class Bridges:
         target: discord.TextChannel | discord.Thread,
         new_webhook: discord.Webhook | None = None,
     ) -> None:
+        """Create a bridge target from the current source channel to the target channel.
+
+        #### Args:
+            - `target`: The target channel.
+            - `new_webhook`: Optionally, an already-existing webhook into the target channel. Defaults to None.
+
+        #### Asserts:
+            - `isinstance(webhook_channel, discord.TextChannel)`
+        """
         target_id = target.id
 
         await self.demolish(target_id)
@@ -43,6 +63,11 @@ class Bridges:
     async def demolish(
         self, target: discord.TextChannel | discord.Thread | int
     ) -> None:
+        """Destroy the Bridge towards the target channel, deleting its webhook.
+
+        #### Args:
+            - `target`: The target channel, or ID of same.
+        """
         target, webhook = self.get_webhook(target)
         if webhook:
             await webhook.delete(reason="User request.")

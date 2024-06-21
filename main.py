@@ -14,6 +14,7 @@ from bridge import Bridges
 
 @globals.client.event
 async def on_ready():
+    """Called when the client is done preparing the data received from Discord. Usually after login is successful and the Client.guilds and co. are filled up."""
     if globals.is_ready:
         return
 
@@ -448,6 +449,9 @@ async def demolish_all(
 
 @globals.client.event
 async def on_message(message: discord.Message):
+    """Called when a Message is created and sent.
+
+    This requires Intents.messages to be enabled."""
     if not isinstance(message.channel, (discord.TextChannel, discord.Thread)):
         return
 
@@ -517,6 +521,16 @@ async def create_bridge(
     target: discord.TextChannel | discord.Thread | int,
     webhook: discord.Webhook | None = None,
 ):
+    """Create a one-way Bridge from source channel to target channel, adding it to `outbound_bridges` and `inbound_bridges` and creating a webhook if necessary. This function does not alter the database entries in any way.
+
+    #### Args:
+        - `source`: Source channel for the Bridge, or ID of same.
+        - `target`: Target channel for the Bridge, or ID of same.
+        - `webhook`: Optionally, an already-existing webhook connecting these channels. Defaults to None.
+
+    #### Asserts:
+        - `isinstance(target, discord.TextChannel | discord.Thread)`
+    """
     if isinstance(source, int):
         source_id = source
     else:
@@ -540,6 +554,12 @@ async def demolish_bridges(
     source: discord.TextChannel | discord.Thread | int,
     target: discord.TextChannel | discord.Thread | int,
 ):
+    """Destroy all Bridges between source and target channels, removing them from `outbound_bridges` and `inbound_bridges` and deleting their webhooks. This function does not alter the database entries in any way.
+
+    #### Args:
+        - `source`: One end of the Bridge, or ID of same.
+        - `target`: The other end of the Bridge, or ID of same.
+    """
     if isinstance(source, int):
         source_id = source
     else:
@@ -554,7 +574,13 @@ async def demolish_bridges(
     await demolish_bridge_one_sided(target_id, source_id)
 
 
-async def demolish_bridge_one_sided(source_id, target_id):
+async def demolish_bridge_one_sided(source_id: int, target_id: int):
+    """Destroy the Bridge going from source channel to target channel, removing it from `outbound_bridges` and `inbound_bridges` and deleting its webhook. This function does not alter the database entries in any way.
+
+    #### Args:
+        - `source_id`: Source channel ID.
+        - `target_id`: Target channel ID.
+    """
     if globals.outbound_bridges.get(source_id):
         bridge = globals.outbound_bridges[source_id]
         await bridge.demolish(target_id)
