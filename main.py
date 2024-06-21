@@ -374,6 +374,81 @@ async def demolish(
     )
 
 
+@discord.app_commands.guild_only()
+@command_tree.command(
+    name="demolish_all",
+    description="Demolish all bridges to and from this channel.",
+)
+async def demolish_all(
+    interaction: discord.Interaction,
+):
+    message_channel = interaction.channel
+    if not isinstance(message_channel, (discord.TextChannel, discord.Thread)):
+        await interaction.response.send_message(
+            "Please run this command from a text channel or a thread."
+        )
+        return
+
+    assert isinstance(interaction.user, discord.Member)
+    if not message_channel.permissions_for(interaction.user).manage_webhooks:
+        await interaction.response.send_message(
+            "Please make sure you have 'Manage Webhooks' permission in this channel."
+        )
+        return
+
+    # I'll make a list of all channels that are currently bridged to or from this channel
+    paired_channels = set(inbound_bridges[message_channel.id].keys())
+    outbound = outbound_bridges[message_channel.id]
+    exceptions: set[int] = set()
+    for target_id in outbound.get_webhooks().keys():
+        target_channel = client.get_channel(target_id)
+        assert isinstance(target_channel, (discord.TextChannel, discord.Thread))
+        if not target_channel.permissions_for(interaction.user).manage_webhooks:
+            # If I don't have Manage Webhooks permission in the target, I can't destroy the bridge from there
+            exceptions.add(target_id)
+        else:
+            paired_channels.add(target_id)
+
+    global conn
+    assert conn
+    cur = conn.cursor()
+
+    for channel_id in paired_channels:
+        await demolish_bridges(channel_id, message_channel)
+
+    exception_str = (  # Unfortunately this kind of injection is the only way to get this to work
+        ""
+        if len(exceptions) == 0
+        else "AND target NOT IN (" + ", ".join(f"'{i}'" for i in exceptions) + ")"
+    )
+    cur.execute(
+        f"""
+        DELETE FROM
+            bridges
+        WHERE
+            target = %(channel)s
+            OR (source = %(channel)s {exception_str})
+        """,
+        {
+            "channel": str(message_channel.id),
+        },
+    )
+
+    conn.commit()
+    cur.close()
+
+    if len(exceptions) == 0:
+        await interaction.response.send_message(
+            "✅ Bridges demolished!",
+            ephemeral=True,
+        )
+    else:
+        await interaction.response.send_message(
+            "⭕ Inbound bridges demolished, but some outbound bridges may not have been, as some permissions were missing.",
+            ephemeral=True,
+        )
+
+
 @client.event
 async def on_message(message: discord.Message):
     if not isinstance(message.channel, (discord.TextChannel, discord.Thread)):
