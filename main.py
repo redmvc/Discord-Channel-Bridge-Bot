@@ -201,15 +201,10 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
         # Not a content edit
         return
 
-    source_channel_id = payload.channel_id
-    message_channel = globals.get_channel_from_id(source_channel_id)
-    if not isinstance(message_channel, (discord.TextChannel, discord.Thread)):
-        return
-
     if not await globals.wait_until_ready():
         return
 
-    outbound_bridges = bridges.get_outbound_bridges(message_channel.id)
+    outbound_bridges = bridges.get_outbound_bridges(payload.channel_id)
     if not outbound_bridges:
         return
 
@@ -220,7 +215,7 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
     )
     for message_row in bridged_messages:
         target_channel_id = int(message_row.target_channel)
-        bridge = bridges.get_one_way_bridge(source_channel_id, target_channel_id)
+        bridge = outbound_bridges[target_channel_id]
         if not bridge:
             continue
 
@@ -250,44 +245,43 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
     #### Args:
         - `payload`: The raw event payload data.
     """
-    source_channel_id = payload.channel_id
-    message_channel = globals.get_channel_from_id(source_channel_id)
-    if not isinstance(message_channel, (discord.TextChannel, discord.Thread)):
-        return
-
     if not await globals.wait_until_ready():
         return
 
-    outbound_bridges = bridges.get_outbound_bridges(message_channel.id)
-    inbound_bridges = bridges.get_inbound_bridges(message_channel.id)
+    outbound_bridges = bridges.get_outbound_bridges(payload.channel_id)
+    inbound_bridges = bridges.get_inbound_bridges(payload.channel_id)
     if not outbound_bridges and not inbound_bridges:
         return
 
     # Find all messages matching this one
     session = SQLSession(engine)
-    bridged_messages: ScalarResult[DBMessageMap] = session.scalars(
-        SQLSelect(DBMessageMap).where(DBMessageMap.source_message == payload.message_id)
-    )
-    for message_row in bridged_messages:
-        target_channel_id = int(message_row.target_channel)
-        bridge = bridges.get_one_way_bridge(source_channel_id, target_channel_id)
-        if not bridge:
-            continue
 
-        bridged_channel = globals.get_channel_from_id(target_channel_id)
-        if not isinstance(bridged_channel, (discord.TextChannel, discord.Thread)):
-            continue
-
-        thread_splat: ThreadSplat = {}
-        if isinstance(bridged_channel, discord.Thread):
-            if not isinstance(bridged_channel.parent, discord.TextChannel):
-                continue
-            thread_splat = {"thread": bridged_channel}
-
-        await bridge.webhook.delete_message(
-            int(message_row.target_message),
-            **thread_splat,
+    if outbound_bridges:
+        bridged_messages: ScalarResult[DBMessageMap] = session.scalars(
+            SQLSelect(DBMessageMap).where(
+                DBMessageMap.source_message == payload.message_id
+            )
         )
+        for message_row in bridged_messages:
+            target_channel_id = int(message_row.target_channel)
+            bridge = outbound_bridges[target_channel_id]
+            if not bridge:
+                continue
+
+            bridged_channel = globals.get_channel_from_id(target_channel_id)
+            if not isinstance(bridged_channel, (discord.TextChannel, discord.Thread)):
+                continue
+
+            thread_splat: ThreadSplat = {}
+            if isinstance(bridged_channel, discord.Thread):
+                if not isinstance(bridged_channel.parent, discord.TextChannel):
+                    continue
+                thread_splat = {"thread": bridged_channel}
+
+            await bridge.webhook.delete_message(
+                int(message_row.target_message),
+                **thread_splat,
+            )
 
     # If the message was bridged, delete its row
     # If it was a source of bridged messages, delete all rows of its bridged versions
