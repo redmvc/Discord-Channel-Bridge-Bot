@@ -206,19 +206,19 @@ async def on_message(message: discord.Message):
 def get_channel(
     link_or_mention: str,
 ) -> discord.guild.GuildChannel | discord.Thread | discord.abc.PrivateChannel | None:
-    if link_or_mention.startswith("<#"):
+    if link_or_mention.startswith("https://discord.com/channels"):
         try:
-            channel_id = int(link_or_mention.split("<#")[1].split(">")[0])
+            channel_id = int(link_or_mention.rsplit("/")[-1])
         except ValueError:
             return None
-        return client.get_channel(channel_id)
-    elif link_or_mention.startswith("https://discord.com/channels"):
+    else:
         try:
-            channel_id = int(link_or_mention.rsplit("/")[0])
+            channel_id = int(
+                link_or_mention.replace("<", "").replace(">", "").replace("#", "")
+            )
         except ValueError:
             return None
-        return client.get_channel(channel_id)
-    return None
+    return client.get_channel(channel_id)
 
 
 async def create_bridge(
