@@ -60,3 +60,22 @@ def init():
     credentials = json.load(open("credentials.json"))
 
     globals_are_initialised = True
+
+
+def mention_to_channel(
+    link_or_mention: str,
+) -> discord.guild.GuildChannel | discord.Thread | discord.abc.PrivateChannel | None:
+    global client
+    if link_or_mention.startswith("https://discord.com/channels"):
+        try:
+            channel_id = int(link_or_mention.rsplit("/")[-1])
+        except ValueError:
+            return None
+    else:
+        try:
+            channel_id = int(
+                link_or_mention.replace("<", "").replace(">", "").replace("#", "")
+            )
+        except ValueError:
+            return None
+    return client.get_channel(channel_id)
