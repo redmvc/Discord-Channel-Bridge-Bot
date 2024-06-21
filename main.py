@@ -6,6 +6,7 @@ from typing import cast
 
 import discord
 import mysql.connector
+import mysql.connector.abstracts
 
 from bridge import Bridges
 
@@ -23,9 +24,11 @@ client = discord.Client(intents=intents)
 credentials = json.load(open("credentials.json"))
 
 is_ready = False  # whether the bot is ready and doesn't need to be readied again
-conn: mysql.connector.PooledMySQLConnection | mysql.connector.MySQLConnection | None = (
-    None  # the connection to the database
-)
+conn: (
+    mysql.connector.pooling.PooledMySQLConnection
+    | mysql.connector.abstracts.MySQLConnectionAbstract
+    | None
+) = None  # the connection to the database
 outbound_bridges: dict[int, Bridges] = {}
 inbound_bridges: dict[int, dict[int, Bridges]] = {}
 
