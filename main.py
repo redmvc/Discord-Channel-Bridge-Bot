@@ -178,17 +178,29 @@ async def bridge(
     cur.execute(
         """
         INSERT INTO bridges (source, target)
-        VALUES (%s, %s)
+        SELECT %(source_id)s, %(target_id)s
+        WHERE NOT EXISTS (
+            SELECT 1
+            FROM bridges
+            WHERE source = %(source_id)s
+                AND target = %(target_id)s
+        )
         """,
-        (str(message_channel.id), str(target_channel.id)),
+        {"source_id": str(message_channel.id), "target_id": str(target_channel.id)},
     )
+
     await create_bridge(target_channel, message_channel)
     cur.execute(
         """
         INSERT INTO bridges (source, target)
-        VALUES (%s, %s)
+        SELECT %(source_id)s, %(target_id)s
+        WHERE NOT EXISTS (
+            SELECT 1
+            FROM bridges
+            WHERE source = %(source_id)s
+                AND target = %(target_id)s
         """,
-        (str(target_channel.id), str(message_channel.id)),
+        {"source_id": str(target_channel.id), "target_id": str(message_channel.id)},
     )
 
     conn.commit()
@@ -242,9 +254,15 @@ async def outbound(
     cur.execute(
         """
         INSERT INTO bridges (source, target)
-        VALUES (%s, %s)
+        SELECT %(source_id)s, %(target_id)s
+        WHERE NOT EXISTS (
+            SELECT 1
+            FROM bridges
+            WHERE source = %(source_id)s
+                AND target = %(target_id)s
+        )
         """,
-        (str(message_channel.id), str(target_channel.id)),
+        {"source_id": str(message_channel.id), "target_id": str(target_channel.id)},
     )
 
     conn.commit()
@@ -298,9 +316,14 @@ async def inbound(
     cur.execute(
         """
         INSERT INTO bridges (source, target)
-        VALUES (%s, %s)
+        SELECT %(source_id)s, %(target_id)s
+        WHERE NOT EXISTS (
+            SELECT 1
+            FROM bridges
+            WHERE source = %(source_id)s
+                AND target = %(target_id)s
         """,
-        (str(source_channel.id), str(message_channel.id)),
+        {"source_id": str(source_channel.id), "target_id": str(message_channel.id)},
     )
 
     conn.commit()
