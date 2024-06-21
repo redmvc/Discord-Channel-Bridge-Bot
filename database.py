@@ -32,3 +32,6 @@ class DBMessageMap(DBBase):
     source_channel: Mapped[str] = mapped_column(String(32), nullable=False)
     target_message: Mapped[str] = mapped_column(String(32), nullable=False)
     target_channel: Mapped[str] = mapped_column(String(32), nullable=False)
+
+
+DBBase.metadata.create_all(engine)
