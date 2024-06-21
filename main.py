@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import re
 from typing import TypedDict, cast
 
 import discord
@@ -9,7 +8,7 @@ import mysql.connector
 import mysql.connector.abstracts
 
 import globals
-from bridge import Bridges
+from bridge import Bridge, Bridges
 
 bridges = Bridges()
 
@@ -19,9 +18,6 @@ async def on_ready():
     """Called when the client is done preparing the data received from Discord. Usually after login is successful and the Client.guilds and co. are filled up."""
     if globals.is_ready:
         return
-
-    # The names of webhooks created by the Bridges class are formatted like: `:bridge: (src_id tgt_id)`
-    webhook_name_parser = re.compile(r"^:bridge: \((?P<src>\d+) (?P<tgt>\d+)\)$")
 
     # I am going to try to identify all existing bridges
     # First, I fetch all target channels registered in the db
@@ -36,75 +32,65 @@ async def on_ready():
     )
     cur = globals.conn.cursor()
     cur.execute(
-        "SELECT UNIQUE(target) FROM bridges;"
-    )  # columns are "id", "source", and "target"
-    target_ids = cur.fetchall()
-    for target_id in target_ids:
-        # Only the channel IDs are stored, so I have to find the appropriate channel for this bridge
-        target_id_str = cast(tuple[str], target_id)[0]
+        "SELECT source, target, webhook FROM bridges;"
+    )  # columns are "id", "source", "target", and "webhook", where "id" is a primary key and ("source", "target") have a uniqueness constraint
+
+    registered_bridges = cast(list[tuple[str, str, str]], cur.fetchall())
+    invalid_channels: set[str] = set()
+    invalid_webhooks: set[str] = set()
+    for source_id_str, target_id_str, webhook_id_str in registered_bridges:
+        if webhook_id_str in invalid_webhooks:
+            continue
+
+        source_id = int(source_id_str)
+        source_channel = globals.get_channel_from_id(int(source_id))
+        if not source_channel:
+            # If I don't have access to the source channel, delete bridges from and to it
+            invalid_channels.add(source_id_str)
+
         target_id = int(target_id_str)
-        target = globals.get_channel_from_id(target_id)
-        if not isinstance(target, (discord.TextChannel, discord.Thread)):
-            # This ID isn't a valid bridged ID, I'll remove it from my database
-            cur.execute("DELETE FROM bridges WHERE target = %s;", (target_id_str,))
-            globals.conn.commit()
-            continue
+        target_channel = globals.get_channel_from_id(int(target_id))
+        if not target_channel:
+            # If I don't have access to the source channel, delete bridges from and to it
+            invalid_channels.add(target_id_str)
 
-        # And the channel its webhooks will be attached to
-        webhook_channel = (
-            target.parent if isinstance(target, discord.Thread) else target
-        )
-        if not isinstance(webhook_channel, discord.TextChannel):
-            # This ID isn't a valid bridged ID, I'll remove it from my database
-            cur.execute("DELETE FROM bridges WHERE target = %s;", (target_id_str,))
-            globals.conn.commit()
-            continue
+        try:
+            webhook = await globals.client.fetch_webhook(int(webhook_id_str))
 
-        # Then I get all webhooks attached to that channel whose target ID (stored in their names) is the current ID
-        candidate_webhooks = await webhook_channel.webhooks()
-        webhooks = [
-            (webhook, match.group("src"))
-            for webhook in candidate_webhooks
-            if webhook.name
-            and (match := webhook_name_parser.fullmatch(webhook.name))
-            and match
-            and match.group("tgt") == target_id_str
-        ]
+            if not source_channel:
+                # I have access to the target webhook but not to the source channel anymore so I'll delete the webhook
+                await webhook.delete(reason="Source channel no longer available.")
+                raise Exception
+            elif target_channel:
+                # I have access to both the source and target channels and to the webhook
+                await create_bridge(source_id, target_id, webhook)
+        except Exception:
+            invalid_webhooks.add(webhook_id_str)
 
-        # Next I get every bridge that has this channel/thread as its target
-        cur.execute(
+            if source_channel and target_channel:
+                # There *should* be a webhook there and I have access to the channels
+                await create_bridge_and_db(source_id, target_id, None, cur)
+
+    if len(invalid_channels) > 0:
+        cur.executemany(
             """
-            SELECT
-                id, source
-            FROM
-                bridges
-            WHERE
-                target = %s;
+            DELETE FROM bridges
+            WHERE source = %(channel_id)s
+                OR target = %(channel_id)s
             """,
-            (target_id_str,),
+            [{"channel_id": channel_id_str} for channel_id_str in invalid_channels],
         )
-        bridges = cur.fetchall()
-        for bridge in bridges:
-            bridge_id, source_id_str = cast(tuple[int, str], bridge)
-            source_id = int(source_id_str)
-            # I try to find a webhook that has the same source as this bridge's entry
-            webhook = next(
-                iter([w for w, src in webhooks if src == source_id_str]), None
-            )
-            if webhook:
-                # Found the webhook, so I'm going to store it in my list of bridges
-                await create_bridge(source_id, target, webhook)
-            else:
-                # I couldn't find that webhook, so I'll delete that entry from the db
-                cur.execute(
-                    """
-                    DELETE FROM bridges
-                    WHERE id = %s;
-                    """,
-                    (bridge_id,),
-                )
-                globals.conn.commit()
 
+    if len(invalid_webhooks) > 0:
+        cur.executemany(
+            """
+            DELETE FROM bridges
+            WHERE webhook = %s
+            """,
+            [(webhook_id_str,) for webhook_id_str in invalid_webhooks],
+        )
+
+    globals.conn.commit()
     cur.close()
 
     await globals.command_tree.sync()
@@ -152,35 +138,8 @@ async def bridge(
     assert globals.conn
     cur = globals.conn.cursor()
 
-    await create_bridge(message_channel, target_channel)
-    cur.execute(
-        """
-        INSERT INTO bridges (source, target)
-        SELECT %(source_id)s, %(target_id)s
-        WHERE NOT EXISTS (
-            SELECT 1
-            FROM bridges
-            WHERE source = %(source_id)s
-                AND target = %(target_id)s
-        )
-        """,
-        {"source_id": str(message_channel.id), "target_id": str(target_channel.id)},
-    )
-
-    await create_bridge(target_channel, message_channel)
-    cur.execute(
-        """
-        INSERT INTO bridges (source, target)
-        SELECT %(source_id)s, %(target_id)s
-        WHERE NOT EXISTS (
-            SELECT 1
-            FROM bridges
-            WHERE source = %(source_id)s
-                AND target = %(target_id)s
-        )
-        """,
-        {"source_id": str(target_channel.id), "target_id": str(message_channel.id)},
-    )
+    await create_bridge_and_db(message_channel, target_channel, None, cur)
+    await create_bridge_and_db(target_channel, message_channel, None, cur)
 
     globals.conn.commit()
     cur.close()
@@ -225,27 +184,7 @@ async def outbound(
         )
         return
 
-    assert globals.conn
-    cur = globals.conn.cursor()
-
-    await create_bridge(message_channel, target_channel)
-    cur.execute(
-        """
-        INSERT INTO bridges (source, target)
-        SELECT %(source_id)s, %(target_id)s
-        WHERE NOT EXISTS (
-            SELECT 1
-            FROM bridges
-            WHERE source = %(source_id)s
-                AND target = %(target_id)s
-        )
-        """,
-        {"source_id": str(message_channel.id), "target_id": str(target_channel.id)},
-    )
-
-    globals.conn.commit()
-    cur.close()
-
+    await create_bridge_and_db(message_channel, target_channel)
     await interaction.response.send_message(
         "✅ Bridge created! Try sending a message from this channel 😁",
         ephemeral=True,
@@ -286,27 +225,7 @@ async def inbound(
         )
         return
 
-    assert globals.conn
-    cur = globals.conn.cursor()
-
-    await create_bridge(source_channel, message_channel)
-    cur.execute(
-        """
-        INSERT INTO bridges (source, target)
-        SELECT %(source_id)s, %(target_id)s
-        WHERE NOT EXISTS (
-            SELECT 1
-            FROM bridges
-            WHERE source = %(source_id)s
-                AND target = %(target_id)s
-        )
-        """,
-        {"source_id": str(source_channel.id), "target_id": str(message_channel.id)},
-    )
-
-    globals.conn.commit()
-    cur.close()
-
+    await create_bridge_and_db(source_channel, message_channel)
     await interaction.response.send_message(
         "✅ Bridge created! Try sending a message from the other channel 😁",
         ephemeral=True,
@@ -531,24 +450,62 @@ async def on_message(message: discord.Message):
         # TODO replies
 
 
+async def create_bridge_and_db(
+    source: discord.TextChannel | discord.Thread | int,
+    target: discord.TextChannel | discord.Thread | int,
+    webhook: discord.Webhook | None = None,
+    cur: mysql.connector.abstracts.MySQLCursorAbstract | None = None,
+) -> Bridge:
+    """Create a one-way Bridge from source channel to target channel in `bridges`, creating a webhook if necessary, then inserts a reference to this new bridge into the database.
+
+    #### Args:
+        - `source`: Source channel for the Bridge, or ID of same.
+        - `target`: Target channel for the Bridge, or ID of same.
+        - `webhook`: Optionally, an already-existing webhook connecting these channels. Defaults to None.
+        - `cur`: Optionally, a cursor for the connection to the database. Defaults to None, in which case creates and closes a new one locally.
+    """
+    bridge = await create_bridge(source, target, webhook)
+
+    assert globals.conn
+    if not cur:
+        close_after = True
+        cur = globals.conn.cursor()
+    else:
+        close_after = False
+    cur.execute(
+        """
+        INSERT INTO bridges (source, target, webhook)
+        VALUES (%(source_id)s, %(target_id)s, %(webhook_id)s)
+        ON DUPLICATE KEY UPDATE webhook = %(webhook_id)s
+        """,
+        {
+            "source_id": str(globals.get_id_from_channel(source)),
+            "target_id": str(globals.get_id_from_channel(target)),
+            "webhook_id": str(bridge.webhook.id),
+        },
+    )
+    if close_after:
+        globals.conn.commit()
+        cur.close()
+
+    return bridge
+
+
 async def create_bridge(
     source: discord.TextChannel | discord.Thread | int,
     target: discord.TextChannel | discord.Thread | int,
     webhook: discord.Webhook | None = None,
-):
+) -> Bridge:
     """Create a one-way Bridge from source channel to target channel in `bridges`, creating a webhook if necessary. This function does not alter the database entries in any way.
 
     #### Args:
         - `source`: Source channel for the Bridge, or ID of same.
         - `target`: Target channel for the Bridge, or ID of same.
         - `webhook`: Optionally, an already-existing webhook connecting these channels. Defaults to None.
-
-    #### Asserts:
-        - `isinstance(target, discord.TextChannel | discord.Thread)`
     """
     global bridges
 
-    await bridges.create_bridge(source, target, webhook)
+    return await bridges.create_bridge(source, target, webhook)
 
 
 async def demolish_bridges(
