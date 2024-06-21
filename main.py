@@ -1,3 +1,4 @@
+from __future__ import annotations
 from bridge import Bridges
 import discord
 import json
@@ -37,6 +38,24 @@ async def on_ready():
 @client.event
 async def on_message(message: discord.Message):
     print(message.content)
+
+
+def get_channel(
+    link_or_mention: str,
+) -> discord.guild.GuildChannel | discord.Thread | discord.abc.PrivateChannel | None:
+    if link_or_mention.startswith("<#"):
+        try:
+            channel_id = int(link_or_mention.split("<#")[1].split(">")[0])
+        except ValueError:
+            return None
+        return client.get_channel(channel_id)
+    elif link_or_mention.startswith("https://discord.com/channels"):
+        try:
+            channel_id = int(link_or_mention.rsplit("/")[0])
+        except ValueError:
+            return None
+        return client.get_channel(channel_id)
+    return None
 
 
 async def create_bridge(
