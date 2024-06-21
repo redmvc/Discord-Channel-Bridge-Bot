@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session as SQLSession
 import commands
 import globals
 from bridge import bridges
-from database import DBBridge, engine
+from database import DBBridge, DBMessageMap, engine
 
 
 @globals.client.event
@@ -117,6 +117,8 @@ async def on_message(message: discord.Message):
         return
 
     # Send a message out to each target webhook
+    bridged_message_ids = []
+    bridged_channel_ids = list(outbound_bridges.keys())
     for target_id, bridge in outbound_bridges.items():
         webhook = bridge.webhook
         if not webhook:
@@ -148,7 +150,7 @@ async def on_message(message: discord.Message):
             assert thread
             thread_splat = {"thread": thread}
 
-        await webhook.send(
+        bridged_message = await webhook.send(
             content=message.content,
             allowed_mentions=discord.AllowedMentions(
                 users=True, roles=False, everyone=False
@@ -158,7 +160,33 @@ async def on_message(message: discord.Message):
             wait=True,
             **thread_splat,
         )
+
+        bridged_message_ids.append(bridged_message.id)
+
         # TODO replies
+
+    if len(bridged_message_ids) == 0:
+        return
+
+    # Insert references to the linked messages into the message_mappings table
+    session = SQLSession(engine)
+    source_message_id = str(message.id)
+    source_channel_id = str(message.channel.id)
+    session.add_all(
+        [
+            DBMessageMap(
+                source_message=source_message_id,
+                source_channel=source_channel_id,
+                target_message=str(bridged_message_id),
+                target_channel=str(bridged_channel_id),
+            )
+            for bridged_message_id, bridged_channel_id in zip(
+                bridged_message_ids, bridged_channel_ids
+            )
+        ]
+    )
+    session.commit()
+    session.close()
 
 
 globals.client.run(cast(str, globals.credentials["app_token"]), reconnect=True)
