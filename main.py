@@ -131,7 +131,7 @@ async def bridge(
         )
         return
 
-    target_channel = get_channel(target)
+    target_channel = mention_to_channel(target)
     if not isinstance(target_channel, (discord.TextChannel, discord.Thread)):
         # The argument passed needs to be a channel or thread
         await interaction.response.send_message(
@@ -206,7 +206,7 @@ async def outbound(
         )
         return
 
-    target_channel = get_channel(target)
+    target_channel = mention_to_channel(target)
     if not isinstance(target_channel, (discord.TextChannel, discord.Thread)):
         # The argument passed needs to be a channel or thread
         await interaction.response.send_message(
@@ -267,7 +267,7 @@ async def inbound(
         )
         return
 
-    source_channel = get_channel(source)
+    source_channel = mention_to_channel(source)
     if not isinstance(source_channel, (discord.TextChannel, discord.Thread)):
         # The argument passed needs to be a channel or thread
         await interaction.response.send_message(
@@ -327,7 +327,7 @@ async def demolish(
         )
         return
 
-    target_channel = get_channel(target)
+    target_channel = mention_to_channel(target)
     if not isinstance(target_channel, (discord.TextChannel, discord.Thread)):
         # The argument passed needs to be a channel or thread
         await interaction.response.send_message(
@@ -513,7 +513,7 @@ async def on_message(message: discord.Message):
         # TODO replies
 
 
-def get_channel(
+def mention_to_channel(
     link_or_mention: str,
 ) -> discord.guild.GuildChannel | discord.Thread | discord.abc.PrivateChannel | None:
     if link_or_mention.startswith("https://discord.com/channels"):
