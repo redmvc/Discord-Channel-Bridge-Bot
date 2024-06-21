@@ -11,9 +11,7 @@ import mysql.connector.abstracts
 import globals
 from bridge import Bridges
 
-# The lists of bridges that have been created
-outbound_bridges: dict[int, Bridges] = {}
-inbound_bridges: dict[int, dict[int, Bridges]] = {}
+bridges = Bridges()
 
 
 @globals.client.event
@@ -385,7 +383,7 @@ async def demolish(
 async def demolish_all(
     interaction: discord.Interaction,
 ):
-    global outbound_bridges, inbound_bridges
+    global bridges
 
     message_channel = interaction.channel
     if not isinstance(message_channel, (discord.TextChannel, discord.Thread)):
@@ -402,17 +400,24 @@ async def demolish_all(
         return
 
     # I'll make a list of all channels that are currently bridged to or from this channel
-    paired_channels = set(inbound_bridges[message_channel.id].keys())
-    outbound = outbound_bridges[message_channel.id]
+    inbound_bridges = bridges.get_inbound_bridges(message_channel.id)
+    paired_channels: set[int]
+    if inbound_bridges:
+        paired_channels = set(inbound_bridges.keys())
+    else:
+        paired_channels = set()
+
+    outbound_bridges = bridges.get_outbound_bridges(message_channel.id)
     exceptions: set[int] = set()
-    for target_id in outbound.get_webhooks().keys():
-        target_channel = globals.get_channel_from_id(target_id)
-        assert isinstance(target_channel, (discord.TextChannel, discord.Thread))
-        if not target_channel.permissions_for(interaction.user).manage_webhooks:
-            # If I don't have Manage Webhooks permission in the target, I can't destroy the bridge from there
-            exceptions.add(target_id)
-        else:
-            paired_channels.add(target_id)
+    if outbound_bridges:
+        for target_id in outbound_bridges.keys():
+            target_channel = globals.get_channel_from_id(target_id)
+            assert isinstance(target_channel, (discord.TextChannel, discord.Thread))
+            if not target_channel.permissions_for(interaction.user).manage_webhooks:
+                # If I don't have Manage Webhooks permission in the target, I can't destroy the bridge from there
+                exceptions.add(target_id)
+            else:
+                paired_channels.add(target_id)
 
     assert globals.conn
     cur = globals.conn.cursor()
@@ -458,7 +463,7 @@ async def on_message(message: discord.Message):
     """Called when a Message is created and sent.
 
     This requires Intents.messages to be enabled."""
-    global outbound_bridges
+    global bridges
 
     if not isinstance(message.channel, (discord.TextChannel, discord.Thread)):
         return
@@ -478,13 +483,16 @@ async def on_message(message: discord.Message):
         print("Taking forever to get ready.")
         return
 
-    bridge = outbound_bridges.get(message.channel.id)
-    if not bridge:
+    outbound_bridges = bridges.get_outbound_bridges(message.channel.id)
+    if not outbound_bridges:
         return
 
     # Send a message out to each target webhook
-    outbound_webhooks = bridge.get_webhooks()
-    for target_id, webhook in outbound_webhooks.items():
+    for target_id, bridge in outbound_bridges.items():
+        webhook = bridge.webhook
+        if not webhook:
+            continue
+
         target_channel = webhook.channel
         if not target_channel:
             continue
@@ -529,7 +537,7 @@ async def create_bridge(
     target: discord.TextChannel | discord.Thread | int,
     webhook: discord.Webhook | None = None,
 ):
-    """Create a one-way Bridge from source channel to target channel, adding it to `outbound_bridges` and `inbound_bridges` and creating a webhook if necessary. This function does not alter the database entries in any way.
+    """Create a one-way Bridge from source channel to target channel in `bridges`, creating a webhook if necessary. This function does not alter the database entries in any way.
 
     #### Args:
         - `source`: Source channel for the Bridge, or ID of same.
@@ -539,58 +547,40 @@ async def create_bridge(
     #### Asserts:
         - `isinstance(target, discord.TextChannel | discord.Thread)`
     """
-    global outbound_bridges, inbound_bridges
+    global bridges
 
-    source_id = globals.get_id_from_channel(source)
-
-    target = cast(
-        discord.TextChannel | discord.Thread, globals.get_channel_from_id(target)
-    )
-    assert isinstance(target, discord.TextChannel | discord.Thread)
-
-    if not outbound_bridges.get(source_id):
-        outbound_bridges[source_id] = Bridges(source_id)
-    await outbound_bridges[source_id].add_target(target, webhook)
-
-    if not inbound_bridges.get(target.id):
-        inbound_bridges[target.id] = {}
-    inbound_bridges[target.id][source_id] = outbound_bridges[source_id]
+    await bridges.create_bridge(source, target, webhook)
 
 
 async def demolish_bridges(
     source: discord.TextChannel | discord.Thread | int,
     target: discord.TextChannel | discord.Thread | int,
 ):
-    """Destroy all Bridges between source and target channels, removing them from `outbound_bridges` and `inbound_bridges` and deleting their webhooks. This function does not alter the database entries in any way.
+    """Destroy all Bridges between source and target channels, removing them from `bridges` and deleting their webhooks. This function does not alter the database entries in any way.
 
     #### Args:
         - `source`: One end of the Bridge, or ID of same.
         - `target`: The other end of the Bridge, or ID of same.
     """
-    source_id = globals.get_id_from_channel(source)
-    target_id = globals.get_id_from_channel(target)
 
-    await demolish_bridge_one_sided(source_id, target_id)
-    await demolish_bridge_one_sided(target_id, source_id)
+    await demolish_bridge_one_sided(source, target)
+    await demolish_bridge_one_sided(target, source)
 
 
-async def demolish_bridge_one_sided(source_id: int, target_id: int):
-    """Destroy the Bridge going from source channel to target channel, removing it from `outbound_bridges` and `inbound_bridges` and deleting its webhook. This function does not alter the database entries in any way.
+async def demolish_bridge_one_sided(
+    source: discord.TextChannel | discord.Thread | int,
+    target: discord.TextChannel | discord.Thread | int,
+):
+    """Destroy the Bridge going from source channel to target channel, removing it from `bridges` and deleting its webhook. This function does not alter the database entries in any way.
 
     #### Args:
-        - `source_id`: Source channel ID.
-        - `target_id`: Target channel ID.
+        - `source`: One end of the Bridge, or ID of same.
+        - `target`: The other end of the Bridge, or ID of same.
     """
-    global outbound_bridges, inbound_bridges
 
-    if outbound_bridges.get(source_id):
-        bridge = outbound_bridges[source_id]
-        await bridge.demolish(target_id)
-        if len(bridge.get_webhooks()) == 0:
-            del outbound_bridges[source_id]
+    global bridges
 
-    if inbound_bridges.get(target_id):
-        del inbound_bridges[target_id][source_id]
+    await bridges.demolish_bridge(source, target)
 
 
 globals.init()
