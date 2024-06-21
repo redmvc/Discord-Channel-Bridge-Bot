@@ -456,7 +456,6 @@ async def on_message(message: discord.Message):
         return
 
     # I need to wait until the on_ready event is done before processing any messages
-    global is_ready
     time_waited = 0
     while not globals.is_ready and time_waited < 100:
         await asyncio.sleep(1)
@@ -518,8 +517,6 @@ async def create_bridge(
     target: discord.TextChannel | discord.Thread | int,
     webhook: discord.Webhook | None = None,
 ):
-    global outbound_bridges, inbound_bridges
-
     if isinstance(source, int):
         source_id = source
     else:
