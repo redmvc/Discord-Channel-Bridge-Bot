@@ -88,7 +88,8 @@ class Bridge:
         return self._target_id
 
     @property
-    def webhook(self) -> discord.Webhook | None:
+    def webhook(self) -> discord.Webhook:
+        assert self._webhook
         return self._webhook
 
 
