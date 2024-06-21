@@ -1,4 +1,5 @@
 import discord
+import json
 
 # Create the client connection
 intents = discord.Intents()
@@ -11,7 +12,7 @@ intents.reactions = True
 intents.typing = True
 intents.webhooks = True
 client = discord.Client(intents=intents)
-TOKEN = "placeholder"
+credentials = json.load(open("credentials.json"))
 
 
 @client.event
@@ -26,4 +27,4 @@ async def on_message(message: discord.Message):
     print(message.content)
 
 
-client.run(TOKEN, reconnect=True)
+client.run(credentials["app_token"], reconnect=True)
