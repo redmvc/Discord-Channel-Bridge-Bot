@@ -200,6 +200,118 @@ async def bridge(
     )
 
 
+@discord.app_commands.guild_only()
+@command_tree.command(
+    name="outbound",
+    description="Create an outbound bridge from this channel to target channel.",
+)
+async def outbound(
+    interaction: discord.Interaction,
+    target: str,
+):
+    message_channel = interaction.channel
+    if not isinstance(message_channel, (discord.TextChannel, discord.Thread)):
+        await interaction.response.send_message(
+            "Please run this command from a text channel or a thread."
+        )
+        return
+
+    target_channel = get_channel(target)
+    if not isinstance(target_channel, (discord.TextChannel, discord.Thread)):
+        # The argument passed needs to be a channel or thread
+        await interaction.response.send_message(
+            "Unsupported argument passed. Please pass a channel reference, ID, or link."
+        )
+        return
+
+    assert isinstance(interaction.user, discord.Member)
+    if (
+        not message_channel.permissions_for(interaction.user).manage_webhooks
+        or not target_channel.permissions_for(interaction.user).manage_webhooks
+    ):
+        await interaction.response.send_message(
+            "Please make sure you have 'Manage Webhooks' permission in both this and target channels."
+        )
+        return
+
+    global conn
+    assert conn
+    cur = conn.cursor()
+
+    await create_bridge(message_channel, target_channel)
+    cur.execute(
+        """
+        INSERT INTO bridges (source, target)
+        VALUES (%s, %s)
+        """,
+        (str(message_channel.id), str(target_channel.id)),
+    )
+
+    conn.commit()
+    cur.close()
+
+    await interaction.response.send_message(
+        "✅ Bridge created! Try sending a message from this channel 😁",
+        ephemeral=True,
+    )
+
+
+@discord.app_commands.guild_only()
+@command_tree.command(
+    name="inbound",
+    description="Create an inbound bridge from source channel to this channel.",
+)
+async def inbound(
+    interaction: discord.Interaction,
+    source: str,
+):
+    message_channel = interaction.channel
+    if not isinstance(message_channel, (discord.TextChannel, discord.Thread)):
+        await interaction.response.send_message(
+            "Please run this command from a text channel or a thread."
+        )
+        return
+
+    source_channel = get_channel(source)
+    if not isinstance(source_channel, (discord.TextChannel, discord.Thread)):
+        # The argument passed needs to be a channel or thread
+        await interaction.response.send_message(
+            "Unsupported argument passed. Please pass a channel reference, ID, or link."
+        )
+        return
+
+    assert isinstance(interaction.user, discord.Member)
+    if (
+        not message_channel.permissions_for(interaction.user).manage_webhooks
+        or not source_channel.permissions_for(interaction.user).manage_webhooks
+    ):
+        await interaction.response.send_message(
+            "Please make sure you have 'Manage Webhooks' permission in both this and target channels."
+        )
+        return
+
+    global conn
+    assert conn
+    cur = conn.cursor()
+
+    await create_bridge(source_channel, message_channel)
+    cur.execute(
+        """
+        INSERT INTO bridges (source, target)
+        VALUES (%s, %s)
+        """,
+        (str(source_channel.id), str(message_channel.id)),
+    )
+
+    conn.commit()
+    cur.close()
+
+    await interaction.response.send_message(
+        "✅ Bridge created! Try sending a message from the other channel 😁",
+        ephemeral=True,
+    )
+
+
 @client.event
 async def on_message(message: discord.Message):
     if not isinstance(message.channel, (discord.TextChannel, discord.Thread)):
