@@ -43,9 +43,7 @@ class Bridge:
         self,
         webhook: discord.Webhook | None = None,
     ) -> None:
-        if self._webhook:
-            await self._webhook.delete(reason="Recycling webhook.")
-            self._webhook = None
+        await self.destroy_webhook("Recycling webhook.")
 
         if webhook:
             self._webhook = webhook
@@ -71,9 +69,15 @@ class Bridge:
 
         await self.add_webhook(webhook)
 
-    async def __del__(self):
+    async def destroy_webhook(self, reason: str = "User request."):
+        """Destroys the Bridge's webhook if it exists.
+
+        #### Args:
+            - `reason`: The reason to be stored in the Discord logs. Defaults to "User request.".
+        """
         if self._webhook:
-            await self._webhook.delete(reason="Recycling webhook.")
+            await self._webhook.delete(reason=reason)
+            self._webhook = None
 
     @property
     def source_id(self) -> int:
@@ -150,6 +154,7 @@ class Bridges:
         ].get(target_id):
             return
 
+        await self._outbound_bridges[source_id][target_id].destroy_webhook()
         del self._outbound_bridges[source_id][target_id]
         del self._inbound_bridges[target_id][source_id]
 
