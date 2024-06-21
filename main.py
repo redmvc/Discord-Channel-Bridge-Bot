@@ -260,4 +260,73 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
     session.close()
 
 
+@globals.client.event
+async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
+    """Called when a message is deleted. Unlike `on_message_delete()`, this is called regardless of the message being in the internal message cache or not.
+
+    #### Args:
+        - `payload`: The raw event payload data.
+    """
+    source_channel_id = payload.channel_id
+    message_channel = globals.get_channel_from_id(source_channel_id)
+    if not isinstance(message_channel, (discord.TextChannel, discord.Thread)):
+        return
+
+    # I need to wait until the on_ready event is done before processing any messages
+    time_waited = 0
+    while not globals.is_ready and time_waited < 100:
+        await asyncio.sleep(1)
+        time_waited += 1
+    if time_waited >= 100:
+        # somethin' real funky going on here
+        # I don't have error handling yet though
+        print("Taking forever to get ready.")
+        return
+
+    outbound_bridges = bridges.get_outbound_bridges(message_channel.id)
+    inbound_bridges = bridges.get_inbound_bridges(message_channel.id)
+    if not outbound_bridges and not inbound_bridges:
+        return
+
+    # Find all messages matching this one
+    session = SQLSession(engine)
+    bridged_messages: ScalarResult[DBMessageMap] = session.scalars(
+        SQLSelect(DBMessageMap).where(DBMessageMap.source_message == payload.message_id)
+    )
+    for message_row in bridged_messages:
+        target_channel_id = int(message_row.target_channel)
+        bridge = bridges.get_one_way_bridge(source_channel_id, target_channel_id)
+        if not bridge:
+            continue
+
+        bridged_channel = globals.get_channel_from_id(target_channel_id)
+        if not isinstance(bridged_channel, (discord.TextChannel, discord.Thread)):
+            continue
+
+        thread_splat: ThreadSplat = {}
+        if isinstance(bridged_channel, discord.Thread):
+            if not isinstance(bridged_channel.parent, discord.TextChannel):
+                continue
+            thread_splat = {"thread": bridged_channel}
+
+        await bridge.webhook.delete_message(
+            int(message_row.target_message),
+            **thread_splat,
+        )
+
+    # If the message was bridged, delete its row
+    # If it was a source of bridged messages, delete all rows of its bridged versions
+    session.execute(
+        SQLDelete(DBMessageMap).where(
+            sql_or(
+                DBMessageMap.source_message == payload.message_id,
+                DBMessageMap.target_message == payload.message_id,
+            )
+        )
+    )
+
+    session.commit()
+    session.close()
+
+
 globals.client.run(cast(str, globals.credentials["app_token"]), reconnect=True)
