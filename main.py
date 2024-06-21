@@ -2,6 +2,8 @@ from __future__ import annotations
 from bridge import Bridges
 import discord
 import json
+import mysql.connector
+import re
 from typing import cast
 
 # Create the client connection
@@ -18,15 +20,103 @@ client = discord.Client(intents=intents)
 credentials = json.load(open("credentials.json"))
 
 is_ready = False  # whether the bot is ready and doesn't need to be readied again
+conn: mysql.connector.PooledMySQLConnection | mysql.connector.MySQLConnection | None = (
+    None  # the connection to the database
+)
 outbound_bridges: dict[int, Bridges] = {}
 inbound_bridges: dict[int, dict[int, Bridges]] = {}
 
 
 @client.event
 async def on_ready():
-    global is_ready
+    global is_ready, conn, outbound_bridges, inbound_bridges
     if is_ready:
         return
+
+    # The names of webhooks created by the Bridges class are formatted like: `:bridge: (src_id tgt_id)`
+    webhook_name_parser = re.compile(r"^:bridge: \((?P<src>\d+) (?P<tgt>\d+)\)$")
+
+    # I am going to try to identify all existing bridges
+    # First, I fetch all target channels registered in the db
+    conn = mysql.connector.connect(
+        host=credentials["db_host"],
+        port=credentials["db_port"],
+        user=credentials["db_user"],
+        passwd=credentials["db_pwd"],
+        database=credentials["db_name"],
+        buffered=True,
+        autocommit=False,
+    )
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT UNIQUE(target) FROM bridges;"
+    )  # columns are "id", "source", and "target"
+    target_ids = cur.fetchall()
+    for target_id in target_ids:
+        # Only the channel IDs are stored, so I have to find the appropriate channel for this bridge
+        target_id = cast(tuple[int], target_id)[0]
+        target = client.get_channel(target_id)
+        if not isinstance(target, (discord.TextChannel, discord.Thread)):
+            # This ID isn't a valid bridged ID, I'll remove it from my database
+            cur.execute("DELETE FROM bridges WHERE target = %s;", (target_id,))
+            conn.commit()
+            continue
+
+        # And the channel its webhooks will be attached to
+        webhook_channel = (
+            target.parent if isinstance(target, discord.Thread) else target
+        )
+        if not isinstance(webhook_channel, discord.TextChannel):
+            # This ID isn't a valid bridged ID, I'll remove it from my database
+            cur.execute("DELETE FROM bridges WHERE target = %s;", (target_id,))
+            conn.commit()
+            continue
+
+        # Then I get all webhooks attached to that channel whose target ID (stored in their names) is the current ID
+        candidate_webhooks = await webhook_channel.webhooks()
+        webhooks = [
+            (webhook, match.group("src"))
+            for webhook in candidate_webhooks
+            if webhook.name
+            and (match := webhook_name_parser.fullmatch(webhook.name))
+            and match
+            and match.group("tgt") == str(target_id)
+        ]
+
+        # Next I get every bridge that has this channel/thread as its target
+        cur.execute(
+            """
+            SELECT
+                id, source
+            FROM
+                bridges
+            WHERE
+                target = %s;
+            """,
+            (target_id,),
+        )
+        bridges = cur.fetchall()
+        for bridge in bridges:
+            bridge_id, source_id = cast(tuple[int, int], bridge)
+            # I try to find a webhook that has the same source as this bridge's entry
+            webhook = next(
+                iter([w for w, src in webhooks if src == str(source_id)]), None
+            )
+            if webhook:
+                # Found the webhook, so I'm going to store it in my list of bridges
+                await create_bridge(source_id, target, webhook)
+            else:
+                # I couldn't find that webhook, so I'll delete that entry from the db
+                cur.execute(
+                    """
+                    DELETE FROM bridges
+                    WHERE id = %s;
+                    """,
+                    (bridge_id,),
+                )
+                conn.commit()
+
+    cur.close()
 
     print(f"{client.user} is connected to the following servers:\n")
     for server in client.guilds:
