@@ -4,8 +4,6 @@ import discord
 import mysql.connector
 import mysql.connector.abstracts
 
-from bridge import Bridges
-
 """
 The format of this variable is
 {
@@ -25,10 +23,6 @@ conn: (
     | mysql.connector.abstracts.MySQLConnectionAbstract
     | None
 ) = None
-
-# The lists of bridges that have been created
-outbound_bridges: dict[int, Bridges] = {}
-inbound_bridges: dict[int, dict[int, Bridges]] = {}
 
 # This variable will be set to True at the end of init() to make sure nothing that relies on the globals uses them before they are ready
 globals_are_initialised: bool = False

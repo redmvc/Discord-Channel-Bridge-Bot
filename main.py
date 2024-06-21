@@ -11,6 +11,10 @@ import mysql.connector.abstracts
 import globals
 from bridge import Bridges
 
+# The lists of bridges that have been created
+outbound_bridges: dict[int, Bridges] = {}
+inbound_bridges: dict[int, dict[int, Bridges]] = {}
+
 
 @globals.client.event
 async def on_ready():
@@ -381,6 +385,8 @@ async def demolish(
 async def demolish_all(
     interaction: discord.Interaction,
 ):
+    global outbound_bridges, inbound_bridges
+
     message_channel = interaction.channel
     if not isinstance(message_channel, (discord.TextChannel, discord.Thread)):
         await interaction.response.send_message(
@@ -396,8 +402,8 @@ async def demolish_all(
         return
 
     # I'll make a list of all channels that are currently bridged to or from this channel
-    paired_channels = set(globals.inbound_bridges[message_channel.id].keys())
-    outbound = globals.outbound_bridges[message_channel.id]
+    paired_channels = set(inbound_bridges[message_channel.id].keys())
+    outbound = outbound_bridges[message_channel.id]
     exceptions: set[int] = set()
     for target_id in outbound.get_webhooks().keys():
         target_channel = globals.get_channel_from_id(target_id)
@@ -452,6 +458,8 @@ async def on_message(message: discord.Message):
     """Called when a Message is created and sent.
 
     This requires Intents.messages to be enabled."""
+    global outbound_bridges
+
     if not isinstance(message.channel, (discord.TextChannel, discord.Thread)):
         return
 
@@ -470,7 +478,7 @@ async def on_message(message: discord.Message):
         print("Taking forever to get ready.")
         return
 
-    bridge = globals.outbound_bridges.get(message.channel.id)
+    bridge = outbound_bridges.get(message.channel.id)
     if not bridge:
         return
 
@@ -531,6 +539,8 @@ async def create_bridge(
     #### Asserts:
         - `isinstance(target, discord.TextChannel | discord.Thread)`
     """
+    global outbound_bridges, inbound_bridges
+
     source_id = globals.get_id_from_channel(source)
 
     target = cast(
@@ -538,13 +548,13 @@ async def create_bridge(
     )
     assert isinstance(target, discord.TextChannel | discord.Thread)
 
-    if not globals.outbound_bridges.get(source_id):
-        globals.outbound_bridges[source_id] = Bridges(source_id)
-    await globals.outbound_bridges[source_id].add_target(target, webhook)
+    if not outbound_bridges.get(source_id):
+        outbound_bridges[source_id] = Bridges(source_id)
+    await outbound_bridges[source_id].add_target(target, webhook)
 
-    if not globals.inbound_bridges.get(target.id):
-        globals.inbound_bridges[target.id] = {}
-    globals.inbound_bridges[target.id][source_id] = globals.outbound_bridges[source_id]
+    if not inbound_bridges.get(target.id):
+        inbound_bridges[target.id] = {}
+    inbound_bridges[target.id][source_id] = outbound_bridges[source_id]
 
 
 async def demolish_bridges(
@@ -571,14 +581,16 @@ async def demolish_bridge_one_sided(source_id: int, target_id: int):
         - `source_id`: Source channel ID.
         - `target_id`: Target channel ID.
     """
-    if globals.outbound_bridges.get(source_id):
-        bridge = globals.outbound_bridges[source_id]
+    global outbound_bridges, inbound_bridges
+
+    if outbound_bridges.get(source_id):
+        bridge = outbound_bridges[source_id]
         await bridge.demolish(target_id)
         if len(bridge.get_webhooks()) == 0:
-            del globals.outbound_bridges[source_id]
+            del outbound_bridges[source_id]
 
-    if globals.inbound_bridges.get(target_id):
-        del globals.inbound_bridges[target_id][source_id]
+    if inbound_bridges.get(target_id):
+        del inbound_bridges[target_id][source_id]
 
 
 globals.init()
