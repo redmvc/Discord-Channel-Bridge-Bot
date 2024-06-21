@@ -124,13 +124,13 @@ class Bridges:
         else:
             bridge = await Bridge.create(source_id, target_id, webhook)
 
-        if not self._outbound_bridges.get(source_id):
-            self._outbound_bridges[source_id] = {}
-        self._outbound_bridges[source_id][target_id] = bridge
+            if not self._outbound_bridges.get(source_id):
+                self._outbound_bridges[source_id] = {}
+            self._outbound_bridges[source_id][target_id] = bridge
 
-        if not self._inbound_bridges.get(target_id):
-            self._inbound_bridges[target_id] = {}
-        self._inbound_bridges[target_id][source_id] = bridge
+            if not self._inbound_bridges.get(target_id):
+                self._inbound_bridges[target_id] = {}
+            self._inbound_bridges[target_id][source_id] = bridge
 
         return bridge
 
