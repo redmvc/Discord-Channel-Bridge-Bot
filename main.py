@@ -126,10 +126,17 @@ async def on_message(message: discord.Message):
 
     session = SQLSession(engine)
     reply_bridges: dict[int, int] = {}
+    reply_reference = False
     if message.reference and message.reference.message_id:
         # This message is a reply to another message, so we should try to link to its match on the other side of bridges
         # reply_bridges will be a dict whose keys are channel IDs and whose values are the IDs of messages matching the message I'm replying to in those channels
         reply_id = message.reference.message_id
+
+        # identify if this reply "pinged" the target, to know whether to add the @ symbol UI
+        reply_message = message.reference.resolved
+        reply_reference = isinstance(reply_message, discord.Message) and any(
+            x.id == reply_message.author.id for x in message.mentions
+        )
 
         # First, check whether the message replied to was itself bridged from somewhere
         reply_source_match = session.scalars(
@@ -192,6 +199,10 @@ async def on_message(message: discord.Message):
             display_name = discord.utils.escape_markdown(
                 replied_message.author.display_name
             )
+            # Discord represents ping "ON" vs "OFF" replies with an @ symbol before the reply author name
+            # copy this behavior here
+            if reply_reference:
+                display_name = "@" + display_name
 
             replied_content = truncate(
                 discord.utils.remove_markdown(replied_message.clean_content),
