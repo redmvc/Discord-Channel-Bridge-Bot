@@ -130,17 +130,22 @@ async def bridge(
         or not target_channel.permissions_for(interaction.guild.me).manage_webhooks
     ):
         await interaction.response.send_message(
-            "Please make sure the bot has 'Manage Webhooks' permission in both this and target channels."
+            "Please make sure the bot has 'Manage Webhooks' permission in both this and target channels.",
+            ephemeral=True,
         )
         return
+
+    await interaction.response.defer(thinking=True, ephemeral=True)
 
     session = None
     try:
         session = SQLSession(engine)
-        await create_bridge_and_db(message_channel, target_channel, session)
-        await create_bridge_and_db(target_channel, message_channel, session)
+        await asyncio.gather(
+            create_bridge_and_db(message_channel, target_channel, session),
+            create_bridge_and_db(target_channel, message_channel, session),
+        )
     except SQLError:
-        await interaction.response.send_message(
+        await interaction.followup.send(
             "❌ There was an issue with the connection to the database; bridge creation failed.",
             ephemeral=True,
         )
@@ -151,7 +156,7 @@ async def bridge(
     session.commit()
     session.close()
 
-    await interaction.response.send_message(
+    await interaction.followup.send(
         "✅ Bridge created! Try sending a message from either channel 😁",
         ephemeral=True,
     )
@@ -199,8 +204,11 @@ async def outbound(
         )
         return
 
+    await interaction.response.defer(thinking=True, ephemeral=True)
+
     await create_bridge_and_db(message_channel, target_channel)
-    await interaction.response.send_message(
+
+    await interaction.followup.send(
         "✅ Bridge created! Try sending a message from this channel 😁",
         ephemeral=True,
     )
@@ -248,8 +256,11 @@ async def inbound(
         )
         return
 
+    await interaction.response.defer(thinking=True, ephemeral=True)
+
     await create_bridge_and_db(source_channel, message_channel)
-    await interaction.response.send_message(
+
+    await interaction.followup.send(
         "✅ Bridge created! Try sending a message from the other channel 😁",
         ephemeral=True,
     )
@@ -334,6 +345,7 @@ async def bridge_thread(
         succeeded_at_least_once = False
         failed_at_least_once = False
 
+        create_bridges = []
         for idx in range(2):
             if idx == 0:
                 list_of_bridges = outbound_bridges
@@ -387,10 +399,15 @@ async def bridge_thread(
 
                 threads_created[channel_id] = new_thread
                 if idx == 0:
-                    await create_bridge_and_db(message_thread, new_thread, session)
+                    create_bridges.append(
+                        create_bridge_and_db(message_thread, new_thread, session)
+                    )
                 else:
-                    await create_bridge_and_db(new_thread, message_thread, session)
+                    create_bridges.append(
+                        create_bridge_and_db(new_thread, message_thread, session)
+                    )
                 succeeded_at_least_once = True
+        await asyncio.gather(*create_bridges)
     except SQLError:
         await interaction.followup.send(
             "❌ There was an issue with the connection to the database; thread and bridge creation failed.",
@@ -454,6 +471,8 @@ async def demolish(
         )
         return
 
+    await interaction.response.defer(thinking=True, ephemeral=True)
+
     demolishing = demolish_bridges(message_channel, target_channel)
 
     message_channel_id = str(message_channel.id)
@@ -491,7 +510,7 @@ async def demolish(
         )
         session.execute(delete_demolished_messages)
     except SQLError:
-        await interaction.response.send_message(
+        await interaction.followup.send(
             "❌ There was an issue with the connection to the database; thread and bridge creation failed.",
             ephemeral=True,
         )
@@ -502,7 +521,7 @@ async def demolish(
     session.commit()
     session.close()
 
-    await interaction.response.send_message(
+    await interaction.followup.send(
         "✅ Bridges demolished!",
         ephemeral=True,
     )
@@ -531,6 +550,8 @@ async def demolish_all(
             ephemeral=True,
         )
         return
+
+    await interaction.response.defer(thinking=True, ephemeral=True)
 
     # I'll make a list of all channels that are currently bridged to or from this channel
     inbound_bridges = bridges.get_inbound_bridges(message_channel.id)
@@ -584,7 +605,7 @@ async def demolish_all(
         )
         session.execute(delete_demolished_messages)
     except SQLError:
-        await interaction.response.send_message(
+        await interaction.followup.send(
             "❌ There was an issue with the connection to the database; thread and bridge creation failed.",
             ephemeral=True,
         )
@@ -595,17 +616,17 @@ async def demolish_all(
     session.commit()
     session.close()
 
+    await asyncio.gather(*bridges_being_demolished)
     if len(exceptions) == 0:
-        await interaction.response.send_message(
+        await interaction.followup.send(
             "✅ Bridges demolished!",
             ephemeral=True,
         )
     else:
-        await interaction.response.send_message(
+        await interaction.followup.send(
             "⭕ Inbound bridges demolished, but some outbound bridges may not have been, as some permissions were missing.",
             ephemeral=True,
         )
-    await asyncio.gather(*bridges_being_demolished)
 
 
 async def create_bridge_and_db(
@@ -725,8 +746,10 @@ async def demolish_bridges(
         - `ValueError`: The webhook does not have a token associated with it.
     """
 
-    await demolish_bridge_one_sided(source, target)
-    await demolish_bridge_one_sided(target, source)
+    await asyncio.gather(
+        demolish_bridge_one_sided(source, target),
+        demolish_bridge_one_sided(target, source),
+    )
 
 
 async def demolish_bridge_one_sided(
