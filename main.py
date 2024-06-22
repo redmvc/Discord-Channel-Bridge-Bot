@@ -110,7 +110,7 @@ async def on_message(message: discord.Message):
     if not isinstance(message.channel, (discord.TextChannel, discord.Thread)):
         return
 
-    if message.content == "":
+    if message.type not in {discord.MessageType.default, discord.MessageType.reply}:
         # Only bridge contentful messages
         return
 
