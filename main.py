@@ -66,7 +66,7 @@ async def on_ready():
 
             if source_channel and target_channel:
                 # There *should* be a webhook there and I have access to the channels
-                await commands.create_bridge_and_db(source_id, target_id, None, session)
+                await commands.create_bridge_and_db(source_id, target_id, session)
 
     if len(invalid_channels) > 0:
         delete_invalid_channels = SQLDelete(DBBridge).where(

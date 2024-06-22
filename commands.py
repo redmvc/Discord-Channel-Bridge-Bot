@@ -119,8 +119,8 @@ async def bridge(
         return
 
     session = SQLSession(engine)
-    await create_bridge_and_db(message_channel, target_channel, None, session)
-    await create_bridge_and_db(target_channel, message_channel, None, session)
+    await create_bridge_and_db(message_channel, target_channel, session)
+    await create_bridge_and_db(target_channel, message_channel, session)
     session.commit()
     session.close()
 
@@ -346,9 +346,9 @@ async def bridge_thread(
 
             threads_created[channel_id] = new_thread
             if idx == 0:
-                await create_bridge_and_db(message_thread, new_thread, None, session)
+                await create_bridge_and_db(message_thread, new_thread, session)
             else:
-                await create_bridge_and_db(new_thread, message_thread, None, session)
+                await create_bridge_and_db(new_thread, message_thread, session)
             succeeded_at_least_once = True
 
     if succeeded_at_least_once:
@@ -536,8 +536,8 @@ async def demolish_all(
 async def create_bridge_and_db(
     source: discord.TextChannel | discord.Thread | int,
     target: discord.TextChannel | discord.Thread | int,
-    webhook: discord.Webhook | None = None,
     session: SQLSession | None = None,
+    webhook: discord.Webhook | None = None,
 ) -> Bridge:
     """Create a one-way Bridge from source channel to target channel in `bridges`, creating a webhook if necessary, then inserts a reference to this new bridge into the database.
 
