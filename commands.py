@@ -154,6 +154,153 @@ async def inbound(
 
 @discord.app_commands.guild_only()
 @globals.command_tree.command(
+    name="bridge_thread",
+    description="Create threads across the bridge matching this one and bridge them.",
+)
+async def bridge_thread(
+    interaction: discord.Interaction,
+):
+    message_thread = interaction.channel
+    if not isinstance(message_thread, discord.Thread):
+        await interaction.response.send_message(
+            "Please run this command from a thread."
+        )
+        return
+
+    if not isinstance(message_thread.parent, discord.TextChannel):
+        await interaction.response.send_message(
+            "Please run this command from a thread off a text channel."
+        )
+        return
+
+    assert isinstance(interaction.user, discord.Member)
+    if not message_thread.permissions_for(interaction.user).manage_webhooks:
+        await interaction.response.send_message(
+            "Please make sure you have 'Manage Webhooks' permission in this channel."
+        )
+        return
+
+    outbound_bridges = bridges.get_outbound_bridges(message_thread.parent.id)
+    inbound_bridges = bridges.get_inbound_bridges(message_thread.parent.id)
+    if not outbound_bridges and not inbound_bridges:
+        await interaction.response.send_message(
+            "The parent channel isn't bridged to any other channels."
+        )
+        return
+
+    await interaction.response.defer(thinking=True, ephemeral=True)
+
+    # The IDs of threads are the same as that of their originating messages so we should try to create threads from the same messages
+    session = SQLSession(engine)
+    matching_starting_messages: dict[int, int] = {}
+    try:
+        await message_thread.parent.fetch_message(message_thread.id)
+
+        source_starting_message = session.scalars(
+            SQLSelect(DBMessageMap).where(
+                DBMessageMap.target_message == str(message_thread.id)
+            )
+        ).first()
+        if isinstance(source_starting_message, DBMessageMap):
+            # The message that's starting this thread is bridged
+            source_channel_id = int(source_starting_message.source_channel)
+            source_message_id = int(source_starting_message.source_message)
+            matching_starting_messages[source_channel_id] = source_message_id
+        else:
+            source_channel_id = message_thread.parent.id
+            source_message_id = message_thread.id
+
+        target_starting_messages: ScalarResult[DBMessageMap] = session.scalars(
+            SQLSelect(DBMessageMap).where(
+                DBMessageMap.source_message == str(source_message_id)
+            )
+        )
+        for target_starting_message in target_starting_messages:
+            matching_starting_messages[int(target_starting_message.target_channel)] = (
+                int(target_starting_message.target_message)
+            )
+    except discord.NotFound:
+        pass
+
+    # Now find all channels that are bridged to the channel this thread's parent is bridged to and create threads there
+    threads_created: dict[int, discord.Thread] = {}
+    succeeded_at_least_once = False
+    failed_at_least_once = False
+
+    for idx in range(2):
+        if idx == 0:
+            list_of_bridges = outbound_bridges
+        else:
+            list_of_bridges = inbound_bridges
+        if not list_of_bridges:
+            continue
+
+        for channel_id in list_of_bridges.keys():
+            channel = globals.get_channel_from_id(channel_id)
+            if not isinstance(channel, discord.TextChannel):
+                # I can't create a thread inside a thread
+                failed_at_least_once = True
+                continue
+
+            if (
+                not channel.permissions_for(interaction.user).manage_webhooks
+                or not channel.permissions_for(interaction.user).create_public_threads
+            ):
+                # User doesn't have permission to act there
+                failed_at_least_once = True
+                continue
+
+            new_thread = threads_created.get(channel_id)
+            if not new_thread and matching_starting_messages.get(channel_id):
+                # I found a matching starting message, so I'll try to create the thread starting there
+                matching_starting_message = await channel.fetch_message(
+                    matching_starting_messages[channel_id]
+                )
+
+                if not matching_starting_message.thread:
+                    # That message doesn't already have a thread, so I can create it
+                    new_thread = await matching_starting_message.create_thread(
+                        name=message_thread.name,
+                        reason=f"Bridged from {message_thread.guild.name}#{message_thread.parent.name}#{message_thread.name}",
+                    )
+
+            if not new_thread:
+                # Haven't created a thread yet, try to create it from the channel
+                new_thread = await channel.create_thread(
+                    name=message_thread.name,
+                    reason=f"Bridged from {message_thread.guild.name}#{message_thread.parent.name}#{message_thread.name}",
+                )
+
+            if not new_thread:
+                # Failed to create a thread somehow
+                failed_at_least_once = True
+                continue
+
+            threads_created[channel_id] = new_thread
+            if idx == 0:
+                await create_bridge_and_db(message_thread, new_thread, None, session)
+            else:
+                await create_bridge_and_db(new_thread, message_thread, None, session)
+            succeeded_at_least_once = True
+
+    if succeeded_at_least_once:
+        if not failed_at_least_once:
+            await interaction.followup.send("✅ All threads created!")
+        else:
+            await interaction.followup.send(
+                "⭕ Some but not all threads were created; this may have happened because you lacked Manage Webhooks or Create Public Threads permissions. Note that trying to run this command again will duplicate threads.",
+            )
+    else:
+        await interaction.followup.send(
+            "❌ Couldn't create any threads. Check that you have Manage Webhooks and Create Public Threads permissions in all relevant channels."
+        )
+
+    session.commit()
+    session.close()
+
+
+@discord.app_commands.guild_only()
+@globals.command_tree.command(
     name="demolish",
     description="Demolish all bridges between this and target channel.",
 )
