@@ -135,6 +135,8 @@ async def bridge(
         )
         return
 
+    await interaction.response.defer(thinking=True, ephemeral=True)
+
     session = None
     try:
         session = SQLSession(engine)
@@ -143,7 +145,7 @@ async def bridge(
             create_bridge_and_db(target_channel, message_channel, session),
         )
     except SQLError:
-        await interaction.response.send_message(
+        await interaction.followup.send(
             "❌ There was an issue with the connection to the database; bridge creation failed.",
             ephemeral=True,
         )
@@ -154,7 +156,7 @@ async def bridge(
     session.commit()
     session.close()
 
-    await interaction.response.send_message(
+    await interaction.followup.send(
         "✅ Bridge created! Try sending a message from either channel 😁",
         ephemeral=True,
     )
@@ -202,8 +204,11 @@ async def outbound(
         )
         return
 
+    await interaction.response.defer(thinking=True, ephemeral=True)
+
     await create_bridge_and_db(message_channel, target_channel)
-    await interaction.response.send_message(
+
+    await interaction.followup.send(
         "✅ Bridge created! Try sending a message from this channel 😁",
         ephemeral=True,
     )
@@ -251,8 +256,11 @@ async def inbound(
         )
         return
 
+    await interaction.response.defer(thinking=True, ephemeral=True)
+
     await create_bridge_and_db(source_channel, message_channel)
-    await interaction.response.send_message(
+
+    await interaction.followup.send(
         "✅ Bridge created! Try sending a message from the other channel 😁",
         ephemeral=True,
     )
@@ -463,6 +471,8 @@ async def demolish(
         )
         return
 
+    await interaction.response.defer(thinking=True, ephemeral=True)
+
     demolishing = demolish_bridges(message_channel, target_channel)
 
     message_channel_id = str(message_channel.id)
@@ -500,7 +510,7 @@ async def demolish(
         )
         session.execute(delete_demolished_messages)
     except SQLError:
-        await interaction.response.send_message(
+        await interaction.followup.send(
             "❌ There was an issue with the connection to the database; thread and bridge creation failed.",
             ephemeral=True,
         )
@@ -511,7 +521,7 @@ async def demolish(
     session.commit()
     session.close()
 
-    await interaction.response.send_message(
+    await interaction.followup.send(
         "✅ Bridges demolished!",
         ephemeral=True,
     )
@@ -540,6 +550,8 @@ async def demolish_all(
             ephemeral=True,
         )
         return
+
+    await interaction.response.defer(thinking=True, ephemeral=True)
 
     # I'll make a list of all channels that are currently bridged to or from this channel
     inbound_bridges = bridges.get_inbound_bridges(message_channel.id)
@@ -593,7 +605,7 @@ async def demolish_all(
         )
         session.execute(delete_demolished_messages)
     except SQLError:
-        await interaction.response.send_message(
+        await interaction.followup.send(
             "❌ There was an issue with the connection to the database; thread and bridge creation failed.",
             ephemeral=True,
         )
@@ -604,17 +616,17 @@ async def demolish_all(
     session.commit()
     session.close()
 
+    await asyncio.gather(*bridges_being_demolished)
     if len(exceptions) == 0:
-        await interaction.response.send_message(
+        await interaction.followup.send(
             "✅ Bridges demolished!",
             ephemeral=True,
         )
     else:
-        await interaction.response.send_message(
+        await interaction.followup.send(
             "⭕ Inbound bridges demolished, but some outbound bridges may not have been, as some permissions were missing.",
             ephemeral=True,
         )
-    await asyncio.gather(*bridges_being_demolished)
 
 
 async def create_bridge_and_db(
