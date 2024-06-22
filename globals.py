@@ -5,6 +5,8 @@ import json
 
 import discord
 
+from validations import validate_types
+
 """
 The format of this variable is
 {
@@ -48,7 +50,8 @@ def mention_to_channel(
     #### Returns:
         - The channel whose ID is given by `channel_id`.
     """
-    global client
+    validate_types({"link_or_mention": (link_or_mention, str)})
+
     if link_or_mention.startswith("https://discord.com/channels"):
         try:
             while link_or_mention.endswith("/"):
@@ -64,6 +67,7 @@ def mention_to_channel(
             )
         except ValueError:
             return None
+
     return get_channel_from_id(channel_id)
 
 
@@ -80,7 +84,24 @@ def get_channel_from_id(
     #### Returns:
         - If the argument is a channel, returns it unchanged; otherwise, returns a channel with the ID passed.
     """
-    global client
+    validate_types(
+        {
+            "channel_or_id": (
+                channel_or_id,
+                (
+                    int,
+                    discord.TextChannel,
+                    discord.Thread,
+                    discord.VoiceChannel,
+                    discord.StageChannel,
+                    discord.ForumChannel,
+                    discord.CategoryChannel,
+                    discord.abc.PrivateChannel,
+                ),
+            )
+        }
+    )
+
     if isinstance(channel_or_id, int):
         channel = client.get_channel(channel_or_id)
     else:
@@ -102,10 +123,28 @@ def get_id_from_channel(
     #### Returns:
         - `int`: The ID of the channel passed as argument.
     """
+    validate_types(
+        {
+            "channel_or_id": (
+                channel_or_id,
+                (
+                    int,
+                    discord.TextChannel,
+                    discord.Thread,
+                    discord.VoiceChannel,
+                    discord.StageChannel,
+                    discord.ForumChannel,
+                    discord.CategoryChannel,
+                    discord.abc.PrivateChannel,
+                ),
+            )
+        }
+    )
 
     if isinstance(channel_or_id, int):
         return channel_or_id
-    return channel_or_id.id
+    else:
+        return channel_or_id.id
 
 
 async def wait_until_ready() -> bool:

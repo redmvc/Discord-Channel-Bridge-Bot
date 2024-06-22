@@ -1,6 +1,9 @@
+from typing import cast
+
 import discord
 
 import globals
+from validations import validate_channels, validate_types, validate_webhook
 
 
 class Bridge:
@@ -26,7 +29,25 @@ class Bridge:
         target: discord.TextChannel | discord.Thread | int,
         webhook: discord.Webhook | None = None,
     ):
-        self = cls(source, target)
+        """Create an outbound Bridge from source channel to target channel.
+
+        #### Args:
+            - `source`: Source channel or ID of same.
+            - `target`: Target channel or ID of same.
+            - `webhook`: Optionally, an existing webhook. Defaults to None, in which case a new one will be created.
+
+        #### Raises:
+            - `ChannelTypeError`: The source or target channels are not text channels nor threads off a text channel.
+            - `WebhookChannelError`: `webhook` is not attached to target channel.
+            - `HTTPException`: Creating the webhook failed.
+            - `Forbidden`: You do not have permissions to create a webhook.
+            - `ValueError`: Existing webhook does not have a token associated with it.
+
+        #### Returns:
+            - `Bridge`: The created Bridge.
+        """
+
+        self = Bridge(source, target)
         await self.add_webhook(webhook)
         return self
 
@@ -35,6 +56,28 @@ class Bridge:
         source: discord.TextChannel | discord.Thread | int,
         target: discord.TextChannel | discord.Thread | int,
     ) -> None:
+        """Construct a new Bridge with an empty webhook. Should only be called from within class method Bridge.create.
+
+        #### Args:
+            - `source`: Source channel or ID of same.
+            - `target`: Target channel or ID of same.
+
+        #### Raises:
+            - `ChannelTypeError`: The source or target channels are not text channels nor threads off a text channel.
+        """
+        validate_types(
+            {
+                "source": (source, (discord.TextChannel, discord.Thread, int)),
+                "target": (target, (discord.TextChannel, discord.Thread, int)),
+            }
+        )
+        validate_channels(
+            {
+                "source": globals.get_channel_from_id(source),
+                "target": globals.get_channel_from_id(target),
+            }
+        )
+
         self._source_id = globals.get_id_from_channel(source)
         self._target_id = globals.get_id_from_channel(target)
         self._webhook: discord.Webhook | None = None
@@ -43,12 +86,28 @@ class Bridge:
         self,
         webhook: discord.Webhook | None = None,
     ) -> None:
+        """Add an existing webhook to this Bridge or create a new one for it.
+
+        #### Args:
+            - `webhook`: The webhook to add. Defaults to None, in which case a new one will be created.
+
+        #### Raises:
+            - `WebhookChannelError`: `webhook` is not attached to Bridge's target channel.
+            - `HTTPException`: Deleting the existing webhook or creating a new webhook failed.
+            - `Forbidden`: You do not have permissions to delete the existing webhook or create a new one.
+            - `ValueError`: Existing webhook does not have a token associated with it.
+        """
+        target_channel = self.target_channel
+
+        if webhook:
+            validate_types({"webhook": (webhook, discord.Webhook)})
+            validate_webhook(webhook, target_channel)
+
         await self.destroy_webhook("Recycling webhook.")
 
         if webhook:
             self._webhook = webhook
         else:
-            target_channel = globals.get_channel_from_id(self._target_id)
             assert isinstance(target_channel, discord.TextChannel | discord.Thread)
             if isinstance(target_channel, discord.Thread):
                 webhook_channel = target_channel.parent
@@ -64,6 +123,17 @@ class Bridge:
         self,
         webhook: discord.Webhook | None = None,
     ) -> None:
+        """Replace this Bridge's webhook, destroying the existing one if possible.
+
+        #### Args:
+            - `webhook`: The webhook to replace this Bridge's webhook with. Defaults to None, in which case this function does nothing.
+
+        #### Raises:
+            - `WebhookChannelError`: `webhook` is not attached to Bridge's target channel.
+            - `HTTPException`: Deleting the existing webhook failed.
+            - `Forbidden`: You do not have permissions to delete the existing webhook.
+            - `ValueError`: Existing webhook does not have a token associated with it.
+        """
         if not webhook:
             return
 
@@ -74,9 +144,19 @@ class Bridge:
 
         #### Args:
             - `reason`: The reason to be stored in the Discord logs. Defaults to "User request.".
+
+        #### Raises:
+            - `HTTPException`: Deleting the webhook failed.
+            - `Forbidden`: You do not have permissions to delete this webhook.
+            - `ValueError`: This webhook does not have a token associated with it.
         """
+        validate_types({"reason": (reason, str)})
+
         if self._webhook:
-            await self._webhook.delete(reason=reason)
+            try:
+                await self._webhook.delete(reason=reason)
+            except discord.NotFound:
+                pass
             self._webhook = None
 
     @property
@@ -84,8 +164,22 @@ class Bridge:
         return self._source_id
 
     @property
+    def source_channel(self) -> discord.TextChannel | discord.Thread:
+        return cast(
+            discord.TextChannel | discord.Thread,
+            globals.get_channel_from_id(self._source_id),
+        )
+
+    @property
     def target_id(self) -> int:
         return self._target_id
+
+    @property
+    def target_channel(self) -> discord.TextChannel | discord.Thread:
+        return cast(
+            discord.TextChannel | discord.Thread,
+            globals.get_channel_from_id(self._target_id),
+        )
 
     @property
     def webhook(self) -> discord.Webhook:
@@ -113,8 +207,16 @@ class Bridges:
         #### Args:
             - `source`: Source channel or ID of same.
             - `target`: Target channel or ID of same.
-        """
 
+        #### Raises:
+            - `ChannelTypeError`: The source or target channels are not text channels nor threads off a text channel.
+            - `WebhookChannelError`: `webhook` is not attached to Bridge's target channel.
+            - `HTTPException`: Deleting an existing webhook or creating a new one failed.
+            - `Forbidden`: You do not have permissions to create or delete webhooks.
+
+        #### Returns:
+            - `Bridge`: The created `Bridge`.
+        """
         source_id = globals.get_id_from_channel(source)
         target_id = globals.get_id_from_channel(target)
         if self._outbound_bridges.get(source_id) and self._outbound_bridges[
@@ -145,7 +247,18 @@ class Bridges:
         #### Args:
             - `source`: Source channel or ID of same.
             - `target`: Target channel or ID of same.
+
+        #### Raises:
+            - `HTTPException`: Deleting the webhook failed.
+            - `Forbidden`: You do not have permissions to delete the webhook.
+            - `ValueError`: The webhook does not have a token associated with it.
         """
+        validate_types(
+            {
+                "source": (source, (discord.TextChannel, discord.Thread, int)),
+                "target": (target, (discord.TextChannel, discord.Thread, int)),
+            }
+        )
 
         source_id = globals.get_id_from_channel(source)
         target_id = globals.get_id_from_channel(target)
@@ -170,6 +283,12 @@ class Bridges:
             - `source`: Source channel or ID of same.
             - `target`: Target channel or ID of same.
         """
+        validate_types(
+            {
+                "source": (source, (discord.TextChannel, discord.Thread, int)),
+                "target": (target, (discord.TextChannel, discord.Thread, int)),
+            }
+        )
 
         source_id = globals.get_id_from_channel(source)
         target_id = globals.get_id_from_channel(target)
@@ -192,6 +311,12 @@ class Bridges:
             - `source`: Source channel or ID of same.
             - `target`: Target channel or ID of same.
         """
+        validate_types(
+            {
+                "source": (source, (discord.TextChannel, discord.Thread, int)),
+                "target": (target, (discord.TextChannel, discord.Thread, int)),
+            }
+        )
 
         return (
             self.get_one_way_bridge(source, target),
@@ -207,6 +332,7 @@ class Bridges:
         #### Args:
             - `source`: Source channel or ID of same.
         """
+        validate_types({"source": (source, (discord.TextChannel, discord.Thread, int))})
 
         return self._outbound_bridges.get(globals.get_id_from_channel(source))
 
@@ -219,6 +345,7 @@ class Bridges:
         #### Args:
             - `target`: Target channel or ID of same.
         """
+        validate_types({"target": (target, (discord.TextChannel, discord.Thread, int))})
 
         return self._inbound_bridges.get(globals.get_id_from_channel(target))
 
