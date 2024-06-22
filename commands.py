@@ -1,4 +1,5 @@
 import asyncio
+
 import discord
 from sqlalchemy import Delete as SQLDelete
 from sqlalchemy import ScalarResult
@@ -11,6 +12,72 @@ from sqlalchemy.orm import Session as SQLSession
 import globals
 from bridge import Bridge, bridges
 from database import DBBridge, DBMessageMap, engine
+
+
+@globals.command_tree.command(
+    name="help",
+    description="Return a list of commands or detailed information about a command.",
+)
+async def help(
+    interaction: discord.Interaction,
+    command: str | None = None,
+):
+    if not command:
+        await interaction.response.send_message(
+            "This bot bridges channels and threads to each other, mirroring messages sent from one to the other. When a message is bridged:"
+            + "\n- its copies will show the avatar and name of the person who wrote the original message;"
+            + "\n- attachments will be copied over;"
+            + "\n- edits to the original message will be reflected in the bridged messages;"
+            + "\n- whenever someone adds a reaction to one message the bot will add the same reaction (if it can) to all of its mirrors;"
+            + "\n- and deleting the original message will delete its copies (but not vice-versa)."
+            + "\nThreads created in a channel do not automatically get matched to other channels bridged to it; create and bridge them manually or use the `/bridge_thread` command."
+            + "\n\nList of commands: `/bridge`, `/outbound`, `/inbound`, `/bridge_thread`, `/demolish`, `/demolish_all`, `/help`.\nType `/help command` for detailed explanation of a command.",
+            ephemeral=True,
+        )
+    else:
+        command = command.lower()
+        if command == "bridge":
+            await interaction.response.send_message(
+                "`/bridge target`"
+                + "\nCreates a two-way bridge between the current channel/thread and target channel/thread. `target` must be a link to another channel or thread, its ID, or a mention to it.",
+                ephemeral=True,
+            )
+        elif command == "outbound":
+            await interaction.response.send_message(
+                "`/outbound target`"
+                + "\nCreates a one-way bridge from the current channel/thread to the target channel/thread, so that messages sent in the current channel will be mirrored there but not vice-versa. `target` must be a link to another channel or thread, its ID, or a mention to it.",
+                ephemeral=True,
+            )
+        elif command == "inbound":
+            await interaction.response.send_message(
+                "`/inbound source`"
+                + "\nCreates a one-way bridge from the source channel/thread to the current channel/thread, so that messages sent in the source channel will be mirrored here but not vice-versa. `source` must be a link to another channel or thread, its ID, or a mention to it.",
+                ephemeral=True,
+            )
+        elif command == "bridge_thread":
+            await interaction.response.send_message(
+                "`/bridge_thread`"
+                + "\nWhen this command is called from within a thread that is in a channel that is bridged to other channels, the bot will attempt to create new threads in all such channels and bridge them to the original one. If the original channel is bridged to threads or if you don't have create thread permissions in the other channels, this command may not run to completion.",
+                ephemeral=True,
+            )
+        elif command == "demolish":
+            await interaction.response.send_message(
+                "`/demolish target`"
+                + "\nDestroys any existing bridges between the current and target channels/threads, making messages from either channel no longer be mirrored to the other. `target` must be a link to another channel or thread, its ID, or a mention to it."
+                + "\n\nNote that even if you recreate any of the bridges, the messages previously bridged will no longer be connected and so they will not share future reactions, edits, or deletions. Note also that this will only destroy bridges to and from the _current specific channel/thread_, not from any threads that spin off it or its parent.",
+                ephemeral=True,
+            )
+        elif command == "demolish_all":
+            await interaction.response.send_message(
+                "`/demolish_all`"
+                + "\nDestroys any existing bridges involving the current channel or thread, making messages from it no longer be mirrored to other channels and making other channels' messages no longer be mirrored to it."
+                + "\n\nNote that even if you recreate any of the bridges, the messages previously bridged will no longer be connected and so they will not share future reactions, edits, or deletions. Note also that this will only destroy bridges to and from the _current specific channel/thread_, not from any threads that spin off it or its parent.",
+                ephemeral=True,
+            )
+        else:
+            await interaction.response.send_message(
+                "Unrecognised command. Type `/help` for the full list.", ephemeral=True
+            )
 
 
 @discord.app_commands.guild_only()
