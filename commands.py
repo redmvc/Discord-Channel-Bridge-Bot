@@ -115,11 +115,13 @@ async def bridge(
 
     assert isinstance(interaction.user, discord.Member)
     assert interaction.guild
+    target_channel_user = target_channel.guild.get_member(interaction.user.id)
     if (
         not message_channel.permissions_for(interaction.user).manage_webhooks
-        or not target_channel.permissions_for(interaction.user).manage_webhooks
+        or not target_channel_user
+        or not target_channel.permissions_for(target_channel_user).manage_webhooks
         or not message_channel.permissions_for(interaction.guild.me).manage_webhooks
-        or not target_channel.permissions_for(interaction.guild.me).manage_webhooks
+        or not target_channel.permissions_for(target_channel.guild.me).manage_webhooks
     ):
         await interaction.response.send_message(
             "Please make sure both you and the bot have 'Manage Webhooks' permission in both this and target channels.",
@@ -187,11 +189,13 @@ async def outbound(
 
     assert isinstance(interaction.user, discord.Member)
     assert interaction.guild
+    target_channel_user = target_channel.guild.get_member(interaction.user.id)
     if (
         not message_channel.permissions_for(interaction.user).manage_webhooks
-        or not target_channel.permissions_for(interaction.user).manage_webhooks
+        or not target_channel_user
+        or not target_channel.permissions_for(target_channel_user).manage_webhooks
         or not message_channel.permissions_for(interaction.guild.me).manage_webhooks
-        or not target_channel.permissions_for(interaction.guild.me).manage_webhooks
+        or not target_channel.permissions_for(target_channel.guild.me).manage_webhooks
     ):
         await interaction.response.send_message(
             "Please make sure both you and the bot have 'Manage Webhooks' permission in both this and target channels.",
@@ -242,11 +246,13 @@ async def inbound(
 
     assert isinstance(interaction.user, discord.Member)
     assert interaction.guild
+    source_channel_user = source_channel.guild.get_member(interaction.user.id)
     if (
         not message_channel.permissions_for(interaction.user).manage_webhooks
-        or not source_channel.permissions_for(interaction.user).manage_webhooks
+        or not source_channel_user
+        or not source_channel.permissions_for(source_channel_user).manage_webhooks
         or not message_channel.permissions_for(interaction.guild.me).manage_webhooks
-        or not source_channel.permissions_for(interaction.guild.me).manage_webhooks
+        or not source_channel.permissions_for(source_channel.guild.me).manage_webhooks
     ):
         await interaction.response.send_message(
             "Please make sure both you and the bot have 'Manage Webhooks' permission in both this and source channels.",
@@ -363,14 +369,14 @@ async def bridge_thread(
                     failed_at_least_once = True
                     continue
 
+                channel_user = channel.guild.get_member(interaction.user.id)
                 if (
-                    not channel.permissions_for(interaction.user).manage_webhooks
+                    not channel_user
+                    or not channel.permissions_for(channel_user).manage_webhooks
+                    or not channel.permissions_for(channel_user).create_public_threads
+                    or not channel.permissions_for(channel.guild.me).manage_webhooks
                     or not channel.permissions_for(
-                        interaction.user
-                    ).create_public_threads
-                    or not channel.permissions_for(interaction.guild.me).manage_webhooks
-                    or not channel.permissions_for(
-                        interaction.guild.me
+                        channel.guild.me
                     ).create_public_threads
                 ):
                     # User doesn't have permission to act there
@@ -468,11 +474,13 @@ async def demolish(
 
     assert isinstance(interaction.user, discord.Member)
     assert interaction.guild
+    target_channel_user = target_channel.guild.get_member(interaction.user.id)
     if (
         not message_channel.permissions_for(interaction.user).manage_webhooks
-        or not target_channel.permissions_for(interaction.user).manage_webhooks
+        or not target_channel_user
+        or not target_channel.permissions_for(target_channel_user).manage_webhooks
         or not message_channel.permissions_for(interaction.guild.me).manage_webhooks
-        or not target_channel.permissions_for(interaction.guild.me).manage_webhooks
+        or not target_channel.permissions_for(target_channel.guild.me).manage_webhooks
     ):
         await interaction.response.send_message(
             "Please make sure both you and the bot have 'Manage Webhooks' permission in both this and target channels.",
@@ -580,10 +588,14 @@ async def demolish_all(
         for target_id in outbound_bridges.keys():
             target_channel = globals.get_channel_from_id(target_id)
             assert isinstance(target_channel, (discord.TextChannel, discord.Thread))
+            target_channel_user = target_channel.guild.get_member(interaction.user.id)
             if (
-                not target_channel.permissions_for(interaction.user).manage_webhooks
+                not target_channel_user
                 or not target_channel.permissions_for(
-                    interaction.guild.me
+                    target_channel_user
+                ).manage_webhooks
+                or not target_channel.permissions_for(
+                    target_channel.guild.me
                 ).manage_webhooks
             ):
                 # If I don't have Manage Webhooks permission in the target, I can't destroy the bridge from there
