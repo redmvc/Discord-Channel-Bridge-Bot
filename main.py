@@ -185,10 +185,33 @@ async def on_message(message: discord.Message):
             replied_message = await target_channel.fetch_message(
                 reply_bridges[target_id]
             )
+
+            def truncate(msg: str, length: int) -> str:
+                return msg if len(msg) < length else msg[: length - 1] + "…"
+
+            display_name = discord.utils.escape_markdown(
+                replied_message.author.display_name
+            )
+
+            replied_content = truncate(
+                discord.utils.remove_markdown(replied_message.clean_content),
+                50,
+            )
             reply_embed = [
-                discord.Embed(
-                    description=f"Reply to [{replied_message.author.display_name}]({replied_message.jump_url})"
-                )
+                discord.Embed.from_dict(
+                    {
+                        "type": "rich",
+                        "url": replied_message.jump_url,
+                        "thumbnail": {
+                            "url": replied_message.author.display_avatar.replace(
+                                size=18
+                            ).url,
+                            "height": 18,
+                            "width": 18,
+                        },
+                        "description": f"**[↪]({replied_message.jump_url}) {display_name}**  {replied_content}",
+                    }
+                ),
             ]
         else:
             reply_embed = []
