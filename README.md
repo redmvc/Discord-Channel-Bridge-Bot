@@ -17,7 +17,7 @@ To add this bot to your server, visit [this link](https://discord.com/oauth2/aut
   - You can run the command `/demolish_all` to demolish all bridges to and from the current channel.
 - `/help` will give you a list of commands. `/help command_name` will explain the usage of the specific command passed as argument.
   - You can pass this command in DM to the bot, too.
-- Right clicking a message and going to Apps > List Reactions will show you a list of all reactions on all sides of the bridge.
+<!-- - Right clicking a message and going to Apps > List Reactions will show you a list of all reactions on all sides of the bridge. -->
 
 ### Help, issues, and bugs
 

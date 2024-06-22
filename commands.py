@@ -553,121 +553,121 @@ async def demolish_bridge_one_sided(
     await bridges.demolish_bridge(source, target)
 
 
-@globals.command_tree.context_menu(
-    name="List Reactions",
-)
-async def list_reactions(interaction: discord.Interaction, message: discord.Message):
-    """List all reactions and users who reacted on all sides of a bridge."""
-    channel = message.channel
-    if not isinstance(channel, (discord.TextChannel, discord.Thread)):
-        await interaction.response.send_message(
-            "Please run this command from a text channel or a thread.", ephemeral=True
-        )
-        return
+# @globals.command_tree.context_menu(
+#     name="List Reactions",
+# )
+# async def list_reactions(interaction: discord.Interaction, message: discord.Message):
+#     """List all reactions and users who reacted on all sides of a bridge."""
+#     channel = message.channel
+#     if not isinstance(channel, (discord.TextChannel, discord.Thread)):
+#         await interaction.response.send_message(
+#             "Please run this command from a text channel or a thread.", ephemeral=True
+#         )
+#         return
 
-    inbound_bridges = bridges.get_inbound_bridges(channel.id)
-    outbound_bridges = bridges.get_outbound_bridges(channel.id)
-    if not inbound_bridges and not outbound_bridges:
-        await interaction.response.send_message(
-            "This channel isn't bridged.", ephemeral=True
-        )
-        return
+#     inbound_bridges = bridges.get_inbound_bridges(channel.id)
+#     outbound_bridges = bridges.get_outbound_bridges(channel.id)
+#     if not inbound_bridges and not outbound_bridges:
+#         await interaction.response.send_message(
+#             "This channel isn't bridged.", ephemeral=True
+#         )
+#         return
 
-    await interaction.response.defer(thinking=True, ephemeral=True)
+#     await interaction.response.defer(thinking=True, ephemeral=True)
 
-    bot_user_id = globals.client.user.id if globals.client.user else 0
+#     bot_user_id = globals.client.user.id if globals.client.user else 0
 
-    # First get the reactions on this message itself
-    all_reactions: dict[str, set[int]] = {}
-    msg_reaction_users = [
-        (reaction, reaction.users()) for reaction in message.reactions
-    ]
-    for reaction, users in msg_reaction_users:
-        reaction_emoji_id = str(reaction.emoji)
+#     # First get the reactions on this message itself
+#     all_reactions: dict[str, set[int]] = {}
+#     msg_reaction_users = [
+#         (reaction, reaction.users()) for reaction in message.reactions
+#     ]
+#     for reaction, users in msg_reaction_users:
+#         reaction_emoji_id = str(reaction.emoji)
 
-        if not all_reactions.get(reaction_emoji_id):
-            all_reactions[reaction_emoji_id] = set()
+#         if not all_reactions.get(reaction_emoji_id):
+#             all_reactions[reaction_emoji_id] = set()
 
-        async for user in users:
-            if user.id != bot_user_id:
-                all_reactions[reaction_emoji_id].add(user.id)
+#         async for user in users:
+#             if user.id != bot_user_id:
+#                 all_reactions[reaction_emoji_id].add(user.id)
 
-    # Then get the bridged ones
-    session = SQLSession(engine)
-    # We need to see whether this message is a bridged message and, if so, find its source
-    source_message_map = session.scalars(
-        SQLSelect(DBMessageMap).where(
-            DBMessageMap.target_message == str(message.id),
-        )
-    ).first()
-    source_message_id: int | None = None
-    message_id_to_skip: int | None = None
-    if isinstance(source_message_map, DBMessageMap):
-        # This message was bridged, so find the original one and then find any other bridged messages from it
-        source_channel = globals.get_channel_from_id(
-            int(source_message_map.source_channel)
-        )
-        if source_channel:
-            source_channel_id = source_channel.id
-            source_message_id = int(source_message_map.source_message)
-            message_id_to_skip = message.id
-    else:
-        # This message is (or might be) the source
-        source_message_id = message.id
-        source_channel_id = channel.id
+#     # Then get the bridged ones
+#     session = SQLSession(engine)
+#     # We need to see whether this message is a bridged message and, if so, find its source
+#     source_message_map = session.scalars(
+#         SQLSelect(DBMessageMap).where(
+#             DBMessageMap.target_message == str(message.id),
+#         )
+#     ).first()
+#     source_message_id: int | None = None
+#     message_id_to_skip: int | None = None
+#     if isinstance(source_message_map, DBMessageMap):
+#         # This message was bridged, so find the original one and then find any other bridged messages from it
+#         source_channel = globals.get_channel_from_id(
+#             int(source_message_map.source_channel)
+#         )
+#         if source_channel:
+#             source_channel_id = source_channel.id
+#             source_message_id = int(source_message_map.source_message)
+#             message_id_to_skip = message.id
+#     else:
+#         # This message is (or might be) the source
+#         source_message_id = message.id
+#         source_channel_id = channel.id
 
-    # Then we find all messages bridged from the source
-    outbound_bridges = bridges.get_outbound_bridges(source_channel_id)
-    if not outbound_bridges:
-        # If there are no outbound bridges we just skip over the next bit and get to the end
-        source_message_id = None
+#     # Then we find all messages bridged from the source
+#     outbound_bridges = bridges.get_outbound_bridges(source_channel_id)
+#     if not outbound_bridges:
+#         # If there are no outbound bridges we just skip over the next bit and get to the end
+#         source_message_id = None
 
-    bridged_messages: ScalarResult[DBMessageMap] = session.scalars(
-        SQLSelect(DBMessageMap).where(
-            sql_and(
-                DBMessageMap.source_message == str(source_message_id),
-                DBMessageMap.target_message != str(message_id_to_skip),
-            )
-        )
-    )
-    for message_row in bridged_messages:
-        target_message_id = int(message_row.target_message)
-        target_channel_id = int(message_row.target_channel)
+#     bridged_messages: ScalarResult[DBMessageMap] = session.scalars(
+#         SQLSelect(DBMessageMap).where(
+#             sql_and(
+#                 DBMessageMap.source_message == str(source_message_id),
+#                 DBMessageMap.target_message != str(message_id_to_skip),
+#             )
+#         )
+#     )
+#     for message_row in bridged_messages:
+#         target_message_id = int(message_row.target_message)
+#         target_channel_id = int(message_row.target_channel)
 
-        if not outbound_bridges or not outbound_bridges.get(target_channel_id):
-            continue
+#         if not outbound_bridges or not outbound_bridges.get(target_channel_id):
+#             continue
 
-        bridged_channel = globals.get_channel_from_id(target_channel_id)
-        if not isinstance(bridged_channel, (discord.TextChannel, discord.Thread)):
-            continue
+#         bridged_channel = globals.get_channel_from_id(target_channel_id)
+#         if not isinstance(bridged_channel, (discord.TextChannel, discord.Thread)):
+#             continue
 
-        bridged_message = await bridged_channel.fetch_message(target_message_id)
-        bridged_reaction_users = [
-            (reaction, reaction.users()) for reaction in bridged_message.reactions
-        ]
-        for reaction, reaction_users in bridged_reaction_users:
-            reaction_emoji_id = str(reaction.emoji)
+#         bridged_message = await bridged_channel.fetch_message(target_message_id)
+#         bridged_reaction_users = [
+#             (reaction, reaction.users()) for reaction in bridged_message.reactions
+#         ]
+#         for reaction, reaction_users in bridged_reaction_users:
+#             reaction_emoji_id = str(reaction.emoji)
 
-            if not all_reactions.get(reaction_emoji_id):
-                all_reactions[reaction_emoji_id] = set()
+#             if not all_reactions.get(reaction_emoji_id):
+#                 all_reactions[reaction_emoji_id] = set()
 
-            async for user in reaction_users:
-                if user.id != bot_user_id:
-                    all_reactions[reaction_emoji_id].add(user.id)
+#             async for user in reaction_users:
+#                 if user.id != bot_user_id:
+#                     all_reactions[reaction_emoji_id].add(user.id)
 
-    session.close()
+#     session.close()
 
-    if len(all_reactions) == 0:
-        await interaction.followup.send("This message doesn't have any reactions.")
-        return
+#     if len(all_reactions) == 0:
+#         await interaction.followup.send("This message doesn't have any reactions.")
+#         return
 
-    await interaction.followup.send(
-        "This message has the following reactions:\n"
-        + "\n\n".join(
-            [
-                f"{reaction_emoji_id} "
-                + " ".join([f"<@{user_id}>" for user_id in reaction_user_ids])
-                for reaction_emoji_id, reaction_user_ids in all_reactions.items()
-            ]
-        ),
-    )
+#     await interaction.followup.send(
+#         "This message has the following reactions:\n"
+#         + "\n\n".join(
+#             [
+#                 f"{reaction_emoji_id} "
+#                 + " ".join([f"<@{user_id}>" for user_id in reaction_user_ids])
+#                 for reaction_emoji_id, reaction_user_ids in all_reactions.items()
+#             ]
+#         ),
+#     )
