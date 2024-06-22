@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from io import BytesIO
 from typing import TypedDict, cast
 
 import discord
@@ -196,9 +195,7 @@ async def on_message(message: discord.Message):
 
         attachments = []
         for attachment in message.attachments:
-            buffer = BytesIO()
-            await attachment.save(buffer)
-            attachments.append(discord.File(buffer, attachment.filename))
+            attachments.append(await attachment.to_file())
 
         thread_splat: ThreadSplat = {}
         if target_id != webhook_channel.id:
