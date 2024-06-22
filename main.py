@@ -120,6 +120,38 @@ async def on_message(message: discord.Message):
     if not outbound_bridges:
         return
 
+    session = SQLSession(engine)
+    reply_bridges: dict[int, int] = {}
+    if message.reference:
+        # This message is a reply to another message, so we should try to link to its match on the other side of bridges
+        # reply_bridges will be a dict whose keys are channel IDs and whose values are the IDs of messages matching the message I'm replying to in those channels
+        reply_id = message.reference.message_id
+
+        # First, check whether the message replied to was itself bridged from somewhere
+        reply_source_match = session.scalars(
+            SQLSelect(DBMessageMap).where(DBMessageMap.target_message == str(reply_id))
+        ).first()
+        if isinstance(reply_source_match, DBMessageMap):
+            # So the message replied to was bridged from elsewhere
+            reply_source_id = int(reply_source_match.source_message)
+            reply_source_channel_id = int(reply_source_match.source_channel)
+            reply_bridges[reply_source_channel_id] = reply_source_id
+        else:
+            # The message this is replying to might have been the source of a bridge, not the target
+            reply_source_id = reply_id
+            reply_source_channel_id = message.channel.id
+
+        # Now find all other bridged versions of the message we're replying to
+        reply_bridge_match: ScalarResult[DBMessageMap] = session.scalars(
+            SQLSelect(DBMessageMap).where(
+                DBMessageMap.source_message == str(reply_source_id)
+            )
+        )
+        for message_match in reply_bridge_match:
+            reply_bridges[int(message_match.target_channel)] = int(
+                message_match.target_message
+            )
+
     # Send a message out to each target webhook
     bridged_message_ids = []
     bridged_channel_ids = list(outbound_bridges.keys())
@@ -146,12 +178,26 @@ async def on_message(message: discord.Message):
             tgt_member_name = message.author.display_name
             tgt_avatar_url = message.author.display_avatar
 
+        if reply_bridges.get(target_id):
+            # This message is replying to a message that is bridged
+            target_channel = globals.get_channel_from_id(target_id)
+            target_channel = cast(discord.TextChannel | discord.Thread, target_channel)
+            replied_message = await target_channel.fetch_message(
+                reply_bridges[target_id]
+            )
+            reply_embed = [
+                discord.Embed(
+                    description=f"Reply to [{replied_message.author.display_name}]({replied_message.jump_url})"
+                )
+            ]
+        else:
+            reply_embed = []
+
         thread_splat: ThreadSplat = {}
         if target_id != webhook_channel.id:
             thread = webhook_channel.get_thread(target_id)
             assert thread
             thread_splat = {"thread": thread}
-
         bridged_message = await webhook.send(
             content=message.content,
             allowed_mentions=discord.AllowedMentions(
@@ -159,19 +205,18 @@ async def on_message(message: discord.Message):
             ),
             avatar_url=tgt_avatar_url,
             username=tgt_member_name,
+            embeds=list(message.embeds + reply_embed),
             wait=True,
             **thread_splat,
         )
 
         bridged_message_ids.append(bridged_message.id)
 
-        # TODO replies
-
     if len(bridged_message_ids) == 0:
+        session.close()
         return
 
     # Insert references to the linked messages into the message_mappings table
-    session = SQLSession(engine)
     source_message_id = str(message.id)
     source_channel_id = str(message.channel.id)
     session.add_all(
