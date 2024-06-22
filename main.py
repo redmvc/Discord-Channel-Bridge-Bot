@@ -353,11 +353,17 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
                     continue
                 thread_splat = {"thread": bridged_channel}
 
-            await bridge.webhook.edit_message(
-                message_id=int(message_row.target_message),
-                content=updated_message_content,
-                **thread_splat,
-            )
+            try:
+                await bridge.webhook.edit_message(
+                    message_id=int(message_row.target_message),
+                    content=updated_message_content,
+                    **thread_splat,
+                )
+            except discord.HTTPException as e:
+                warn(
+                    "Ran into a Discord exception while trying to edit a message across a bridge:\n"
+                    + str(e)
+                )
     except SQLError as e:
         warn("Ran into an SQL error while trying to edit a message:\n" + str(e))
 
@@ -408,10 +414,16 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
                     continue
                 thread_splat = {"thread": bridged_channel}
 
-            await bridge.webhook.delete_message(
-                int(message_row.target_message),
-                **thread_splat,
-            )
+            try:
+                await bridge.webhook.delete_message(
+                    int(message_row.target_message),
+                    **thread_splat,
+                )
+            except discord.HTTPException as e:
+                warn(
+                    "Ran into a Discord exception while trying to delete a message across a bridge:\n"
+                    + str(e)
+                )
 
         # If the message was bridged, delete its row
         # If it was a source of bridged messages, delete all rows of its bridged versions
@@ -493,9 +505,15 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
             assert isinstance(source_channel, (discord.TextChannel, discord.Thread))
 
             source_message_id = int(source_message_map.source_message)
-            source_message = await source_channel.fetch_message(source_message_id)
-            if source_message:
-                await source_message.add_reaction(reaction_emoji)
+            try:
+                source_message = await source_channel.fetch_message(source_message_id)
+                if source_message:
+                    await source_message.add_reaction(reaction_emoji)
+            except discord.HTTPException as e:
+                warn(
+                    "Ran into a Discord exception while trying to add a reaction across a bridge:\n"
+                    + str(e)
+                )
 
             message_id_to_skip = (
                 payload.message_id
@@ -529,8 +547,14 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
             if not isinstance(bridged_channel, (discord.TextChannel, discord.Thread)):
                 continue
 
-            bridged_message = await bridged_channel.fetch_message(target_message_id)
-            await bridged_message.add_reaction(reaction_emoji)
+            try:
+                bridged_message = await bridged_channel.fetch_message(target_message_id)
+                await bridged_message.add_reaction(reaction_emoji)
+            except discord.HTTPException as e:
+                warn(
+                    "Ran into a Discord exception while trying to add a reaction across a bridge:\n"
+                    + str(e)
+                )
     except SQLError as e:
         if session:
             session.close()
