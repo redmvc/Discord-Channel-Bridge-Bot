@@ -295,39 +295,34 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
         return
 
     outbound_bridges = bridges.get_outbound_bridges(payload.channel_id)
-    inbound_bridges = bridges.get_inbound_bridges(payload.channel_id)
-    if not outbound_bridges and not inbound_bridges:
+    if not outbound_bridges:
         return
 
     # Find all messages matching this one
     session = SQLSession(engine)
+    bridged_messages: ScalarResult[DBMessageMap] = session.scalars(
+        SQLSelect(DBMessageMap).where(DBMessageMap.source_message == payload.message_id)
+    )
+    for message_row in bridged_messages:
+        target_channel_id = int(message_row.target_channel)
+        bridge = outbound_bridges.get(target_channel_id)
+        if not bridge:
+            continue
 
-    if outbound_bridges:
-        bridged_messages: ScalarResult[DBMessageMap] = session.scalars(
-            SQLSelect(DBMessageMap).where(
-                DBMessageMap.source_message == payload.message_id
-            )
+        bridged_channel = globals.get_channel_from_id(target_channel_id)
+        if not isinstance(bridged_channel, (discord.TextChannel, discord.Thread)):
+            continue
+
+        thread_splat: ThreadSplat = {}
+        if isinstance(bridged_channel, discord.Thread):
+            if not isinstance(bridged_channel.parent, discord.TextChannel):
+                continue
+            thread_splat = {"thread": bridged_channel}
+
+        await bridge.webhook.delete_message(
+            int(message_row.target_message),
+            **thread_splat,
         )
-        for message_row in bridged_messages:
-            target_channel_id = int(message_row.target_channel)
-            bridge = outbound_bridges.get(target_channel_id)
-            if not bridge:
-                continue
-
-            bridged_channel = globals.get_channel_from_id(target_channel_id)
-            if not isinstance(bridged_channel, (discord.TextChannel, discord.Thread)):
-                continue
-
-            thread_splat: ThreadSplat = {}
-            if isinstance(bridged_channel, discord.Thread):
-                if not isinstance(bridged_channel.parent, discord.TextChannel):
-                    continue
-                thread_splat = {"thread": bridged_channel}
-
-            await bridge.webhook.delete_message(
-                int(message_row.target_message),
-                **thread_splat,
-            )
 
     # If the message was bridged, delete its row
     # If it was a source of bridged messages, delete all rows of its bridged versions
