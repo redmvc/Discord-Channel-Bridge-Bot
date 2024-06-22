@@ -128,16 +128,16 @@ async def on_message(message: discord.Message):
         if not webhook:
             continue
 
-        target_channel = webhook.channel
-        if not target_channel:
+        webhook_channel = webhook.channel
+        if not webhook_channel:
             continue
 
-        assert isinstance(target_channel, discord.TextChannel)
+        assert isinstance(webhook_channel, discord.TextChannel)
 
         # attachments = []  # TODO
-        # should_spoiler = message.channel.is_nsfw() and not target_channel.is_nsfw()
+        # should_spoiler = message.channel.is_nsfw() and not webhook_channel.is_nsfw()
 
-        tgt_member = target_channel.guild.get_member(message.author.id)
+        tgt_member = webhook_channel.guild.get_member(message.author.id)
         if tgt_member:
             tgt_member_name = tgt_member.display_name
             tgt_avatar_url = tgt_member.display_avatar
@@ -146,8 +146,8 @@ async def on_message(message: discord.Message):
             tgt_avatar_url = message.author.display_avatar
 
         thread_splat: ThreadSplat = {}
-        if target_id != target_channel.id:
-            thread = target_channel.get_thread(target_id)
+        if target_id != webhook_channel.id:
+            thread = webhook_channel.get_thread(target_id)
             assert thread
             thread_splat = {"thread": thread}
 
