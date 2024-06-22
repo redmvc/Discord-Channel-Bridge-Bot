@@ -161,10 +161,11 @@ async def on_message(message: discord.Message):
             continue
 
         webhook_channel = webhook.channel
-        if not webhook_channel:
+        if not isinstance(webhook_channel, discord.TextChannel):
             continue
 
-        assert isinstance(webhook_channel, discord.TextChannel)
+        target_channel = globals.get_channel_from_id(target_id)
+        target_channel = cast(discord.TextChannel | discord.Thread, target_channel)
 
         # attachments = []  # TODO
         # should_spoiler = message.channel.is_nsfw() and not webhook_channel.is_nsfw()
@@ -180,8 +181,6 @@ async def on_message(message: discord.Message):
 
         if reply_bridges.get(target_id):
             # This message is replying to a message that is bridged
-            target_channel = globals.get_channel_from_id(target_id)
-            target_channel = cast(discord.TextChannel | discord.Thread, target_channel)
             replied_message = await target_channel.fetch_message(
                 reply_bridges[target_id]
             )
@@ -195,9 +194,9 @@ async def on_message(message: discord.Message):
 
         thread_splat: ThreadSplat = {}
         if target_id != webhook_channel.id:
-            thread = webhook_channel.get_thread(target_id)
-            assert thread
-            thread_splat = {"thread": thread}
+            if not isinstance(target_channel, discord.Thread):
+                continue
+            thread_splat = {"thread": target_channel}
         bridged_message = await webhook.send(
             content=message.content,
             allowed_mentions=discord.AllowedMentions(
