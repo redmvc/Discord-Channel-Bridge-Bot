@@ -130,7 +130,8 @@ async def bridge(
         or not target_channel.permissions_for(interaction.guild.me).manage_webhooks
     ):
         await interaction.response.send_message(
-            "Please make sure the bot has 'Manage Webhooks' permission in both this and target channels."
+            "Please make sure the bot has 'Manage Webhooks' permission in both this and target channels.",
+            ephemeral=True,
         )
         return
 
