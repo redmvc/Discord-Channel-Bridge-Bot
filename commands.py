@@ -575,9 +575,8 @@ async def create_bridge_and_db(
     #### Returns:
         - `Bridge`: The created `Bridge`.
     """
-    validate_types({"session": (session, discord.Webhook)})
-
-    bridge = await create_bridge(source, target, webhook)
+    if webhook:
+        validate_types({"webhook": (webhook, discord.Webhook)})
 
     if not session:
         close_after = True
