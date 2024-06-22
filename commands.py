@@ -93,7 +93,7 @@ async def bridge(
     message_channel = interaction.channel
     if not isinstance(message_channel, (discord.TextChannel, discord.Thread)):
         await interaction.response.send_message(
-            "Please run this command from a text channel or a thread."
+            "Please run this command from a text channel or a thread.", ephemeral=True
         )
         return
 
@@ -101,12 +101,15 @@ async def bridge(
     if not isinstance(target_channel, (discord.TextChannel, discord.Thread)):
         # The argument passed needs to be a channel or thread
         await interaction.response.send_message(
-            "Unsupported argument passed. Please pass a channel reference, ID, or link."
+            "Unsupported argument passed. Please pass a channel reference, ID, or link.",
+            ephemeral=True,
         )
         return
 
     if target_channel.id == message_channel.id:
-        await interaction.response.send_message("You can't bridge a channel to itself.")
+        await interaction.response.send_message(
+            "You can't bridge a channel to itself.", ephemeral=True
+        )
         return
 
     assert isinstance(interaction.user, discord.Member)
@@ -115,7 +118,8 @@ async def bridge(
         or not target_channel.permissions_for(interaction.user).manage_webhooks
     ):
         await interaction.response.send_message(
-            "Please make sure you have 'Manage Webhooks' permission in both this and target channels."
+            "Please make sure you have 'Manage Webhooks' permission in both this and target channels.",
+            ephemeral=True,
         )
         return
 
@@ -143,7 +147,7 @@ async def outbound(
     message_channel = interaction.channel
     if not isinstance(message_channel, (discord.TextChannel, discord.Thread)):
         await interaction.response.send_message(
-            "Please run this command from a text channel or a thread."
+            "Please run this command from a text channel or a thread.", ephemeral=True
         )
         return
 
@@ -151,12 +155,15 @@ async def outbound(
     if not isinstance(target_channel, (discord.TextChannel, discord.Thread)):
         # The argument passed needs to be a channel or thread
         await interaction.response.send_message(
-            "Unsupported argument passed. Please pass a channel reference, ID, or link."
+            "Unsupported argument passed. Please pass a channel reference, ID, or link.",
+            ephemeral=True,
         )
         return
 
     if target_channel.id == message_channel.id:
-        await interaction.response.send_message("You can't bridge a channel to itself.")
+        await interaction.response.send_message(
+            "You can't bridge a channel to itself.", ephemeral=True
+        )
         return
 
     assert isinstance(interaction.user, discord.Member)
@@ -165,7 +172,8 @@ async def outbound(
         or not target_channel.permissions_for(interaction.user).manage_webhooks
     ):
         await interaction.response.send_message(
-            "Please make sure you have 'Manage Webhooks' permission in both this and target channels."
+            "Please make sure you have 'Manage Webhooks' permission in both this and target channels.",
+            ephemeral=True,
         )
         return
 
@@ -188,7 +196,7 @@ async def inbound(
     message_channel = interaction.channel
     if not isinstance(message_channel, (discord.TextChannel, discord.Thread)):
         await interaction.response.send_message(
-            "Please run this command from a text channel or a thread."
+            "Please run this command from a text channel or a thread.", ephemeral=True
         )
         return
 
@@ -196,12 +204,15 @@ async def inbound(
     if not isinstance(source_channel, (discord.TextChannel, discord.Thread)):
         # The argument passed needs to be a channel or thread
         await interaction.response.send_message(
-            "Unsupported argument passed. Please pass a channel reference, ID, or link."
+            "Unsupported argument passed. Please pass a channel reference, ID, or link.",
+            ephemeral=True,
         )
         return
 
     if source_channel.id == message_channel.id:
-        await interaction.response.send_message("You can't bridge a channel to itself.")
+        await interaction.response.send_message(
+            "You can't bridge a channel to itself.", ephemeral=True
+        )
         return
 
     assert isinstance(interaction.user, discord.Member)
@@ -210,7 +221,8 @@ async def inbound(
         or not source_channel.permissions_for(interaction.user).manage_webhooks
     ):
         await interaction.response.send_message(
-            "Please make sure you have 'Manage Webhooks' permission in both this and target channels."
+            "Please make sure you have 'Manage Webhooks' permission in both this and target channels.",
+            ephemeral=True,
         )
         return
 
@@ -232,20 +244,21 @@ async def bridge_thread(
     message_thread = interaction.channel
     if not isinstance(message_thread, discord.Thread):
         await interaction.response.send_message(
-            "Please run this command from a thread."
+            "Please run this command from a thread.", ephemeral=True
         )
         return
 
     if not isinstance(message_thread.parent, discord.TextChannel):
         await interaction.response.send_message(
-            "Please run this command from a thread off a text channel."
+            "Please run this command from a thread off a text channel.", ephemeral=True
         )
         return
 
     assert isinstance(interaction.user, discord.Member)
     if not message_thread.permissions_for(interaction.user).manage_webhooks:
         await interaction.response.send_message(
-            "Please make sure you have 'Manage Webhooks' permission in this channel."
+            "Please make sure you have 'Manage Webhooks' permission in this channel.",
+            ephemeral=True,
         )
         return
 
@@ -253,7 +266,7 @@ async def bridge_thread(
     inbound_bridges = bridges.get_inbound_bridges(message_thread.parent.id)
     if not outbound_bridges and not inbound_bridges:
         await interaction.response.send_message(
-            "The parent channel isn't bridged to any other channels."
+            "The parent channel isn't bridged to any other channels.", ephemeral=True
         )
         return
 
@@ -354,14 +367,16 @@ async def bridge_thread(
 
     if succeeded_at_least_once:
         if not failed_at_least_once:
-            await interaction.followup.send("✅ All threads created!")
+            await interaction.followup.send("✅ All threads created!", ephemeral=True)
         else:
             await interaction.followup.send(
                 "⭕ Some but not all threads were created; this may have happened because you lacked Manage Webhooks or Create Public Threads permissions. Note that trying to run this command again will duplicate threads.",
+                ephemeral=True,
             )
     else:
         await interaction.followup.send(
-            "❌ Couldn't create any threads. Check that you have Manage Webhooks and Create Public Threads permissions in all relevant channels."
+            "❌ Couldn't create any threads. Check that you have Manage Webhooks and Create Public Threads permissions in all relevant channels.",
+            ephemeral=True,
         )
 
     session.commit()
@@ -380,7 +395,7 @@ async def demolish(
     message_channel = interaction.channel
     if not isinstance(message_channel, (discord.TextChannel, discord.Thread)):
         await interaction.response.send_message(
-            "Please run this command from a text channel or a thread."
+            "Please run this command from a text channel or a thread.", ephemeral=True
         )
         return
 
@@ -388,7 +403,8 @@ async def demolish(
     if not isinstance(target_channel, (discord.TextChannel, discord.Thread)):
         # The argument passed needs to be a channel or thread
         await interaction.response.send_message(
-            "Unsupported argument passed. Please pass a channel reference, ID, or link."
+            "Unsupported argument passed. Please pass a channel reference, ID, or link.",
+            ephemeral=True,
         )
         return
 
@@ -398,7 +414,8 @@ async def demolish(
         or not target_channel.permissions_for(interaction.user).manage_webhooks
     ):
         await interaction.response.send_message(
-            "Please make sure you have 'Manage Webhooks' permission in both this and target channels."
+            "Please make sure you have 'Manage Webhooks' permission in both this and target channels.",
+            ephemeral=True,
         )
         return
 
@@ -457,14 +474,15 @@ async def demolish_all(
     message_channel = interaction.channel
     if not isinstance(message_channel, (discord.TextChannel, discord.Thread)):
         await interaction.response.send_message(
-            "Please run this command from a text channel or a thread."
+            "Please run this command from a text channel or a thread.", ephemeral=True
         )
         return
 
     assert isinstance(interaction.user, discord.Member)
     if not message_channel.permissions_for(interaction.user).manage_webhooks:
         await interaction.response.send_message(
-            "Please make sure you have 'Manage Webhooks' permission in this channel."
+            "Please make sure you have 'Manage Webhooks' permission in this channel.",
+            ephemeral=True,
         )
         return
 
@@ -756,7 +774,7 @@ async def demolish_bridge_one_sided(
 #     session.close()
 
 #     if len(all_reactions) == 0:
-#         await interaction.followup.send("This message doesn't have any reactions.")
+#         await interaction.followup.send("This message doesn't have any reactions.", ephemeral=True)
 #         return
 
 #     await interaction.followup.send(
@@ -768,4 +786,5 @@ async def demolish_bridge_one_sided(
 #                 for reaction_emoji_id, reaction_user_ids in all_reactions.items()
 #             ]
 #         ),
+#         ephemeral=True,
 #     )
