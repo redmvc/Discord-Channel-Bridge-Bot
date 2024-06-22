@@ -26,19 +26,6 @@ class Bridge:
         target: discord.TextChannel | discord.Thread | int,
         webhook: discord.Webhook | None = None,
     ):
-        if not isinstance(source, (discord.TextChannel, discord.Thread, int)):
-            raise TypeError(
-                "source must be TextChannel, Thread, or int, not "
-                + type(source).__name__
-            )
-        elif not isinstance(target, (discord.TextChannel, discord.Thread, int)):
-            raise TypeError(
-                "target must be TextChannel, Thread, or int, not "
-                + type(target).__name__
-            )
-        elif webhook and not isinstance(webhook, discord.Webhook):
-            raise TypeError("webhook must be Webhook, not " + type(webhook).__name__)
-
         self = cls(source, target)
         await self.add_webhook(webhook)
         return self
@@ -93,8 +80,6 @@ class Bridge:
     ) -> None:
         if not webhook:
             return
-        elif not isinstance(webhook, discord.Webhook):
-            raise TypeError("webhook must be Webhook, not " + type(webhook).__name__)
 
         await self.add_webhook(webhook)
 
@@ -146,19 +131,6 @@ class Bridges:
             - `source`: Source channel or ID of same.
             - `target`: Target channel or ID of same.
         """
-        if not isinstance(source, (discord.TextChannel, discord.Thread, int)):
-            raise TypeError(
-                "source must be TextChannel, Thread, or int, not "
-                + type(source).__name__
-            )
-        elif not isinstance(target, (discord.TextChannel, discord.Thread, int)):
-            raise TypeError(
-                "target must be TextChannel, Thread, or int, not "
-                + type(target).__name__
-            )
-        elif webhook and not isinstance(webhook, discord.Webhook):
-            raise TypeError("webhook must be Webhook, not " + type(webhook).__name__)
-
         source_id = globals.get_id_from_channel(source)
         target_id = globals.get_id_from_channel(target)
         if self._outbound_bridges.get(source_id) and self._outbound_bridges[
