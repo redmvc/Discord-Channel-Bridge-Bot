@@ -243,7 +243,7 @@ async def on_message(message: discord.Message):
                                 "url": replied_message.jump_url,
                                 "thumbnail": {
                                     "url": replied_message.author.display_avatar.replace(
-                                        size=18
+                                        size=16
                                     ).url,
                                     "height": 18,
                                     "width": 18,
