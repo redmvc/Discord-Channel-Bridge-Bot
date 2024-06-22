@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from io import BytesIO
 from typing import TypedDict, cast
 
 import discord
@@ -171,9 +172,6 @@ async def on_message(message: discord.Message):
         target_channel = globals.get_channel_from_id(target_id)
         target_channel = cast(discord.TextChannel | discord.Thread, target_channel)
 
-        # attachments = []  # TODO
-        # should_spoiler = message.channel.is_nsfw() and not webhook_channel.is_nsfw()
-
         # Try to find whether the user who sent this message is on the other side of the bridge and if so what their name and avatar would be
         tgt_member = webhook_channel.guild.get_member(message.author.id)
         if tgt_member:
@@ -196,6 +194,12 @@ async def on_message(message: discord.Message):
         else:
             reply_embed = []
 
+        attachments = []
+        for attachment in message.attachments:
+            buffer = BytesIO()
+            await attachment.save(buffer)
+            attachments.append(discord.File(buffer, attachment.filename))
+
         thread_splat: ThreadSplat = {}
         if target_id != webhook_channel.id:
             if not isinstance(target_channel, discord.Thread):
@@ -209,6 +213,7 @@ async def on_message(message: discord.Message):
             avatar_url=tgt_avatar_url,
             username=tgt_member_name,
             embeds=list(message.embeds + reply_embed),
+            files=attachments,  # might throw HHTPException if too large?
             wait=True,
             **thread_splat,
         )
