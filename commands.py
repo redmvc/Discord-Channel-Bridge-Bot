@@ -1,3 +1,4 @@
+import asyncio
 import discord
 from sqlalchemy import Delete as SQLDelete
 from sqlalchemy import ScalarResult
@@ -333,7 +334,7 @@ async def demolish(
         )
         return
 
-    await demolish_bridges(message_channel, target_channel)
+    demolishing = demolish_bridges(message_channel, target_channel)
 
     message_channel_id = str(message_channel.id)
     target_channel_id = str(target_channel.id)
@@ -374,6 +375,7 @@ async def demolish(
         "✅ Bridges demolished!",
         ephemeral=True,
     )
+    await demolishing
 
 
 @discord.app_commands.guild_only()
@@ -418,8 +420,9 @@ async def demolish_all(
             else:
                 paired_channels.add(target_id)
 
+    bridges_being_demolished = []
     for channel_id in paired_channels:
-        await demolish_bridges(channel_id, message_channel)
+        bridges_being_demolished.append(demolish_bridges(channel_id, message_channel))
 
     session = SQLSession(engine)
     message_channel_id = str(message_channel.id)
@@ -460,6 +463,7 @@ async def demolish_all(
             "⭕ Inbound bridges demolished, but some outbound bridges may not have been, as some permissions were missing.",
             ephemeral=True,
         )
+    await asyncio.gather(*bridges_being_demolished)
 
 
 async def create_bridge_and_db(
