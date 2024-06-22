@@ -209,41 +209,44 @@ async def on_message(message: discord.Message):
 
             if reply_bridges.get(target_id):
                 # This message is replying to a message that is bridged
-                replied_message = await target_channel.fetch_message(
-                    reply_bridges[target_id]
-                )
+                try:
+                    replied_message = await target_channel.fetch_message(
+                        reply_bridges[target_id]
+                    )
 
-                def truncate(msg: str, length: int) -> str:
-                    return msg if len(msg) < length else msg[: length - 1] + "…"
+                    def truncate(msg: str, length: int) -> str:
+                        return msg if len(msg) < length else msg[: length - 1] + "…"
 
-                display_name = discord.utils.escape_markdown(
-                    replied_message.author.display_name
-                )
-                # Discord represents ping "ON" vs "OFF" replies with an @ symbol before the reply author name
-                # copy this behavior here
-                if reply_reference:
-                    display_name = "@" + display_name
+                    display_name = discord.utils.escape_markdown(
+                        replied_message.author.display_name
+                    )
+                    # Discord represents ping "ON" vs "OFF" replies with an @ symbol before the reply author name
+                    # copy this behavior here
+                    if reply_reference:
+                        display_name = "@" + display_name
 
-                replied_content = truncate(
-                    discord.utils.remove_markdown(replied_message.clean_content),
-                    50,
-                )
-                reply_embed = [
-                    discord.Embed.from_dict(
-                        {
-                            "type": "rich",
-                            "url": replied_message.jump_url,
-                            "thumbnail": {
-                                "url": replied_message.author.display_avatar.replace(
-                                    size=18
-                                ).url,
-                                "height": 18,
-                                "width": 18,
-                            },
-                            "description": f"**[↪]({replied_message.jump_url}) {display_name}**  {replied_content}",
-                        }
-                    ),
-                ]
+                    replied_content = truncate(
+                        discord.utils.remove_markdown(replied_message.clean_content),
+                        50,
+                    )
+                    reply_embed = [
+                        discord.Embed.from_dict(
+                            {
+                                "type": "rich",
+                                "url": replied_message.jump_url,
+                                "thumbnail": {
+                                    "url": replied_message.author.display_avatar.replace(
+                                        size=18
+                                    ).url,
+                                    "height": 18,
+                                    "width": 18,
+                                },
+                                "description": f"**[↪]({replied_message.jump_url}) {display_name}**  {replied_content}",
+                            }
+                        ),
+                    ]
+                except discord.HTTPException:
+                    reply_embed = []
             else:
                 reply_embed = []
 
