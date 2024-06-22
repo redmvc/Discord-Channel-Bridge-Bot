@@ -7,6 +7,7 @@ from sqlalchemy import Select as SQLSelect
 from sqlalchemy import and_ as sql_and
 from sqlalchemy import or_ as sql_or
 from sqlalchemy.dialects.mysql import insert as sql_insert
+from sqlalchemy.exc import StatementError as SQLError
 from sqlalchemy.orm import Session as SQLSession
 
 import globals
@@ -123,9 +124,30 @@ async def bridge(
         )
         return
 
-    session = SQLSession(engine)
-    await create_bridge_and_db(message_channel, target_channel, session)
-    await create_bridge_and_db(target_channel, message_channel, session)
+    assert interaction.guild
+    if (
+        not message_channel.permissions_for(interaction.guild.me).manage_webhooks
+        or not target_channel.permissions_for(interaction.guild.me).manage_webhooks
+    ):
+        await interaction.response.send_message(
+            "Please make sure the bot has 'Manage Webhooks' permission in both this and target channels."
+        )
+        return
+
+    session = None
+    try:
+        session = SQLSession(engine)
+        await create_bridge_and_db(message_channel, target_channel, session)
+        await create_bridge_and_db(target_channel, message_channel, session)
+    except SQLError:
+        await interaction.response.send_message(
+            "❌ There was an issue with the connection to the database; bridge creation failed.",
+            ephemeral=True,
+        )
+        if session:
+            session.close()
+        return
+
     session.commit()
     session.close()
 
@@ -273,97 +295,110 @@ async def bridge_thread(
     await interaction.response.defer(thinking=True, ephemeral=True)
 
     # The IDs of threads are the same as that of their originating messages so we should try to create threads from the same messages
-    session = SQLSession(engine)
-    matching_starting_messages: dict[int, int] = {}
+    session = None
     try:
-        await message_thread.parent.fetch_message(message_thread.id)
+        session = SQLSession(engine)
 
-        source_starting_message = session.scalars(
-            SQLSelect(DBMessageMap).where(
-                DBMessageMap.target_message == str(message_thread.id)
-            )
-        ).first()
-        if isinstance(source_starting_message, DBMessageMap):
-            # The message that's starting this thread is bridged
-            source_channel_id = int(source_starting_message.source_channel)
-            source_message_id = int(source_starting_message.source_message)
-            matching_starting_messages[source_channel_id] = source_message_id
-        else:
-            source_channel_id = message_thread.parent.id
-            source_message_id = message_thread.id
+        matching_starting_messages: dict[int, int] = {}
+        try:
+            await message_thread.parent.fetch_message(message_thread.id)
 
-        target_starting_messages: ScalarResult[DBMessageMap] = session.scalars(
-            SQLSelect(DBMessageMap).where(
-                DBMessageMap.source_message == str(source_message_id)
-            )
-        )
-        for target_starting_message in target_starting_messages:
-            matching_starting_messages[int(target_starting_message.target_channel)] = (
-                int(target_starting_message.target_message)
-            )
-    except discord.NotFound:
-        pass
-
-    # Now find all channels that are bridged to the channel this thread's parent is bridged to and create threads there
-    threads_created: dict[int, discord.Thread] = {}
-    succeeded_at_least_once = False
-    failed_at_least_once = False
-
-    for idx in range(2):
-        if idx == 0:
-            list_of_bridges = outbound_bridges
-        else:
-            list_of_bridges = inbound_bridges
-        if not list_of_bridges:
-            continue
-
-        for channel_id in list_of_bridges.keys():
-            channel = globals.get_channel_from_id(channel_id)
-            if not isinstance(channel, discord.TextChannel):
-                # I can't create a thread inside a thread
-                failed_at_least_once = True
-                continue
-
-            if (
-                not channel.permissions_for(interaction.user).manage_webhooks
-                or not channel.permissions_for(interaction.user).create_public_threads
-            ):
-                # User doesn't have permission to act there
-                failed_at_least_once = True
-                continue
-
-            new_thread = threads_created.get(channel_id)
-            if not new_thread and matching_starting_messages.get(channel_id):
-                # I found a matching starting message, so I'll try to create the thread starting there
-                matching_starting_message = await channel.fetch_message(
-                    matching_starting_messages[channel_id]
+            source_starting_message = session.scalars(
+                SQLSelect(DBMessageMap).where(
+                    DBMessageMap.target_message == str(message_thread.id)
                 )
+            ).first()
+            if isinstance(source_starting_message, DBMessageMap):
+                # The message that's starting this thread is bridged
+                source_channel_id = int(source_starting_message.source_channel)
+                source_message_id = int(source_starting_message.source_message)
+                matching_starting_messages[source_channel_id] = source_message_id
+            else:
+                source_channel_id = message_thread.parent.id
+                source_message_id = message_thread.id
 
-                if not matching_starting_message.thread:
-                    # That message doesn't already have a thread, so I can create it
-                    new_thread = await matching_starting_message.create_thread(
+            target_starting_messages: ScalarResult[DBMessageMap] = session.scalars(
+                SQLSelect(DBMessageMap).where(
+                    DBMessageMap.source_message == str(source_message_id)
+                )
+            )
+            for target_starting_message in target_starting_messages:
+                matching_starting_messages[
+                    int(target_starting_message.target_channel)
+                ] = int(target_starting_message.target_message)
+        except discord.NotFound:
+            pass
+
+        # Now find all channels that are bridged to the channel this thread's parent is bridged to and create threads there
+        threads_created: dict[int, discord.Thread] = {}
+        succeeded_at_least_once = False
+        failed_at_least_once = False
+
+        for idx in range(2):
+            if idx == 0:
+                list_of_bridges = outbound_bridges
+            else:
+                list_of_bridges = inbound_bridges
+            if not list_of_bridges:
+                continue
+
+            for channel_id in list_of_bridges.keys():
+                channel = globals.get_channel_from_id(channel_id)
+                if not isinstance(channel, discord.TextChannel):
+                    # I can't create a thread inside a thread
+                    failed_at_least_once = True
+                    continue
+
+                if (
+                    not channel.permissions_for(interaction.user).manage_webhooks
+                    or not channel.permissions_for(
+                        interaction.user
+                    ).create_public_threads
+                ):
+                    # User doesn't have permission to act there
+                    failed_at_least_once = True
+                    continue
+
+                new_thread = threads_created.get(channel_id)
+                if not new_thread and matching_starting_messages.get(channel_id):
+                    # I found a matching starting message, so I'll try to create the thread starting there
+                    matching_starting_message = await channel.fetch_message(
+                        matching_starting_messages[channel_id]
+                    )
+
+                    if not matching_starting_message.thread:
+                        # That message doesn't already have a thread, so I can create it
+                        new_thread = await matching_starting_message.create_thread(
+                            name=message_thread.name,
+                            reason=f"Bridged from {message_thread.guild.name}#{message_thread.parent.name}#{message_thread.name}",
+                        )
+
+                if not new_thread:
+                    # Haven't created a thread yet, try to create it from the channel
+                    new_thread = await channel.create_thread(
                         name=message_thread.name,
                         reason=f"Bridged from {message_thread.guild.name}#{message_thread.parent.name}#{message_thread.name}",
                     )
 
-            if not new_thread:
-                # Haven't created a thread yet, try to create it from the channel
-                new_thread = await channel.create_thread(
-                    name=message_thread.name,
-                    reason=f"Bridged from {message_thread.guild.name}#{message_thread.parent.name}#{message_thread.name}",
-                )
+                if not new_thread:
+                    # Failed to create a thread somehow
+                    failed_at_least_once = True
+                    continue
 
-            if not new_thread:
-                # Failed to create a thread somehow
-                failed_at_least_once = True
-                continue
-
-            threads_created[channel_id] = new_thread
-            if idx == 0:
-                await create_bridge_and_db(message_thread, new_thread, session)
-            else:
-                await create_bridge_and_db(new_thread, message_thread, session)
-            succeeded_at_least_once = True
+                threads_created[channel_id] = new_thread
+                if idx == 0:
+                    await create_bridge_and_db(message_thread, new_thread, session)
+                else:
+                    await create_bridge_and_db(new_thread, message_thread, session)
+                succeeded_at_least_once = True
+    except SQLError:
+        await interaction.followup.send(
+            "❌ There was an issue with the connection to the database; thread and bridge creation failed.",
+            ephemeral=True,
+        )
+        if session:
+            session.close()
+        return
 
     if succeeded_at_least_once:
         if not failed_at_least_once:
@@ -423,35 +458,46 @@ async def demolish(
 
     message_channel_id = str(message_channel.id)
     target_channel_id = str(target_channel.id)
-    session = SQLSession(engine)
 
-    delete_demolished_bridges = SQLDelete(DBBridge).where(
-        sql_or(
-            sql_and(
-                DBBridge.source == message_channel_id,
-                DBBridge.target == target_channel_id,
-            ),
-            sql_and(
-                DBBridge.source == target_channel_id,
-                DBBridge.target == message_channel_id,
-            ),
-        )
-    )
-    session.execute(delete_demolished_bridges)
+    session = None
+    try:
+        session = SQLSession(engine)
 
-    delete_demolished_messages = SQLDelete(DBMessageMap).where(
-        sql_or(
-            sql_and(
-                DBMessageMap.source_channel == message_channel_id,
-                DBMessageMap.target_channel == target_channel_id,
-            ),
-            sql_and(
-                DBMessageMap.source_channel == target_channel_id,
-                DBMessageMap.target_channel == message_channel_id,
-            ),
+        delete_demolished_bridges = SQLDelete(DBBridge).where(
+            sql_or(
+                sql_and(
+                    DBBridge.source == message_channel_id,
+                    DBBridge.target == target_channel_id,
+                ),
+                sql_and(
+                    DBBridge.source == target_channel_id,
+                    DBBridge.target == message_channel_id,
+                ),
+            )
         )
-    )
-    session.execute(delete_demolished_messages)
+        session.execute(delete_demolished_bridges)
+
+        delete_demolished_messages = SQLDelete(DBMessageMap).where(
+            sql_or(
+                sql_and(
+                    DBMessageMap.source_channel == message_channel_id,
+                    DBMessageMap.target_channel == target_channel_id,
+                ),
+                sql_and(
+                    DBMessageMap.source_channel == target_channel_id,
+                    DBMessageMap.target_channel == message_channel_id,
+                ),
+            )
+        )
+        session.execute(delete_demolished_messages)
+    except SQLError:
+        await interaction.response.send_message(
+            "❌ There was an issue with the connection to the database; thread and bridge creation failed.",
+            ephemeral=True,
+        )
+        if session:
+            session.close()
+        return
 
     session.commit()
     session.close()
@@ -510,31 +556,41 @@ async def demolish_all(
     for channel_id in paired_channels:
         bridges_being_demolished.append(demolish_bridges(channel_id, message_channel))
 
-    session = SQLSession(engine)
-    message_channel_id = str(message_channel.id)
-    exceptions_list = [str(i) for i in exceptions]
+    session = None
+    try:
+        session = SQLSession(engine)
+        message_channel_id = str(message_channel.id)
+        exceptions_list = [str(i) for i in exceptions]
 
-    delete_demolished_bridges = SQLDelete(DBBridge).where(
-        sql_or(
-            DBBridge.target == message_channel_id,
-            sql_and(
-                DBBridge.source == message_channel_id,
-                DBBridge.target.not_in(exceptions_list),
-            ),
+        delete_demolished_bridges = SQLDelete(DBBridge).where(
+            sql_or(
+                DBBridge.target == message_channel_id,
+                sql_and(
+                    DBBridge.source == message_channel_id,
+                    DBBridge.target.not_in(exceptions_list),
+                ),
+            )
         )
-    )
-    session.execute(delete_demolished_bridges)
+        session.execute(delete_demolished_bridges)
 
-    delete_demolished_messages = SQLDelete(DBMessageMap).where(
-        sql_or(
-            DBMessageMap.target_channel == message_channel_id,
-            sql_and(
-                DBMessageMap.source_channel == message_channel_id,
-                DBMessageMap.target_channel.not_in(exceptions_list),
-            ),
+        delete_demolished_messages = SQLDelete(DBMessageMap).where(
+            sql_or(
+                DBMessageMap.target_channel == message_channel_id,
+                sql_and(
+                    DBMessageMap.source_channel == message_channel_id,
+                    DBMessageMap.target_channel.not_in(exceptions_list),
+                ),
+            )
         )
-    )
-    session.execute(delete_demolished_messages)
+        session.execute(delete_demolished_messages)
+    except SQLError:
+        await interaction.response.send_message(
+            "❌ There was an issue with the connection to the database; thread and bridge creation failed.",
+            ephemeral=True,
+        )
+        if session:
+            session.close()
+        return
 
     session.commit()
     session.close()
@@ -578,24 +634,48 @@ async def create_bridge_and_db(
     if webhook:
         validate_types({"webhook": (webhook, discord.Webhook)})
 
-    if not session:
-        close_after = True
-        session = SQLSession(engine)
-    else:
-        close_after = False
+    bridge = None
+    try:
+        if not session:
+            close_after = True
+            session = SQLSession(engine)
+        else:
+            validate_types({"session": (session, SQLSession)})
+            close_after = False
 
-    insert_bridge_row = (
-        sql_insert(DBBridge)
-        .values(
-            source=str(globals.get_id_from_channel(source)),
-            target=str(globals.get_id_from_channel(target)),
-            webhook=str(bridge.webhook.id),
+        bridge = await create_bridge(source, target, webhook)
+        insert_bridge_row = (
+            sql_insert(DBBridge)
+            .values(
+                source=str(globals.get_id_from_channel(source)),
+                target=str(globals.get_id_from_channel(target)),
+                webhook=str(bridge.webhook.id),
+            )
+            .on_duplicate_key_update(  # TODO abstract this away so it doesn't rely on being specifically MySQL?
+                webhook=str(bridge.webhook.id),
+            )
         )
-        .on_duplicate_key_update(  # TODO abstract this away so it doesn't rely on being specifically MySQL?
-            webhook=str(bridge.webhook.id),
+        session.execute(insert_bridge_row)
+
+    except SQLError as e:
+        if session:
+            session.close()
+
+        raise SQLError(
+            message=e._message(),
+            statement=e.statement,
+            params=e.params,
+            orig=e.orig,
+            hide_parameters=e.hide_parameters,
+            code=e.code,
+            ismulti=e.ismulti,
         )
-    )
-    session.execute(insert_bridge_row)
+    except Exception as e:
+        if session:
+            session.close()
+        if bridge:
+            await bridges.demolish_bridge(source, target)
+        raise e
 
     if close_after:
         session.commit()
