@@ -653,8 +653,8 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
         "This message has the following reactions:\n"
         + "\n\n".join(
             [
-                f"{reaction_emoji_id}\n"
-                + "\n".join([f" - <@{user_id}>" for user_id in reaction_user_ids])
+                f"{reaction_emoji_id} "
+                + " ".join([f"<@{user_id}>" for user_id in reaction_user_ids])
                 for reaction_emoji_id, reaction_user_ids in all_reactions.items()
             ]
         ),
