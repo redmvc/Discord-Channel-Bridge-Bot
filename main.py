@@ -109,6 +109,10 @@ async def on_message(message: discord.Message):
     if not isinstance(message.channel, (discord.TextChannel, discord.Thread)):
         return
 
+    if message.content == "":
+        # Only bridge contentful messages
+        return
+
     if message.webhook_id:
         # Don't bridge messages from webhooks
         return
