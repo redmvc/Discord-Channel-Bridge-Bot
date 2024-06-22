@@ -48,7 +48,11 @@ def mention_to_channel(
     #### Returns:
         - The channel whose ID is given by `channel_id`.
     """
-    global client
+    if not isinstance(link_or_mention, str):
+        raise TypeError(
+            "link_or_mention must be str, not " + type(link_or_mention).__name__
+        )
+
     if link_or_mention.startswith("https://discord.com/channels"):
         try:
             while link_or_mention.endswith("/"):
@@ -64,6 +68,7 @@ def mention_to_channel(
             )
         except ValueError:
             return None
+
     return get_channel_from_id(channel_id)
 
 
@@ -80,11 +85,26 @@ def get_channel_from_id(
     #### Returns:
         - If the argument is a channel, returns it unchanged; otherwise, returns a channel with the ID passed.
     """
-    global client
     if isinstance(channel_or_id, int):
         channel = client.get_channel(channel_or_id)
-    else:
+    elif isinstance(
+        channel_or_id,
+        (
+            discord.TextChannel,
+            discord.Thread,
+            discord.VoiceChannel,
+            discord.StageChannel,
+            discord.ForumChannel,
+            discord.CategoryChannel,
+            discord.abc.PrivateChannel,
+        ),
+    ):
         channel = channel_or_id
+    else:
+        raise TypeError(
+            "channel_or_id must be Discord channel or int, not "
+            + type(channel_or_id).__name__
+        )
 
     return channel
 
@@ -102,10 +122,26 @@ def get_id_from_channel(
     #### Returns:
         - `int`: The ID of the channel passed as argument.
     """
-
     if isinstance(channel_or_id, int):
         return channel_or_id
-    return channel_or_id.id
+    elif isinstance(
+        channel_or_id,
+        (
+            discord.TextChannel,
+            discord.Thread,
+            discord.VoiceChannel,
+            discord.StageChannel,
+            discord.ForumChannel,
+            discord.CategoryChannel,
+            discord.abc.PrivateChannel,
+        ),
+    ):
+        return channel_or_id.id
+    else:
+        raise TypeError(
+            "channel_or_id must be Discord channel or int, not "
+            + type(channel_or_id).__name__
+        )
 
 
 async def wait_until_ready() -> bool:

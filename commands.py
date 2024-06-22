@@ -547,6 +547,9 @@ async def create_bridge_and_db(
         - `webhook`: Optionally, an already-existing webhook connecting these channels. Defaults to None.
         - `session`: Optionally, a session with the connection to the database. Defaults to None, in which case creates and closes a new one locally.
     """
+    if session and not isinstance(session, SQLSession):
+        raise TypeError("session must be Session, not " + type(session).__name__)
+
     bridge = await create_bridge(source, target, webhook)
 
     if not session:
@@ -587,6 +590,16 @@ async def create_bridge(
         - `target`: Target channel for the Bridge, or ID of same.
         - `webhook`: Optionally, an already-existing webhook connecting these channels. Defaults to None.
     """
+    if not isinstance(source, (discord.TextChannel, discord.Thread, int)):
+        raise TypeError(
+            "source must be TextChannel, Thread, or int, not " + type(source).__name__
+        )
+    elif not isinstance(target, (discord.TextChannel, discord.Thread, int)):
+        raise TypeError(
+            "target must be TextChannel, Thread, or int, not " + type(target).__name__
+        )
+    elif webhook and not isinstance(webhook, discord.Webhook):
+        raise TypeError("webhook must be Webhook, not " + type(webhook).__name__)
 
     return await bridges.create_bridge(source, target, webhook)
 
@@ -616,6 +629,14 @@ async def demolish_bridge_one_sided(
         - `source`: One end of the Bridge, or ID of same.
         - `target`: The other end of the Bridge, or ID of same.
     """
+    if not isinstance(source, (discord.TextChannel, discord.Thread, int)):
+        raise TypeError(
+            "source must be TextChannel, Thread, or int, not " + type(source).__name__
+        )
+    elif not isinstance(target, (discord.TextChannel, discord.Thread, int)):
+        raise TypeError(
+            "target must be TextChannel, Thread, or int, not " + type(target).__name__
+        )
 
     await bridges.demolish_bridge(source, target)
 
