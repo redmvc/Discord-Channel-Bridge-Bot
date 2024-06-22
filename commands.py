@@ -601,7 +601,7 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
     message_id_to_skip: int | None = None
     if isinstance(source_message_map, DBMessageMap):
         # This message was bridged, so find the original one and then find any other bridged messages from it
-        source_channel = globals.get_channel_from_id(source_message_map.source_channel)
+        source_channel = globals.get_channel_from_id(int(source_message_map.source_channel))
         if source_channel:
             source_channel_id = source_channel.id
             source_message_id = int(source_message_map.source_message)
