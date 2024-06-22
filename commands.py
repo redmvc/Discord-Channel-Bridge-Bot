@@ -579,13 +579,14 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
 
     # First get the reactions on this message itself
     all_reactions: dict[str, set[int]] = {}
-    for reaction in message.reactions:
+    msg_reaction_users = [(reaction, reaction.users()) for reaction in message.reactions]
+    for reaction, users in msg_reaction_users:
         reaction_emoji_id = str(reaction.emoji)
 
         if not all_reactions.get(reaction_emoji_id):
             all_reactions[reaction_emoji_id] = set()
 
-        async for user in reaction.users():
+        async for user in users:
             if user.id != bot_user_id:
                 all_reactions[reaction_emoji_id].add(user.id)
 
@@ -637,13 +638,14 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
             continue
 
         bridged_message = await bridged_channel.fetch_message(target_message_id)
-        for reaction in bridged_message.reactions:
+        bridged_reaction_users = [(reaction, reaction.users()) for reaction in bridged_message.reactions]
+        for reaction, reaction_users in bridged_reaction_users:
             reaction_emoji_id = str(reaction.emoji)
 
             if not all_reactions.get(reaction_emoji_id):
                 all_reactions[reaction_emoji_id] = set()
 
-            async for user in reaction.users():
+            async for user in reaction_users:
                 if user.id != bot_user_id:
                     all_reactions[reaction_emoji_id].add(user.id)
 
