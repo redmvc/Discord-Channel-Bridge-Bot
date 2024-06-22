@@ -153,7 +153,10 @@ class Bridge:
         validate_types({"reason": (reason, str)})
 
         if self._webhook:
-            await self._webhook.delete(reason=reason)
+            try:
+                await self._webhook.delete(reason=reason)
+            except discord.NotFound:
+                pass
             self._webhook = None
 
     @property
