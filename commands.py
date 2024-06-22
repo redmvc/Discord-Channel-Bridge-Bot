@@ -137,8 +137,10 @@ async def bridge(
     session = None
     try:
         session = SQLSession(engine)
-        await create_bridge_and_db(message_channel, target_channel, session)
-        await create_bridge_and_db(target_channel, message_channel, session)
+        await asyncio.gather(
+            create_bridge_and_db(message_channel, target_channel, session),
+            create_bridge_and_db(target_channel, message_channel, session),
+        )
     except SQLError:
         await interaction.response.send_message(
             "❌ There was an issue with the connection to the database; bridge creation failed.",
@@ -334,6 +336,7 @@ async def bridge_thread(
         succeeded_at_least_once = False
         failed_at_least_once = False
 
+        create_bridges = []
         for idx in range(2):
             if idx == 0:
                 list_of_bridges = outbound_bridges
@@ -387,10 +390,15 @@ async def bridge_thread(
 
                 threads_created[channel_id] = new_thread
                 if idx == 0:
-                    await create_bridge_and_db(message_thread, new_thread, session)
+                    create_bridges.append(
+                        create_bridge_and_db(message_thread, new_thread, session)
+                    )
                 else:
-                    await create_bridge_and_db(new_thread, message_thread, session)
+                    create_bridges.append(
+                        create_bridge_and_db(new_thread, message_thread, session)
+                    )
                 succeeded_at_least_once = True
+        await asyncio.gather(*create_bridges)
     except SQLError:
         await interaction.followup.send(
             "❌ There was an issue with the connection to the database; thread and bridge creation failed.",

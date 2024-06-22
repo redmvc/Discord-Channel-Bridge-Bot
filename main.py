@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from typing import TypedDict, cast
 from warnings import warn
 
@@ -40,6 +41,7 @@ async def on_ready():
     registered_bridges: ScalarResult[DBBridge] = session.scalars(SQLSelect(DBBridge))
     invalid_channels: set[str] = set()
     invalid_webhooks: set[str] = set()
+    create_bridges = []
     for bridge in registered_bridges:
         source_id_str = bridge.source
         target_id_str = bridge.target
@@ -69,13 +71,18 @@ async def on_ready():
                 raise Exception
             elif target_channel:
                 # I have access to both the source and target channels and to the webhook
-                await commands.create_bridge(source_id, target_id, webhook)
+                create_bridges.append(
+                    commands.create_bridge(source_id, target_id, webhook)
+                )
         except Exception:
             invalid_webhooks.add(webhook_id_str)
 
             if source_channel and target_channel:
                 # There *should* be a webhook there and I have access to the channels
-                await commands.create_bridge_and_db(source_id, target_id, session)
+                create_bridges.append(
+                    commands.create_bridge_and_db(source_id, target_id, session)
+                )
+    await asyncio.gather(*create_bridges)
 
     if len(invalid_channels) > 0:
         delete_invalid_channels = SQLDelete(DBBridge).where(
