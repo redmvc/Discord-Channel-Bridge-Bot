@@ -126,7 +126,7 @@ async def on_message(message: discord.Message):
 
     session = SQLSession(engine)
     reply_bridges: dict[int, int] = {}
-    if message.reference:
+    if message.reference and message.reference.message_id:
         # This message is a reply to another message, so we should try to link to its match on the other side of bridges
         # reply_bridges will be a dict whose keys are channel IDs and whose values are the IDs of messages matching the message I'm replying to in those channels
         reply_id = message.reference.message_id
