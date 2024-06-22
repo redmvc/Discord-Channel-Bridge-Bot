@@ -602,8 +602,10 @@ async def demolish_bridges(
         - `target`: The other end of the Bridge, or ID of same.
     """
 
-    await demolish_bridge_one_sided(source, target)
-    await demolish_bridge_one_sided(target, source)
+    await asyncio.gather(
+        demolish_bridge_one_sided(source, target),
+        demolish_bridge_one_sided(target, source),
+    )
 
 
 async def demolish_bridge_one_sided(
