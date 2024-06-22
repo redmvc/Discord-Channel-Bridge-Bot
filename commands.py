@@ -573,6 +573,8 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
         )
         return
 
+    await interaction.response.defer(thinking=True, ephemeral=True)
+
     bot_user_id = globals.client.user.id if globals.client.user else 0
 
     # First get the reactions on this message itself
@@ -648,12 +650,10 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
     session.close()
 
     if len(all_reactions) == 0:
-        await interaction.response.send_message(
-            "This message doesn't have any reactions.", ephemeral=True
-        )
+        await interaction.followup.send("This message doesn't have any reactions.")
         return
 
-    await interaction.response.send_message(
+    await interaction.followup.send(
         "This message has the following reactions:\n"
         + "\n\n".join(
             [
@@ -662,5 +662,4 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
                 for reaction_emoji_id, reaction_user_ids in all_reactions.items()
             ]
         ),
-        ephemeral=True,
     )
