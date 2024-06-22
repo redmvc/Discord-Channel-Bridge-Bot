@@ -137,6 +137,7 @@ async def on_message(message: discord.Message):
         # attachments = []  # TODO
         # should_spoiler = message.channel.is_nsfw() and not webhook_channel.is_nsfw()
 
+        # Try to find whether the user who sent this message is on the other side of the bridge and if so what their name and avatar would be
         tgt_member = webhook_channel.guild.get_member(message.author.id)
         if tgt_member:
             tgt_member_name = tgt_member.display_name
