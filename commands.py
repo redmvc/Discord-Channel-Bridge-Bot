@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session as SQLSession
 import globals
 from bridge import Bridge, bridges
 from database import DBBridge, DBMessageMap, engine
+from validations import validate_types
 
 
 @globals.command_tree.command(
@@ -547,8 +548,7 @@ async def create_bridge_and_db(
         - `webhook`: Optionally, an already-existing webhook connecting these channels. Defaults to None.
         - `session`: Optionally, a session with the connection to the database. Defaults to None, in which case creates and closes a new one locally.
     """
-    if session and not isinstance(session, SQLSession):
-        raise TypeError("session must be Session, not " + type(session).__name__)
+    validate_types({"session": (session, discord.Webhook)})
 
     bridge = await create_bridge(source, target, webhook)
 

@@ -1,6 +1,7 @@
 import discord
 
 import globals
+from validations import validate_types
 
 
 class Bridge:
@@ -35,16 +36,12 @@ class Bridge:
         source: discord.TextChannel | discord.Thread | int,
         target: discord.TextChannel | discord.Thread | int,
     ) -> None:
-        if not isinstance(source, (discord.TextChannel, discord.Thread, int)):
-            raise TypeError(
-                "source must be TextChannel, Thread, or int, not "
-                + type(source).__name__
-            )
-        elif not isinstance(target, (discord.TextChannel, discord.Thread, int)):
-            raise TypeError(
-                "target must be TextChannel, Thread, or int, not "
-                + type(target).__name__
-            )
+        validate_types(
+            {
+                "source": (source, (discord.TextChannel, discord.Thread, int)),
+                "target": (target, (discord.TextChannel, discord.Thread, int)),
+            }
+        )
 
         self._source_id = globals.get_id_from_channel(source)
         self._target_id = globals.get_id_from_channel(target)
@@ -54,8 +51,8 @@ class Bridge:
         self,
         webhook: discord.Webhook | None = None,
     ) -> None:
-        if webhook and not isinstance(webhook, discord.Webhook):
-            raise TypeError("webhook must be Webhook, not " + type(webhook).__name__)
+        if webhook:
+            validate_types({"webhook": (webhook, discord.Webhook)})
 
         await self.destroy_webhook("Recycling webhook.")
 
@@ -89,8 +86,7 @@ class Bridge:
         #### Args:
             - `reason`: The reason to be stored in the Discord logs. Defaults to "User request.".
         """
-        if not isinstance(reason, str):
-            raise TypeError("reason must be str, not " + type(reason).__name__)
+        validate_types({"reason": (reason, str)})
 
         if self._webhook:
             await self._webhook.delete(reason=reason)
@@ -162,16 +158,12 @@ class Bridges:
             - `source`: Source channel or ID of same.
             - `target`: Target channel or ID of same.
         """
-        if not isinstance(source, (discord.TextChannel, discord.Thread, int)):
-            raise TypeError(
-                "source must be TextChannel, Thread, or int, not "
-                + type(source).__name__
-            )
-        elif not isinstance(target, (discord.TextChannel, discord.Thread, int)):
-            raise TypeError(
-                "target must be TextChannel, Thread, or int, not "
-                + type(target).__name__
-            )
+        validate_types(
+            {
+                "source": (source, (discord.TextChannel, discord.Thread, int)),
+                "target": (target, (discord.TextChannel, discord.Thread, int)),
+            }
+        )
 
         source_id = globals.get_id_from_channel(source)
         target_id = globals.get_id_from_channel(target)
@@ -196,16 +188,12 @@ class Bridges:
             - `source`: Source channel or ID of same.
             - `target`: Target channel or ID of same.
         """
-        if not isinstance(source, (discord.TextChannel, discord.Thread, int)):
-            raise TypeError(
-                "source must be TextChannel, Thread, or int, not "
-                + type(source).__name__
-            )
-        elif not isinstance(target, (discord.TextChannel, discord.Thread, int)):
-            raise TypeError(
-                "target must be TextChannel, Thread, or int, not "
-                + type(target).__name__
-            )
+        validate_types(
+            {
+                "source": (source, (discord.TextChannel, discord.Thread, int)),
+                "target": (target, (discord.TextChannel, discord.Thread, int)),
+            }
+        )
 
         source_id = globals.get_id_from_channel(source)
         target_id = globals.get_id_from_channel(target)
@@ -228,16 +216,12 @@ class Bridges:
             - `source`: Source channel or ID of same.
             - `target`: Target channel or ID of same.
         """
-        if not isinstance(source, (discord.TextChannel, discord.Thread, int)):
-            raise TypeError(
-                "source must be TextChannel, Thread, or int, not "
-                + type(source).__name__
-            )
-        elif not isinstance(target, (discord.TextChannel, discord.Thread, int)):
-            raise TypeError(
-                "target must be TextChannel, Thread, or int, not "
-                + type(target).__name__
-            )
+        validate_types(
+            {
+                "source": (source, (discord.TextChannel, discord.Thread, int)),
+                "target": (target, (discord.TextChannel, discord.Thread, int)),
+            }
+        )
 
         return (
             self.get_one_way_bridge(source, target),
@@ -253,11 +237,7 @@ class Bridges:
         #### Args:
             - `source`: Source channel or ID of same.
         """
-        if not isinstance(source, (discord.TextChannel, discord.Thread, int)):
-            raise TypeError(
-                "source must be TextChannel, Thread, or int, not "
-                + type(source).__name__
-            )
+        validate_types({"source": (source, (discord.TextChannel, discord.Thread, int))})
 
         return self._outbound_bridges.get(globals.get_id_from_channel(source))
 
@@ -270,11 +250,7 @@ class Bridges:
         #### Args:
             - `target`: Target channel or ID of same.
         """
-        if not isinstance(target, (discord.TextChannel, discord.Thread, int)):
-            raise TypeError(
-                "target must be TextChannel, Thread, or int, not "
-                + type(target).__name__
-            )
+        validate_types({"target": (target, (discord.TextChannel, discord.Thread, int))})
 
         return self._inbound_bridges.get(globals.get_id_from_channel(target))
 

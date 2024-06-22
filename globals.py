@@ -5,6 +5,8 @@ import json
 
 import discord
 
+from validations import validate_types
+
 """
 The format of this variable is
 {
@@ -48,10 +50,7 @@ def mention_to_channel(
     #### Returns:
         - The channel whose ID is given by `channel_id`.
     """
-    if not isinstance(link_or_mention, str):
-        raise TypeError(
-            "link_or_mention must be str, not " + type(link_or_mention).__name__
-        )
+    validate_types({"link_or_mention": (link_or_mention, str)})
 
     if link_or_mention.startswith("https://discord.com/channels"):
         try:
@@ -85,26 +84,28 @@ def get_channel_from_id(
     #### Returns:
         - If the argument is a channel, returns it unchanged; otherwise, returns a channel with the ID passed.
     """
+    validate_types(
+        {
+            "channel_or_id": (
+                channel_or_id,
+                (
+                    int,
+                    discord.TextChannel,
+                    discord.Thread,
+                    discord.VoiceChannel,
+                    discord.StageChannel,
+                    discord.ForumChannel,
+                    discord.CategoryChannel,
+                    discord.abc.PrivateChannel,
+                ),
+            )
+        }
+    )
+
     if isinstance(channel_or_id, int):
         channel = client.get_channel(channel_or_id)
-    elif isinstance(
-        channel_or_id,
-        (
-            discord.TextChannel,
-            discord.Thread,
-            discord.VoiceChannel,
-            discord.StageChannel,
-            discord.ForumChannel,
-            discord.CategoryChannel,
-            discord.abc.PrivateChannel,
-        ),
-    ):
-        channel = channel_or_id
     else:
-        raise TypeError(
-            "channel_or_id must be Discord channel or int, not "
-            + type(channel_or_id).__name__
-        )
+        channel = channel_or_id
 
     return channel
 
@@ -122,26 +123,28 @@ def get_id_from_channel(
     #### Returns:
         - `int`: The ID of the channel passed as argument.
     """
+    validate_types(
+        {
+            "channel_or_id": (
+                channel_or_id,
+                (
+                    int,
+                    discord.TextChannel,
+                    discord.Thread,
+                    discord.VoiceChannel,
+                    discord.StageChannel,
+                    discord.ForumChannel,
+                    discord.CategoryChannel,
+                    discord.abc.PrivateChannel,
+                ),
+            )
+        }
+    )
+
     if isinstance(channel_or_id, int):
         return channel_or_id
-    elif isinstance(
-        channel_or_id,
-        (
-            discord.TextChannel,
-            discord.Thread,
-            discord.VoiceChannel,
-            discord.StageChannel,
-            discord.ForumChannel,
-            discord.CategoryChannel,
-            discord.abc.PrivateChannel,
-        ),
-    ):
-        return channel_or_id.id
     else:
-        raise TypeError(
-            "channel_or_id must be Discord channel or int, not "
-            + type(channel_or_id).__name__
-        )
+        return channel_or_id.id
 
 
 async def wait_until_ready() -> bool:
