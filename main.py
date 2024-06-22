@@ -22,7 +22,13 @@ class ThreadSplat(TypedDict, total=False):
 
 @globals.client.event
 async def on_ready():
-    """Called when the client is done preparing the data received from Discord. Usually after login is successful and the Client.guilds and co. are filled up."""
+    """Called when the client is done preparing the data received from Discord. Usually after login is successful and the Client.guilds and co. are filled up.
+
+    #### Raises:
+        - `ChannelTypeError`: The source or target channels of some existing Bridge are not text channels nor threads off a text channel.
+        - `HTTPException`: Deleting an existing webhook or creating a new one failed.
+        - `Forbidden`: You do not have permissions to create or delete webhooks for some of the channels in existing Bridges.
+    """
     if globals.is_ready:
         return
 
@@ -105,7 +111,14 @@ async def on_ready():
 async def on_message(message: discord.Message):
     """Called when a Message is created and sent.
 
-    This requires Intents.messages to be enabled."""
+    This requires Intents.messages to be enabled.
+
+    #### Raises:
+        - `HTTPException`: Sending a message failed.
+        - `NotFound`: One of the webhooks was not found.
+        - `Forbidden`: The authorization token for one of the webhooks is incorrect.
+        - `ValueError`: The length of embeds was invalid, there was no token associated with one of the webhooks or ephemeral was passed with the improper webhook type or there was no state attached with one of the webhooks when giving it a view.
+    """
     if not isinstance(message.channel, (discord.TextChannel, discord.Thread)):
         return
 
@@ -281,6 +294,11 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
 
     #### Args:
         - `payload`: The raw event payload data.
+
+    #### Raises:
+        - `HTTPException`: Editing a message failed.
+        - `Forbidden`: Tried to edit a message that is not yours.
+        - `ValueError`: The length of embeds was invalid, there was no token associated with a webhook or a webhook had no state.
     """
     updated_message_content = payload.data.get("content")
     if not updated_message_content or updated_message_content == "":
@@ -330,6 +348,11 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
 
     #### Args:
         - `payload`: The raw event payload data.
+
+    #### Raises:
+        - `HTTPException`: Deleting a message failed.
+        - `Forbidden`: Tried to delete a message that is not yours.
+        - `ValueError`: A webhook does not have a token associated with it.
     """
     if not await globals.wait_until_ready():
         return

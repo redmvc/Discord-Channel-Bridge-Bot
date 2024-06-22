@@ -547,6 +547,14 @@ async def create_bridge_and_db(
         - `target`: Target channel for the Bridge, or ID of same.
         - `webhook`: Optionally, an already-existing webhook connecting these channels. Defaults to None.
         - `session`: Optionally, a session with the connection to the database. Defaults to None, in which case creates and closes a new one locally.
+
+    #### Raises:
+        - `ChannelTypeError`: The source or target channels are not text channels nor threads off a text channel.
+        - `HTTPException`: Deleting an existing webhook or creating a new one failed.
+        - `Forbidden`: You do not have permissions to create or delete webhooks.
+
+    #### Returns:
+        - `Bridge`: The created `Bridge`.
     """
     validate_types({"session": (session, discord.Webhook)})
 
@@ -589,6 +597,14 @@ async def create_bridge(
         - `source`: Source channel for the Bridge, or ID of same.
         - `target`: Target channel for the Bridge, or ID of same.
         - `webhook`: Optionally, an already-existing webhook connecting these channels. Defaults to None.
+
+    #### Raises:
+        - `ChannelTypeError`: The source or target channels are not text channels nor threads off a text channel.
+        - `HTTPException`: Deleting an existing webhook or creating a new one failed.
+        - `Forbidden`: You do not have permissions to create or delete webhooks.
+
+    #### Returns:
+        - `Bridge`: The created `Bridge`.
     """
 
     return await bridges.create_bridge(source, target, webhook)
@@ -603,6 +619,11 @@ async def demolish_bridges(
     #### Args:
         - `source`: One end of the Bridge, or ID of same.
         - `target`: The other end of the Bridge, or ID of same.
+
+    #### Raises:
+        - `HTTPException`: Deleting the webhook failed.
+        - `Forbidden`: You do not have permissions to delete the webhook.
+        - `ValueError`: The webhook does not have a token associated with it.
     """
 
     await demolish_bridge_one_sided(source, target)
@@ -618,6 +639,11 @@ async def demolish_bridge_one_sided(
     #### Args:
         - `source`: One end of the Bridge, or ID of same.
         - `target`: The other end of the Bridge, or ID of same.
+
+    #### Raises:
+        - `HTTPException`: Deleting the webhook failed.
+        - `Forbidden`: You do not have permissions to delete the webhook.
+        - `ValueError`: The webhook does not have a token associated with it.
     """
 
     await bridges.demolish_bridge(source, target)
