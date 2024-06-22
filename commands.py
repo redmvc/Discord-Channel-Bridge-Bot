@@ -579,7 +579,9 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
 
     # First get the reactions on this message itself
     all_reactions: dict[str, set[int]] = {}
-    msg_reaction_users = [(reaction, reaction.users()) for reaction in message.reactions]
+    msg_reaction_users = [
+        (reaction, reaction.users()) for reaction in message.reactions
+    ]
     for reaction, users in msg_reaction_users:
         reaction_emoji_id = str(reaction.emoji)
 
@@ -602,7 +604,9 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
     message_id_to_skip: int | None = None
     if isinstance(source_message_map, DBMessageMap):
         # This message was bridged, so find the original one and then find any other bridged messages from it
-        source_channel = globals.get_channel_from_id(int(source_message_map.source_channel))
+        source_channel = globals.get_channel_from_id(
+            int(source_message_map.source_channel)
+        )
         if source_channel:
             source_channel_id = source_channel.id
             source_message_id = int(source_message_map.source_message)
@@ -638,7 +642,9 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
             continue
 
         bridged_message = await bridged_channel.fetch_message(target_message_id)
-        bridged_reaction_users = [(reaction, reaction.users()) for reaction in bridged_message.reactions]
+        bridged_reaction_users = [
+            (reaction, reaction.users()) for reaction in bridged_message.reactions
+        ]
         for reaction, reaction_users in bridged_reaction_users:
             reaction_emoji_id = str(reaction.emoji)
 

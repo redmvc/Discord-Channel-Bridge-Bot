@@ -392,7 +392,9 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
     message_id_to_skip: int | None = None
     if isinstance(source_message_map, DBMessageMap):
         # This message was bridged, so find the original one, react to it, and then find any other bridged messages from it
-        source_channel = globals.get_channel_from_id(int(source_message_map.source_channel))
+        source_channel = globals.get_channel_from_id(
+            int(source_message_map.source_channel)
+        )
         if not source_channel:
             return
 
