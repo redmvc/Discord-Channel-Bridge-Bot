@@ -1,7 +1,9 @@
+from typing import cast
+
 import discord
 
 import globals
-from validations import validate_channels, validate_types
+from validations import validate_channels, validate_types, validate_webhook
 
 
 class Bridge:
@@ -36,6 +38,7 @@ class Bridge:
 
         #### Raises:
             - `ChannelTypeError`: The source or target channels are not text channels nor threads off a text channel.
+            - `WebhookChannelError`: `webhook` is not attached to target channel.
             - `HTTPException`: Creating the webhook failed.
             - `Forbidden`: You do not have permissions to create a webhook.
             - `ValueError`: Existing webhook does not have a token associated with it.
@@ -89,19 +92,22 @@ class Bridge:
             - `webhook`: The webhook to add. Defaults to None, in which case a new one will be created.
 
         #### Raises:
+            - `WebhookChannelError`: `webhook` is not attached to Bridge's target channel.
             - `HTTPException`: Deleting the existing webhook or creating a new webhook failed.
             - `Forbidden`: You do not have permissions to delete the existing webhook or create a new one.
             - `ValueError`: Existing webhook does not have a token associated with it.
         """
+        target_channel = self.target_channel
+
         if webhook:
             validate_types({"webhook": (webhook, discord.Webhook)})
+            validate_webhook(webhook, target_channel)
 
         await self.destroy_webhook("Recycling webhook.")
 
         if webhook:
             self._webhook = webhook
         else:
-            target_channel = globals.get_channel_from_id(self._target_id)
             assert isinstance(target_channel, discord.TextChannel | discord.Thread)
             if isinstance(target_channel, discord.Thread):
                 webhook_channel = target_channel.parent
@@ -123,6 +129,7 @@ class Bridge:
             - `webhook`: The webhook to replace this Bridge's webhook with. Defaults to None, in which case this function does nothing.
 
         #### Raises:
+            - `WebhookChannelError`: `webhook` is not attached to Bridge's target channel.
             - `HTTPException`: Deleting the existing webhook failed.
             - `Forbidden`: You do not have permissions to delete the existing webhook.
             - `ValueError`: Existing webhook does not have a token associated with it.
@@ -154,8 +161,22 @@ class Bridge:
         return self._source_id
 
     @property
+    def source_channel(self) -> discord.TextChannel | discord.Thread:
+        return cast(
+            discord.TextChannel | discord.Thread,
+            globals.get_channel_from_id(self._source_id),
+        )
+
+    @property
     def target_id(self) -> int:
         return self._target_id
+
+    @property
+    def target_channel(self) -> discord.TextChannel | discord.Thread:
+        return cast(
+            discord.TextChannel | discord.Thread,
+            globals.get_channel_from_id(self._target_id),
+        )
 
     @property
     def webhook(self) -> discord.Webhook:
@@ -186,6 +207,7 @@ class Bridges:
 
         #### Raises:
             - `ChannelTypeError`: The source or target channels are not text channels nor threads off a text channel.
+            - `WebhookChannelError`: `webhook` is not attached to Bridge's target channel.
             - `HTTPException`: Deleting an existing webhook or creating a new one failed.
             - `Forbidden`: You do not have permissions to create or delete webhooks.
 
@@ -222,6 +244,11 @@ class Bridges:
         #### Args:
             - `source`: Source channel or ID of same.
             - `target`: Target channel or ID of same.
+
+        #### Raises:
+            - `HTTPException`: Deleting the webhook failed.
+            - `Forbidden`: You do not have permissions to delete the webhook.
+            - `ValueError`: The webhook does not have a token associated with it.
         """
         validate_types(
             {
@@ -252,11 +279,6 @@ class Bridges:
         #### Args:
             - `source`: Source channel or ID of same.
             - `target`: Target channel or ID of same.
-
-        #### Raises:
-            - `HTTPException`: Deleting the webhook failed.
-            - `Forbidden`: You do not have permissions to delete the webhook.
-            - `ValueError`: The webhook does not have a token associated with it.
         """
         validate_types(
             {

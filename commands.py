@@ -550,6 +550,7 @@ async def create_bridge_and_db(
 
     #### Raises:
         - `ChannelTypeError`: The source or target channels are not text channels nor threads off a text channel.
+        - `WebhookChannelError`: `webhook` is not attached to Bridge's target channel.
         - `HTTPException`: Deleting an existing webhook or creating a new one failed.
         - `Forbidden`: You do not have permissions to create or delete webhooks.
 
@@ -600,6 +601,7 @@ async def create_bridge(
 
     #### Raises:
         - `ChannelTypeError`: The source or target channels are not text channels nor threads off a text channel.
+        - `WebhookChannelError`: `webhook` is not attached to Bridge's target channel.
         - `HTTPException`: Deleting an existing webhook or creating a new one failed.
         - `Forbidden`: You do not have permissions to create or delete webhooks.
 

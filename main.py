@@ -26,6 +26,7 @@ async def on_ready():
 
     #### Raises:
         - `ChannelTypeError`: The source or target channels of some existing Bridge are not text channels nor threads off a text channel.
+        - `WebhookChannelError`: Webhook of some existing Bridge is not attached to Bridge's target channel.
         - `HTTPException`: Deleting an existing webhook or creating a new one failed.
         - `Forbidden`: You do not have permissions to create or delete webhooks for some of the channels in existing Bridges.
     """

@@ -9,6 +9,10 @@ class ChannelTypeError(Exception):
     pass
 
 
+class WebhookChannelError(Exception):
+    pass
+
+
 def natural_language_concat(items: Sequence[str]) -> str:
     if len(items) == 2:
         return items[0] + " or " + items[1]
@@ -60,3 +64,28 @@ def validate_channels(
                 f"{channel_name} channel must be text channel or text channel thread, not "
                 + type(channel).__name__
             )
+
+
+def validate_webhook(
+    webhook: discord.Webhook, target_channel: discord.TextChannel | discord.Thread
+):
+    """Raise `WebhookChannelError` if the webhook is not attached to the target channel or, if it's a thread, its parent.
+
+    #### Args:
+        - `webhook`: A Discord webhook.
+        - `target_channel`: The Discord text channel or thread to validate against.
+
+    #### Raises:
+        - `ChannelTypeError`: `target_channel` is a thread but not one that is off a text channel.
+    """
+    if isinstance(target_channel, discord.TextChannel):
+        target_channel_id = target_channel.id
+    else:
+        try:
+            assert isinstance(target_channel.parent, discord.TextChannel)
+        except AssertionError:
+            raise ChannelTypeError("Target thread is not a thread off a text channel.")
+        target_channel_id = target_channel.parent.id
+
+    if target_channel_id != webhook.channel_id:
+        raise WebhookChannelError("webhook is not attached to Bridge's target channel.")
