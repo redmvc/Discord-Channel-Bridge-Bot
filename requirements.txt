@@ -1,5 +1,8 @@
 discord.py @ git+https://github.com/Rapptz/discord.py@c055fd3
 typing_extensions==4.12.2
 mypy==1.10.0
-PyMySQL==1.1.1
+# Uncomment one of the lines below depending on which SQL dialect your server will be using and make sure to use the correct one in your credentials.json file
+# PyMySQL
+# psycopg2
+# pysqlite
 SQLAlchemy==2.0.31

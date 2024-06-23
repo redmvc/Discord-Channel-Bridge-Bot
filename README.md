@@ -19,10 +19,33 @@ To add this bot to your server, visit [this link](https://discord.com/oauth2/aut
   - You can pass this command in DM to the bot, too.
 <!-- - Right clicking a message and going to Apps > List Reactions will show you a list of all reactions on all sides of the bridge. -->
 
-### Help, issues, and bugs
+### Running your own copy
+It's very straightforward to run your own copy of this bot. You'll need access to an SQL database running MySQL, PostgreSQL, or SQLite, and a Discord developer account.
+1. Go to the [applications page](https://discord.com/developers/applications) on the Discord Developers platform and create a new application.
+2. Under the "Bot" tab, make sure your bot has access to the "Server Members Intent" and the "Message Content Intent".
+   - Grab the authorisation token from that page, too, and save it to store it in your credentials file later.
+3. Generate an install link under the "Installation" tab:
+   - Use the "Guild Install" authorization method.
+   - Add the `applications.commands` and `bot` scopes.
+   - Add the `Add Reactions`, `Attach Files`, `Create Public Threads`, `Embed Links`, `Read Message History`, `Read Messages/View Channels`, `Send Messages`, `Send Messages in Threads`, `Use External Emojis`, `Use External Stickers`, and `Use Slash Commands` default permissions.
+4. Create a `credentials.json` file in the same folder as your `main.py` file with the following entries, filling them out with the appropriate values for your own application and server:
+   ```json
+   {
+       "app_token": "the token you got in step 2",
+       "db_dialect": "mysql, postgresql, or sqlite, depending on which dialect your database uses",
+       "db_driver": "pymysql, psycopg2, or pysqlite, respectively depending on the above",
+       "db_host": "",
+       "db_port": 0,
+       "db_user": "",
+       "db_pwd": "",
+       "db_name": ""
+   }
+   ```
+5. Edit your `requirements.txt` file to include the appropriate SQL library depending on your SQL dialect, then run `pip install -r requirements.txt` on your command line from the main folder.
+6. Run `main.py`. This will automatically create the necessary tables in your database if they're not already there, and all commands will be working out of the box.
 
+### Help, issues, and bugs
 If you have any issues with this bot, feel free to create an issue on the Issue Tracker or DM `redmagnos` on Discord.
 
 ### License
-
 This project is licensed under the GNU General Public License v3.0 License. See the LICENSE file for details.
