@@ -1,17 +1,15 @@
 from typing import Any
 
-from sqlalchemy import (
-    Select as SQLSelect,
-    String,
-    UniqueConstraint,
-    Update as SQLUpdate,
-    UpdateBase,
-    create_engine,
-    insert as other_db_insert,
-)
+from sqlalchemy import Select as SQLSelect
+from sqlalchemy import String, UniqueConstraint
+from sqlalchemy import Update as SQLUpdate
+from sqlalchemy import UpdateBase, create_engine
+from sqlalchemy import insert as other_db_insert
 from sqlalchemy.dialects import mysql, postgresql, sqlite
 from sqlalchemy.exc import StatementError as SQLError
-from sqlalchemy.orm import DeclarativeBase, Mapped, Session as SQLSession, mapped_column
+from sqlalchemy.orm import DeclarativeBase, Mapped
+from sqlalchemy.orm import Session as SQLSession
+from sqlalchemy.orm import mapped_column
 from sqlalchemy.sql._typing import _DMLTableArgument
 
 from globals import credentials
