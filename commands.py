@@ -6,13 +6,12 @@ from sqlalchemy import ScalarResult
 from sqlalchemy import Select as SQLSelect
 from sqlalchemy import and_ as sql_and
 from sqlalchemy import or_ as sql_or
-from sqlalchemy.dialects.mysql import insert as sql_insert
 from sqlalchemy.exc import StatementError as SQLError
 from sqlalchemy.orm import Session as SQLSession
 
 import globals
 from bridge import Bridge, bridges
-from database import DBBridge, DBMessageMap, engine
+from database import DBBridge, DBMessageMap, engine, sql_upsert
 from validations import validate_types
 
 
@@ -695,16 +694,14 @@ async def create_bridge_and_db(
             close_after = False
 
         bridge = await create_bridge(source, target, webhook)
-        insert_bridge_row = (
-            sql_insert(DBBridge)
-            .values(
-                source=str(globals.get_id_from_channel(source)),
-                target=str(globals.get_id_from_channel(target)),
-                webhook=str(bridge.webhook.id),
-            )
-            .on_duplicate_key_update(  # TODO abstract this away so it doesn't rely on being specifically MySQL?
-                webhook=str(bridge.webhook.id),
-            )
+        insert_bridge_row = sql_upsert(
+            DBBridge,
+            {
+                "source": str(globals.get_id_from_channel(source)),
+                "target": str(globals.get_id_from_channel(target)),
+                "webhook": str(bridge.webhook.id),
+            },
+            {"webhook": str(bridge.webhook.id)},
         )
         session.execute(insert_bridge_row)
 
