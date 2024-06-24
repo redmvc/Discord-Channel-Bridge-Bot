@@ -19,10 +19,7 @@ from validations import validate_types
     name="help",
     description="Return a list of commands or detailed information about a command.",
 )
-async def help(
-    interaction: discord.Interaction,
-    command: str | None = None,
-):
+async def help(interaction: discord.Interaction, command: str | None = None):
     if not command:
         await interaction.response.send_message(
             "This bot bridges channels and threads to each other, mirroring messages sent from one to the other. When a message is bridged:"
@@ -86,10 +83,7 @@ async def help(
     name="bridge",
     description="Create a two-way bridge between two channels.",
 )
-async def bridge(
-    interaction: discord.Interaction,
-    target: str,
-):
+async def bridge(interaction: discord.Interaction, target: str):
     message_channel = interaction.channel
     if not isinstance(message_channel, (discord.TextChannel, discord.Thread)):
         await interaction.response.send_message(
@@ -160,10 +154,7 @@ async def bridge(
     name="outbound",
     description="Create an outbound bridge from this channel to target channel.",
 )
-async def outbound(
-    interaction: discord.Interaction,
-    target: str,
-):
+async def outbound(interaction: discord.Interaction, target: str):
     message_channel = interaction.channel
     if not isinstance(message_channel, (discord.TextChannel, discord.Thread)):
         await interaction.response.send_message(
@@ -217,10 +208,7 @@ async def outbound(
     name="inbound",
     description="Create an inbound bridge from source channel to this channel.",
 )
-async def inbound(
-    interaction: discord.Interaction,
-    source: str,
-):
+async def inbound(interaction: discord.Interaction, source: str):
     message_channel = interaction.channel
     if not isinstance(message_channel, (discord.TextChannel, discord.Thread)):
         await interaction.response.send_message(
@@ -274,9 +262,7 @@ async def inbound(
     name="bridge_thread",
     description="Create threads across the bridge matching this one and bridge them.",
 )
-async def bridge_thread(
-    interaction: discord.Interaction,
-):
+async def bridge_thread(interaction: discord.Interaction):
     message_thread = interaction.channel
     if not isinstance(message_thread, discord.Thread):
         await interaction.response.send_message(
@@ -294,10 +280,14 @@ async def bridge_thread(
     assert interaction.guild
     if (
         not message_thread.permissions_for(interaction.user).manage_webhooks
+        or not message_thread.permissions_for(interaction.user).create_public_threads
         or not message_thread.permissions_for(interaction.guild.me).manage_webhooks
+        or not message_thread.permissions_for(
+            interaction.guild.me
+        ).create_public_threads
     ):
         await interaction.response.send_message(
-            "Please make sure both you and the bot have 'Manage Webhooks' permission in both this and target channels.",
+            "Please make sure both you and the bot have Manage Webhooks and Create Public Threads permissions in both this and target channels.",
             ephemeral=True,
         )
         return
@@ -307,6 +297,25 @@ async def bridge_thread(
     if not outbound_bridges and not inbound_bridges:
         await interaction.response.send_message(
             "The parent channel isn't bridged to any other channels.", ephemeral=True
+        )
+        return
+
+    # I need to check that the current channel is bridged to at least one other channel (as opposed to only threads)
+    at_least_one_channel = False
+    for bridge_list in (outbound_bridges, inbound_bridges):
+        if not bridge_list:
+            continue
+
+        for target_id, bridge in bridge_list.items():
+            if target_id == bridge.webhook.channel_id:
+                at_least_one_channel = True
+                break
+
+        if at_least_one_channel:
+            break
+    if not at_least_one_channel:
+        await interaction.response.send_message(
+            "The parent channel is only bridged to threads.", ephemeral=True
         )
         return
 
@@ -350,7 +359,8 @@ async def bridge_thread(
         # Now find all channels that are bridged to the channel this thread's parent is bridged to and create threads there
         threads_created: dict[int, discord.Thread] = {}
         succeeded_at_least_once = False
-        failed_at_least_once = False
+        bridged_threads = []
+        failed_channels = []
 
         create_bridges = []
         for idx in range(2):
@@ -365,7 +375,8 @@ async def bridge_thread(
                 channel = globals.get_channel_from_id(channel_id)
                 if not isinstance(channel, discord.TextChannel):
                     # I can't create a thread inside a thread
-                    failed_at_least_once = True
+                    if channel:
+                        bridged_threads.append(channel.id)
                     continue
 
                 channel_user = channel.guild.get_member(interaction.user.id)
@@ -379,7 +390,7 @@ async def bridge_thread(
                     ).create_public_threads
                 ):
                     # User doesn't have permission to act there
-                    failed_at_least_once = True
+                    failed_channels.append(channel.id)
                     continue
 
                 new_thread = threads_created.get(channel_id)
@@ -405,7 +416,7 @@ async def bridge_thread(
 
                 if not new_thread:
                     # Failed to create a thread somehow
-                    failed_at_least_once = True
+                    failed_channels.append(channel.id)
                     continue
 
                 threads_created[channel_id] = new_thread
@@ -429,18 +440,26 @@ async def bridge_thread(
         return
 
     if succeeded_at_least_once:
-        if not failed_at_least_once:
-            await interaction.followup.send("✅ All threads created!", ephemeral=True)
+        if len(failed_channels) == 0:
+            response = "✅ All threads created!"
         else:
-            await interaction.followup.send(
-                "⭕ Some but not all threads were created; this may have happened because you lacked Manage Webhooks or Create Public Threads permissions. Note that trying to run this command again will duplicate threads.",
-                ephemeral=True,
+            response = (
+                "⭕ Some but not all threads were created. This may have happened because you lacked Manage Webhooks or Create Public Threads permissions. The channels this command failed for were:\n"
+                + "\n".join(
+                    f"- <#{failed_channel_id}>" for failed_channel_id in failed_channels
+                )
+                + "\nTrying to run this command again will duplicate threads in the channels the command _succeeded_ at. If you wish to create threads in the channels this command failed for, it would be better to do so manually one by one."
+            )
+
+        if len(bridged_threads) > 0:
+            response += (
+                "\n\nNote: this channel is bridged to at least one thread, and so this command was not able to create further threads in them. The threads bridged to this channel are:"
+                + "\n".join(f"- <#{thread_id}>" for thread_id in bridged_threads)
             )
     else:
-        await interaction.followup.send(
-            "❌ Couldn't create any threads. Check that you have Manage Webhooks and Create Public Threads permissions in all relevant channels.",
-            ephemeral=True,
-        )
+        response = "❌ Couldn't create any threads. Make sure that you and the bot have Manage Webhooks and Create Public Threads permissions in all relevant channels."
+
+    await interaction.followup.send(response, ephemeral=True)
 
     session.commit()
     session.close()
@@ -451,10 +470,7 @@ async def bridge_thread(
     name="demolish",
     description="Demolish all bridges between this and target channel.",
 )
-async def demolish(
-    interaction: discord.Interaction,
-    target: str,
-):
+async def demolish(interaction: discord.Interaction, target: str):
     message_channel = interaction.channel
     if not isinstance(message_channel, (discord.TextChannel, discord.Thread)):
         await interaction.response.send_message(
@@ -483,6 +499,17 @@ async def demolish(
     ):
         await interaction.response.send_message(
             "Please make sure both you and the bot have 'Manage Webhooks' permission in both this and target channels.",
+            ephemeral=True,
+        )
+        return
+
+    inbound_bridges = bridges.get_inbound_bridges(message_channel.id)
+    outbound_bridges = bridges.get_outbound_bridges(message_channel.id)
+    if (not inbound_bridges or not inbound_bridges.get(target_channel.id)) and (
+        not outbound_bridges or not outbound_bridges.get(target_channel.id)
+    ):
+        await interaction.response.send_message(
+            "There are no bridges between current and target channels.",
             ephemeral=True,
         )
         return
@@ -549,9 +576,7 @@ async def demolish(
     name="demolish_all",
     description="Demolish all bridges to and from this channel.",
 )
-async def demolish_all(
-    interaction: discord.Interaction,
-):
+async def demolish_all(interaction: discord.Interaction):
     message_channel = interaction.channel
     if not isinstance(message_channel, (discord.TextChannel, discord.Thread)):
         await interaction.response.send_message(
@@ -571,17 +596,24 @@ async def demolish_all(
         )
         return
 
+    inbound_bridges = bridges.get_inbound_bridges(message_channel.id)
+    outbound_bridges = bridges.get_outbound_bridges(message_channel.id)
+    if not inbound_bridges and not outbound_bridges:
+        await interaction.response.send_message(
+            "There are no bridges associated with the current channel.",
+            ephemeral=True,
+        )
+        return
+
     await interaction.response.defer(thinking=True, ephemeral=True)
 
     # I'll make a list of all channels that are currently bridged to or from this channel
-    inbound_bridges = bridges.get_inbound_bridges(message_channel.id)
     paired_channels: set[int]
     if inbound_bridges:
         paired_channels = set(inbound_bridges.keys())
     else:
         paired_channels = set()
 
-    outbound_bridges = bridges.get_outbound_bridges(message_channel.id)
     exceptions: set[int] = set()
     if outbound_bridges:
         for target_id in outbound_bridges.keys():
@@ -798,9 +830,7 @@ async def demolish_bridge_one_sided(
     await bridges.demolish_bridge(source, target)
 
 
-# @globals.command_tree.context_menu(
-#     name="List Reactions",
-# )
+# @globals.command_tree.context_menu(name="List Reactions")
 # async def list_reactions(interaction: discord.Interaction, message: discord.Message):
 #     """List all reactions and users who reacted on all sides of a bridge."""
 #     channel = message.channel
