@@ -503,6 +503,17 @@ async def demolish(interaction: discord.Interaction, target: str):
         )
         return
 
+    inbound_bridges = bridges.get_inbound_bridges(message_channel.id)
+    outbound_bridges = bridges.get_outbound_bridges(message_channel.id)
+    if (not inbound_bridges or not inbound_bridges.get(target_channel.id)) and (
+        not outbound_bridges or not outbound_bridges.get(target_channel.id)
+    ):
+        await interaction.response.send_message(
+            "There are no bridges between current and target channels.",
+            ephemeral=True,
+        )
+        return
+
     await interaction.response.defer(thinking=True, ephemeral=True)
 
     demolishing = demolish_bridges(message_channel, target_channel)
@@ -585,17 +596,24 @@ async def demolish_all(interaction: discord.Interaction):
         )
         return
 
+    inbound_bridges = bridges.get_inbound_bridges(message_channel.id)
+    outbound_bridges = bridges.get_outbound_bridges(message_channel.id)
+    if not inbound_bridges and not outbound_bridges:
+        await interaction.response.send_message(
+            "There are no bridges associated with the current channel.",
+            ephemeral=True,
+        )
+        return
+
     await interaction.response.defer(thinking=True, ephemeral=True)
 
     # I'll make a list of all channels that are currently bridged to or from this channel
-    inbound_bridges = bridges.get_inbound_bridges(message_channel.id)
     paired_channels: set[int]
     if inbound_bridges:
         paired_channels = set(inbound_bridges.keys())
     else:
         paired_channels = set()
 
-    outbound_bridges = bridges.get_outbound_bridges(message_channel.id)
     exceptions: set[int] = set()
     if outbound_bridges:
         for target_id in outbound_bridges.keys():
