@@ -296,6 +296,25 @@ async def bridge_thread(interaction: discord.Interaction):
         )
         return
 
+    # I need to check that the current channel is bridged to at least one other channel (as opposed to only threads)
+    at_least_one_channel = False
+    for bridge_list in (outbound_bridges, inbound_bridges):
+        if not bridge_list:
+            continue
+
+        for target_id, bridge in bridge_list.items():
+            if target_id == bridge.webhook.channel_id:
+                at_least_one_channel = True
+                break
+
+        if at_least_one_channel:
+            break
+    if not at_least_one_channel:
+        await interaction.response.send_message(
+            "The parent channel is only bridged to threads.", ephemeral=True
+        )
+        return
+
     await interaction.response.defer(thinking=True, ephemeral=True)
 
     # The IDs of threads are the same as that of their originating messages so we should try to create threads from the same messages
