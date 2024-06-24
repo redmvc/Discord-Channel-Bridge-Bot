@@ -108,6 +108,7 @@ async def on_ready():
         session.execute(delete_invalid_webhooks)
 
     session.commit()
+    session.close()
 
     await globals.command_tree.sync()
     print(f"{globals.client.user} is connected to the following servers:\n")
