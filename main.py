@@ -630,5 +630,9 @@ async def on_thread_create(thread: discord.Thread):
 
     await commands.bridge_thread_helper(thread, thread.owner_id)
 
+    if thread.last_message:
+        # The message that was used to create the thread will need to be bridged, as the bridge didn't exist at the time
+        await bridge_message_helper(thread.last_message)
+
 
 globals.client.run(cast(str, globals.credentials["app_token"]), reconnect=True)
