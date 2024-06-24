@@ -667,7 +667,7 @@ async def demolish_all(interaction: discord.Interaction):
         session.execute(delete_demolished_messages)
     except SQLError:
         await interaction.followup.send(
-            "❌ There was an issue with the connection to the database; thread and bridge creation failed.",
+            "❌ There was an issue with the connection to the database; bridge demolition failed.",
             ephemeral=True,
         )
         if session:
