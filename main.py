@@ -152,6 +152,21 @@ async def on_message(message: discord.Message):
     if not await globals.wait_until_ready():
         return
 
+    await bridge_message_helper(message)
+
+
+async def bridge_message_helper(message: discord.Message):
+    """Mirrors a message to any of its outbound bridge targets.
+
+    #### Args:
+        - `message`: The message to bridge.
+
+    #### Raises:
+        - `HTTPException`: Sending a message failed.
+        - `NotFound`: One of the webhooks was not found.
+        - `Forbidden`: The authorization token for one of the webhooks is incorrect.
+        - `ValueError`: The length of embeds was invalid, there was no token associated with one of the webhooks or ephemeral was passed with the improper webhook type or there was no state attached with one of the webhooks when giving it a view.
+    """
     outbound_bridges = bridges.get_outbound_bridges(message.channel.id)
     if not outbound_bridges:
         return
