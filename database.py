@@ -45,6 +45,13 @@ class DBMessageMap(DBBase):
     target_channel: Mapped[str] = mapped_column(String(32), nullable=False)
 
 
+class DBAutoBridgeThreadChannels(DBBase):
+    __tablename__ = "auto_bridge_thread_channels"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    channel: Mapped[str] = mapped_column(String(32), nullable=False)
+
+
 def sql_upsert(
     table: _DMLTableArgument,
     insert_values: dict[str, Any],

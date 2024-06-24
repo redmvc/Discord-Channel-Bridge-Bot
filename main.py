@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session as SQLSession
 import commands
 import globals
 from bridge import bridges
-from database import DBBridge, DBMessageMap, engine
+from database import DBAutoBridgeThreadChannels, DBBridge, DBMessageMap, engine
 
 
 class ThreadSplat(TypedDict, total=False):
@@ -109,6 +109,15 @@ async def on_ready():
 
     session.commit()
 
+    # And next I identify all automatically-thread-bridging channels
+    registered_auto_bridge_thread_channels: ScalarResult[DBAutoBridgeThreadChannels] = (
+        session.scalars(SQLSelect(DBAutoBridgeThreadChannels))
+    )
+    for auto_bridge_thread_channel in registered_auto_bridge_thread_channels:
+        globals.auto_bridge_thread_channels.add(int(auto_bridge_thread_channel.channel))
+
+    session.close()
+
     await globals.command_tree.sync()
     print(f"{globals.client.user} is connected to the following servers:\n")
     for server in globals.client.guilds:
@@ -143,6 +152,21 @@ async def on_message(message: discord.Message):
     if not await globals.wait_until_ready():
         return
 
+    await bridge_message_helper(message)
+
+
+async def bridge_message_helper(message: discord.Message):
+    """Mirrors a message to any of its outbound bridge targets.
+
+    #### Args:
+        - `message`: The message to bridge.
+
+    #### Raises:
+        - `HTTPException`: Sending a message failed.
+        - `NotFound`: One of the webhooks was not found.
+        - `Forbidden`: The authorization token for one of the webhooks is incorrect.
+        - `ValueError`: The length of embeds was invalid, there was no token associated with one of the webhooks or ephemeral was passed with the improper webhook type or there was no state attached with one of the webhooks when giving it a view.
+    """
     outbound_bridges = bridges.get_outbound_bridges(message.channel.id)
     if not outbound_bridges:
         return
@@ -572,6 +596,43 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         )
 
     session.close()
+
+
+@globals.client.event
+async def on_thread_create(thread: discord.Thread):
+    """Called whenever a thread is created.
+
+    #### Args:
+        - `thread`: The thread that was created.
+    """
+    # Bridge a thread from a channel that has auto_bridge_threads enabled
+    if not isinstance(thread.parent, discord.TextChannel):
+        return
+
+    try:
+        await thread.join()
+    except Exception:
+        pass
+
+    if not await globals.wait_until_ready():
+        return
+
+    parent_channel = thread.parent
+    if parent_channel.id not in globals.auto_bridge_thread_channels:
+        return
+
+    assert globals.client.user
+    if thread.owner_id and thread.owner_id == globals.client.user.id:
+        return
+
+    if not thread.permissions_for(thread.guild.me).manage_webhooks:
+        return
+
+    await commands.bridge_thread_helper(thread, thread.owner_id)
+
+    if thread.last_message:
+        # The message that was used to create the thread will need to be bridged, as the bridge didn't exist at the time
+        await bridge_message_helper(thread.last_message)
 
 
 globals.client.run(cast(str, globals.credentials["app_token"]), reconnect=True)

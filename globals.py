@@ -34,9 +34,12 @@ intents.typing = True
 intents.webhooks = True
 client = discord.Client(intents=intents)
 command_tree = discord.app_commands.CommandTree(client)
-is_ready: bool = (
-    False  # This one is set to True once the bot has been initialised in main.py
-)
+
+# This one is set to True once the bot has been initialised in main.py
+is_ready: bool = False
+
+# Channels which will automatically create threads in bridged channels
+auto_bridge_thread_channels: set[int] = set()
 
 
 def mention_to_channel(
