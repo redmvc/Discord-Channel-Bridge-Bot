@@ -1029,7 +1029,10 @@ def stop_auto_bridging_threads_helper(channel_id: int, session: SQLSession):
             DBAutoBridgeThreadChannels.channel == str(channel_id)
         )
     )
-    globals.auto_bridge_thread_channels.remove(channel_id)
+    try:
+        globals.auto_bridge_thread_channels.remove(channel_id)
+    except Exception:
+        pass
 
 
 # @globals.command_tree.context_menu(name="List Reactions")
