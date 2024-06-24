@@ -14,7 +14,7 @@ To add this bot to your server, visit [this link](https://discord.com/oauth2/aut
   - It will not mirror thread creation; if you want threads in both channels to be mirrored, you need to run the bridge command from within them.
     - Alternatively, you can run the command `/bridge_thread` from within a new thread and it will try to create threads in all channels bridged to the current one following the same bridge rules present in the parent channel.
 - You can run the command `/demolish target` to demolish all bridges between the current and target channels.
-  - You can run the command `/demolish_all` to demolish all bridges to and from the current channel.
+  - You can run the command `/demolish_all` to demolish all bridges to and from the current channel/thread (and, optionally, its threads or its parent channel's threads).
 - `/help` will give you a list of commands. `/help command_name` will explain the usage of the specific command passed as argument.
   - You can pass this command in DM to the bot, too.
 <!-- - Right clicking a message and going to Apps > List Reactions will show you a list of all reactions on all sides of the bridge. -->
