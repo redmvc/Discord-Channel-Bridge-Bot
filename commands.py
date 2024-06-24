@@ -950,6 +950,7 @@ async def bridge_thread_helper(
                     new_thread = await channel.create_thread(
                         name=thread_to_bridge.name,
                         reason=f"Bridged from {thread_to_bridge.guild.name}#{thread_to_bridge.parent.name}#{thread_to_bridge.name}",
+                        type=discord.ChannelType.public_thread,
                     )
 
                 if not new_thread:
