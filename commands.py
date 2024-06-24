@@ -138,13 +138,26 @@ async def bridge(interaction: discord.Interaction, target: str):
 
     await interaction.response.defer(thinking=True, ephemeral=True)
 
+    join_threads: list[Coroutine] = []
+    if isinstance(message_channel, discord.Thread) and not message_channel.me:
+        try:
+            join_threads.append(message_channel.join())
+        except Exception:
+            pass
+    if isinstance(target_channel, discord.Thread) and not target_channel.me:
+        try:
+            join_threads.append(target_channel.join())
+        except Exception:
+            pass
+
+    create_bridges = []
     session = None
     try:
         session = SQLSession(engine)
-        await asyncio.gather(
+        create_bridges = [
             create_bridge_and_db(message_channel, target_channel, session),
             create_bridge_and_db(target_channel, message_channel, session),
-        )
+        ]
     except SQLError:
         await interaction.followup.send(
             "❌ There was an issue with the connection to the database; bridge creation failed.",
@@ -161,6 +174,8 @@ async def bridge(interaction: discord.Interaction, target: str):
         "✅ Bridge created! Try sending a message from either channel 😁",
         ephemeral=True,
     )
+
+    await asyncio.gather(*(join_threads + create_bridges))
 
 
 @discord.app_commands.guild_only()
@@ -209,12 +224,25 @@ async def outbound(interaction: discord.Interaction, target: str):
 
     await interaction.response.defer(thinking=True, ephemeral=True)
 
-    await create_bridge_and_db(message_channel, target_channel)
+    join_threads: list[Coroutine] = []
+    if isinstance(message_channel, discord.Thread) and not message_channel.me:
+        try:
+            join_threads.append(message_channel.join())
+        except Exception:
+            pass
+    if isinstance(target_channel, discord.Thread) and not target_channel.me:
+        try:
+            join_threads.append(target_channel.join())
+        except Exception:
+            pass
+
+    create_bridge = create_bridge_and_db(message_channel, target_channel)
 
     await interaction.followup.send(
         "✅ Bridge created! Try sending a message from this channel 😁",
         ephemeral=True,
     )
+    await asyncio.gather(*(join_threads + [create_bridge]))
 
 
 @discord.app_commands.guild_only()
@@ -263,12 +291,25 @@ async def inbound(interaction: discord.Interaction, source: str):
 
     await interaction.response.defer(thinking=True, ephemeral=True)
 
-    await create_bridge_and_db(source_channel, message_channel)
+    join_threads: list[Coroutine] = []
+    if isinstance(message_channel, discord.Thread) and not message_channel.me:
+        try:
+            join_threads.append(message_channel.join())
+        except Exception:
+            pass
+    if isinstance(source_channel, discord.Thread) and not source_channel.me:
+        try:
+            join_threads.append(source_channel.join())
+        except Exception:
+            pass
+
+    create_bridge = create_bridge_and_db(source_channel, message_channel)
 
     await interaction.followup.send(
         "✅ Bridge created! Try sending a message from the other channel 😁",
         ephemeral=True,
     )
+    await asyncio.gather(*(join_threads + [create_bridge]))
 
 
 @discord.app_commands.guild_only()
@@ -904,6 +945,11 @@ async def bridge_thread_helper(
 
         create_bridges: list[Coroutine] = []
         add_user_to_threads: list[Coroutine] = []
+        try:
+            add_user_to_threads.append(thread_to_bridge.join())
+        except Exception:
+            pass
+
         for idx in range(2):
             if idx == 0:
                 list_of_bridges = outbound_bridges
@@ -962,17 +1008,19 @@ async def bridge_thread_helper(
                     failed_channels.append(channel.id)
                     continue
 
-                if (
-                    not thread_already_existed
-                    and channel_user
-                    and channel.permissions_for(
-                        channel.guild.me
-                    ).send_messages_in_threads
-                ):
+                if not thread_already_existed:
                     try:
-                        add_user_to_threads.append(new_thread.add_user(channel_user))
+                        add_user_to_threads.append(new_thread.join())
                     except Exception:
                         pass
+
+                    if channel_user:
+                        try:
+                            add_user_to_threads.append(
+                                new_thread.add_user(channel_user)
+                            )
+                        except Exception:
+                            pass
 
                 threads_created[channel_id] = new_thread
                 if idx == 0:

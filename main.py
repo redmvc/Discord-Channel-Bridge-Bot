@@ -594,6 +594,11 @@ async def on_thread_create(thread: discord.Thread):
     if not isinstance(thread.parent, discord.TextChannel):
         return
 
+    try:
+        await thread.join()
+    except Exception:
+        pass
+
     if not await globals.wait_until_ready():
         return
 
