@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session as SQLSession
 import commands
 import globals
 from bridge import bridges
-from database import DBBridge, DBMessageMap, engine
+from database import DBAutoBridgeThreadChannels, DBBridge, DBMessageMap, engine
 
 
 class ThreadSplat(TypedDict, total=False):
@@ -108,6 +108,16 @@ async def on_ready():
         session.execute(delete_invalid_webhooks)
 
     session.commit()
+
+    # And next I identify all automatically-thread-bridging channels
+    registered_auto_bridge_thread_channels: ScalarResult[DBAutoBridgeThreadChannels] = (
+        session.scalars(SQLSelect(DBAutoBridgeThreadChannels))
+    )
+    for auto_bridge_thread_channel in registered_auto_bridge_thread_channels:
+        globals.auto_bridge_thread_channels.append(
+            int(auto_bridge_thread_channel.channel)
+        )
+
     session.close()
 
     await globals.command_tree.sync()
