@@ -1015,6 +1015,15 @@ async def bridge_thread_helper(
 
 
 def stop_auto_bridging_threads_helper(channel_id: int, session: SQLSession):
+    """Remove a channel from the auto_bridge_thread_channels table and list.
+
+    #### Args:
+        - `channel_id`: The ID of the channel to remove.
+        - `session`: SQL session for accessing the database.
+
+    #### Raises:
+        - `SQLError`: Something went wrong accessing or modifying the database.
+    """
     session.execute(
         SQLDelete(DBAutoBridgeThreadChannels).where(
             DBAutoBridgeThreadChannels.channel == str(channel_id)
