@@ -19,10 +19,7 @@ from validations import validate_types
     name="help",
     description="Return a list of commands or detailed information about a command.",
 )
-async def help(
-    interaction: discord.Interaction,
-    command: str | None = None,
-):
+async def help(interaction: discord.Interaction, command: str | None = None):
     if not command:
         await interaction.response.send_message(
             "This bot bridges channels and threads to each other, mirroring messages sent from one to the other. When a message is bridged:"
@@ -86,10 +83,7 @@ async def help(
     name="bridge",
     description="Create a two-way bridge between two channels.",
 )
-async def bridge(
-    interaction: discord.Interaction,
-    target: str,
-):
+async def bridge(interaction: discord.Interaction, target: str):
     message_channel = interaction.channel
     if not isinstance(message_channel, (discord.TextChannel, discord.Thread)):
         await interaction.response.send_message(
@@ -160,10 +154,7 @@ async def bridge(
     name="outbound",
     description="Create an outbound bridge from this channel to target channel.",
 )
-async def outbound(
-    interaction: discord.Interaction,
-    target: str,
-):
+async def outbound(interaction: discord.Interaction, target: str):
     message_channel = interaction.channel
     if not isinstance(message_channel, (discord.TextChannel, discord.Thread)):
         await interaction.response.send_message(
@@ -217,10 +208,7 @@ async def outbound(
     name="inbound",
     description="Create an inbound bridge from source channel to this channel.",
 )
-async def inbound(
-    interaction: discord.Interaction,
-    source: str,
-):
+async def inbound(interaction: discord.Interaction, source: str):
     message_channel = interaction.channel
     if not isinstance(message_channel, (discord.TextChannel, discord.Thread)):
         await interaction.response.send_message(
@@ -274,9 +262,7 @@ async def inbound(
     name="bridge_thread",
     description="Create threads across the bridge matching this one and bridge them.",
 )
-async def bridge_thread(
-    interaction: discord.Interaction,
-):
+async def bridge_thread(interaction: discord.Interaction):
     message_thread = interaction.channel
     if not isinstance(message_thread, discord.Thread):
         await interaction.response.send_message(
@@ -451,10 +437,7 @@ async def bridge_thread(
     name="demolish",
     description="Demolish all bridges between this and target channel.",
 )
-async def demolish(
-    interaction: discord.Interaction,
-    target: str,
-):
+async def demolish(interaction: discord.Interaction, target: str):
     message_channel = interaction.channel
     if not isinstance(message_channel, (discord.TextChannel, discord.Thread)):
         await interaction.response.send_message(
@@ -549,9 +532,7 @@ async def demolish(
     name="demolish_all",
     description="Demolish all bridges to and from this channel.",
 )
-async def demolish_all(
-    interaction: discord.Interaction,
-):
+async def demolish_all(interaction: discord.Interaction):
     message_channel = interaction.channel
     if not isinstance(message_channel, (discord.TextChannel, discord.Thread)):
         await interaction.response.send_message(
@@ -798,9 +779,7 @@ async def demolish_bridge_one_sided(
     await bridges.demolish_bridge(source, target)
 
 
-# @globals.command_tree.context_menu(
-#     name="List Reactions",
-# )
+# @globals.command_tree.context_menu(name="List Reactions")
 # async def list_reactions(interaction: discord.Interaction, message: discord.Message):
 #     """List all reactions and users who reacted on all sides of a bridge."""
 #     channel = message.channel
