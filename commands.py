@@ -588,7 +588,7 @@ async def demolish_all(
         channels_to_check = [message_channel]
     channels_affected = {channel.id for channel in channels_to_check}
     lists_of_bridges = {
-        channel: (
+        channel.id: (
             bridges.get_inbound_bridges(channel.id),
             bridges.get_outbound_bridges(channel.id),
         )
@@ -621,7 +621,7 @@ async def demolish_all(
         )
         return
 
-    for channel_to_demolish, (
+    for channel_to_demolish_id, (
         inbound_bridges,
         outbound_bridges,
     ) in lists_of_bridges.items():
@@ -656,14 +656,14 @@ async def demolish_all(
         channels_affected = channels_affected.union(paired_channels)
 
         try:
-            message_channel_id = str(message_channel.id)
+            channel_to_demolish_id_str = str(channel_to_demolish_id)
             exceptions_list = [str(i) for i in exceptions]
 
             delete_demolished_bridges = SQLDelete(DBBridge).where(
                 sql_or(
-                    DBBridge.target == message_channel_id,
+                    DBBridge.target == channel_to_demolish_id_str,
                     sql_and(
-                        DBBridge.source == message_channel_id,
+                        DBBridge.source == channel_to_demolish_id_str,
                         DBBridge.target.not_in(exceptions_list),
                     ),
                 )
@@ -672,9 +672,9 @@ async def demolish_all(
 
             delete_demolished_messages = SQLDelete(DBMessageMap).where(
                 sql_or(
-                    DBMessageMap.target_channel == message_channel_id,
+                    DBMessageMap.target_channel == channel_to_demolish_id_str,
                     sql_and(
-                        DBMessageMap.source_channel == message_channel_id,
+                        DBMessageMap.source_channel == channel_to_demolish_id_str,
                         DBMessageMap.target_channel.not_in(exceptions_list),
                     ),
                 )
@@ -689,9 +689,9 @@ async def demolish_all(
                 session.close()
             return
 
-        for channel_id in paired_channels:
+        for paired_channel_id in paired_channels:
             bridges_being_demolished.append(
-                demolish_bridges(channel_id, channel_to_demolish)
+                demolish_bridges(paired_channel_id, channel_to_demolish_id)
             )
 
     validate_auto_bridge_thread_channels(channels_affected, session)
