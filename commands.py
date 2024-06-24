@@ -1,4 +1,5 @@
 import asyncio
+from typing import Coroutine
 
 import discord
 from sqlalchemy import Delete as SQLDelete
@@ -375,7 +376,8 @@ async def bridge_thread(interaction: discord.Interaction):
         bridged_threads = []
         failed_channels = []
 
-        create_bridges = []
+        create_bridges: list[Coroutine] = []
+        add_user_to_threads: list[Coroutine] = []
         for idx in range(2):
             if idx == 0:
                 list_of_bridges = outbound_bridges
@@ -407,6 +409,7 @@ async def bridge_thread(interaction: discord.Interaction):
                     continue
 
                 new_thread = threads_created.get(channel_id)
+                thread_already_existed = new_thread is not None
                 if not new_thread and matching_starting_messages.get(channel_id):
                     # I found a matching starting message, so I'll try to create the thread starting there
                     matching_starting_message = await channel.fetch_message(
@@ -432,6 +435,18 @@ async def bridge_thread(interaction: discord.Interaction):
                     failed_channels.append(channel.id)
                     continue
 
+                if (
+                    not thread_already_existed
+                    and channel_user
+                    and channel.permissions_for(
+                        channel.guild.me
+                    ).send_messages_in_threads
+                ):
+                    try:
+                        add_user_to_threads.append(new_thread.add_user(channel_user))
+                    except Exception:
+                        pass
+
                 threads_created[channel_id] = new_thread
                 if idx == 0:
                     create_bridges.append(
@@ -442,7 +457,7 @@ async def bridge_thread(interaction: discord.Interaction):
                         create_bridge_and_db(new_thread, message_thread, session)
                     )
                 succeeded_at_least_once = True
-        await asyncio.gather(*create_bridges)
+        await asyncio.gather(*(create_bridges + add_user_to_threads))
     except SQLError:
         await interaction.followup.send(
             "❌ There was an issue with the connection to the database; thread and bridge creation failed.",
