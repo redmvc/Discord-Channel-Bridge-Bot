@@ -585,4 +585,32 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
     session.close()
 
 
+@globals.client.event
+async def on_thread_create(thread: discord.Thread):
+    """Called whenever a thread is created.
+
+    #### Args:
+        - `thread`: The thread that was created.
+    """
+    # Bridge a thread from a channel that has auto_bridge_threads enabled
+    if not isinstance(thread.parent, discord.TextChannel):
+        return
+
+    if not await globals.wait_until_ready():
+        return
+
+    parent_channel = thread.parent
+    if parent_channel.id not in globals.auto_bridge_thread_channels:
+        return
+
+    assert globals.client.user
+    if thread.owner_id and thread.owner_id == globals.client.user.id:
+        return
+
+    if not thread.permissions_for(thread.guild.me).manage_webhooks:
+        return
+
+    await commands.bridge_thread_helper(thread, thread.owner_id)
+
+
 globals.client.run(cast(str, globals.credentials["app_token"]), reconnect=True)
