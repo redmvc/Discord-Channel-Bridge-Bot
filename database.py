@@ -46,7 +46,7 @@ class DBMessageMap(DBBase):
 
 
 class DBAutoBridgeThreadChannels(DBBase):
-    __tablenname__ = "auto_bridge_thread_channels"
+    __tablename__ = "auto_bridge_thread_channels"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     channel: Mapped[str] = mapped_column(String(32), nullable=False)
