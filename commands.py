@@ -374,12 +374,7 @@ async def auto_bridge_threads(
 
             response = "✅ Threads will now be automatically created across bridges when they are created in this channel."
         else:
-            session.execute(
-                SQLDelete(DBAutoBridgeThreadChannels).where(
-                    DBAutoBridgeThreadChannels.channel == str(message_channel.id)
-                )
-            )
-            globals.auto_bridge_thread_channels.remove(message_channel.id)
+            stop_auto_bridging_threads_helper(message_channel.id)
 
             response = "✅ Threads will no longer be automatically created across bridges when they are created in this channel."
 
@@ -1017,6 +1012,15 @@ async def bridge_thread_helper(
 
     session.commit()
     session.close()
+
+
+def stop_auto_bridging_threads_helper(channel_id: int, session: SQLSession):
+    session.execute(
+        SQLDelete(DBAutoBridgeThreadChannels).where(
+            DBAutoBridgeThreadChannels.channel == str(channel_id)
+        )
+    )
+    globals.auto_bridge_thread_channels.remove(channel_id)
 
 
 # @globals.command_tree.context_menu(name="List Reactions")
