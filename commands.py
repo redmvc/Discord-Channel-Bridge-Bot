@@ -336,7 +336,8 @@ async def bridge_thread(interaction: discord.Interaction):
         # Now find all channels that are bridged to the channel this thread's parent is bridged to and create threads there
         threads_created: dict[int, discord.Thread] = {}
         succeeded_at_least_once = False
-        failed_at_least_once = False
+        bridged_threads = []
+        failed_channels = []
 
         create_bridges = []
         for idx in range(2):
@@ -351,7 +352,8 @@ async def bridge_thread(interaction: discord.Interaction):
                 channel = globals.get_channel_from_id(channel_id)
                 if not isinstance(channel, discord.TextChannel):
                     # I can't create a thread inside a thread
-                    failed_at_least_once = True
+                    if channel:
+                        bridged_threads.append(channel.id)
                     continue
 
                 channel_user = channel.guild.get_member(interaction.user.id)
@@ -365,7 +367,7 @@ async def bridge_thread(interaction: discord.Interaction):
                     ).create_public_threads
                 ):
                     # User doesn't have permission to act there
-                    failed_at_least_once = True
+                    failed_channels.append(channel.id)
                     continue
 
                 new_thread = threads_created.get(channel_id)
@@ -391,7 +393,7 @@ async def bridge_thread(interaction: discord.Interaction):
 
                 if not new_thread:
                     # Failed to create a thread somehow
-                    failed_at_least_once = True
+                    failed_channels.append(channel.id)
                     continue
 
                 threads_created[channel_id] = new_thread
@@ -415,18 +417,26 @@ async def bridge_thread(interaction: discord.Interaction):
         return
 
     if succeeded_at_least_once:
-        if not failed_at_least_once:
-            await interaction.followup.send("✅ All threads created!", ephemeral=True)
+        if len(failed_channels) == 0:
+            response = "✅ All threads created!"
         else:
-            await interaction.followup.send(
-                "⭕ Some but not all threads were created; this may have happened because you lacked Manage Webhooks or Create Public Threads permissions. Note that trying to run this command again will duplicate threads.",
-                ephemeral=True,
+            response = (
+                "⭕ Some but not all threads were created. This may have happened because you lacked Manage Webhooks or Create Public Threads permissions. The channels this command failed for were:\n"
+                + "\n".join(
+                    f"- <#{failed_channel_id}>" for failed_channel_id in failed_channels
+                )
+                + "\nTrying to run this command again will duplicate threads in the channels the command _succeeded_ at. If you wish to create threads in the channels this command failed for, it would be better to do so manually one by one."
+            )
+
+        if len(bridged_threads) > 0:
+            response += (
+                "\n\nNote: this channel is bridged to at least one thread, and so this command was not able to create further threads in them. The threads bridged to this channel are:"
+                + "\n".join(f"- <#{thread_id}>" for thread_id in bridged_threads)
             )
     else:
-        await interaction.followup.send(
-            "❌ Couldn't create any threads. Check that you have Manage Webhooks and Create Public Threads permissions in all relevant channels.",
-            ephemeral=True,
-        )
+        response = "❌ Couldn't create any threads. Make sure that you and the bot have Manage Webhooks and Create Public Threads permissions in all relevant channels."
+
+    await interaction.followup.send(response, ephemeral=True)
 
     session.commit()
     session.close()
