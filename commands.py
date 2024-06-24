@@ -488,6 +488,11 @@ async def demolish(interaction: discord.Interaction, target: str):
             session.close()
         return
 
+    await demolishing
+    validate_auto_bridge_thread_channels(
+        {message_channel.id, target_channel.id}, session
+    )
+
     session.commit()
     session.close()
 
@@ -495,7 +500,6 @@ async def demolish(interaction: discord.Interaction, target: str):
         "✅ Bridges demolished!",
         ephemeral=True,
     )
-    await demolishing
 
 
 @discord.app_commands.guild_only()
@@ -541,6 +545,7 @@ async def demolish_all(
         channels_to_check = [thread_parent_channel] + thread_parent_channel.threads
     else:
         channels_to_check = [message_channel]
+    channels_affected = {channel.id for channel in channels_to_check}
     lists_of_bridges = {
         channel: (
             bridges.get_inbound_bridges(channel.id),
@@ -607,6 +612,8 @@ async def demolish_all(
                 else:
                     paired_channels.add(target_id)
 
+        channels_affected = channels_affected.union(paired_channels)
+
         try:
             message_channel_id = str(message_channel.id)
             exceptions_list = [str(i) for i in exceptions]
@@ -645,6 +652,8 @@ async def demolish_all(
             bridges_being_demolished.append(
                 demolish_bridges(channel_id, channel_to_demolish)
             )
+
+    validate_auto_bridge_thread_channels(channels_affected, session)
 
     session.commit()
     session.close()
@@ -1045,11 +1054,44 @@ def stop_auto_bridging_threads_helper(
             )
         )
     )
+
     globals.auto_bridge_thread_channels -= channel_ids_to_remove
 
     if close_after:
         session.commit()
         session.close()
+
+
+def validate_auto_bridge_thread_channels(
+    channel_ids_to_check: int | Iterable[int], session: SQLSession | None = None
+):
+    """Check whether each one of a list of channels are in auto_bridge_thread_channels and, if so, whether they should be and, if not, remove them from there.
+
+    #### Args:
+        - `channel_ids_to_check`: IDs of the channels to check.
+        - `session`: SQL session for accessing the database. Optional, default None.
+
+    #### Raises:
+        - `SQLError`: Something went wrong accessing or modifying the database.
+    """
+    if not isinstance(channel_ids_to_check, set):
+        if isinstance(channel_ids_to_check, int):
+            channel_ids_to_check = {channel_ids_to_check}
+        else:
+            channel_ids_to_check = set(channel_ids_to_check)
+
+    channel_ids_to_remove = {
+        id
+        for id in channel_ids_to_check
+        if id in globals.auto_bridge_thread_channels
+        and not bridges.get_inbound_bridges(id)
+        and not bridges.get_outbound_bridges(id)
+    }
+
+    if len(channel_ids_to_remove) == 0:
+        return
+
+    stop_auto_bridging_threads_helper(channel_ids_to_remove, session)
 
 
 # @globals.command_tree.context_menu(name="List Reactions")
