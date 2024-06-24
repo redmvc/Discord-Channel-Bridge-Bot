@@ -370,7 +370,7 @@ async def auto_bridge_threads(
         session = SQLSession(engine)
         if message_channel.id not in globals.auto_bridge_thread_channels:
             session.add(DBAutoBridgeThreadChannels(channel=str(message_channel.id)))
-            globals.auto_bridge_thread_channels.append(message_channel.id)
+            globals.auto_bridge_thread_channels.add(message_channel.id)
 
             response = "✅ Threads will now be automatically created across bridges when they are created in this channel."
         else:
@@ -1045,11 +1045,7 @@ def stop_auto_bridging_threads_helper(
             )
         )
     )
-    globals.auto_bridge_thread_channels = [
-        channel_id
-        for channel_id in globals.auto_bridge_thread_channels
-        if channel_id not in channel_ids_to_remove
-    ]
+    globals.auto_bridge_thread_channels -= channel_ids_to_remove
 
     if close_after:
         session.commit()

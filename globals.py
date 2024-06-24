@@ -39,7 +39,7 @@ command_tree = discord.app_commands.CommandTree(client)
 is_ready: bool = False
 
 # Channels which will automatically create threads in bridged channels
-auto_bridge_thread_channels: list[int] = []
+auto_bridge_thread_channels: set[int] = set()
 
 
 def mention_to_channel(
