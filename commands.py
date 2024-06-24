@@ -67,9 +67,10 @@ async def help(interaction: discord.Interaction, command: str | None = None):
             )
         elif command == "demolish_all":
             await interaction.response.send_message(
-                "`/demolish_all`"
+                "`/demolish_all [channel_and_threads]`"
                 + "\nDestroys any existing bridges involving the current channel or thread, making messages from it no longer be mirrored to other channels and making other channels' messages no longer be mirrored to it."
-                + "\n\nNote that even if you recreate any of the bridges, the messages previously bridged will no longer be connected and so they will not share future reactions, edits, or deletions. Note also that this will only destroy bridges to and from the _current specific channel/thread_, not from any threads that spin off it or its parent.",
+                + "\n\nIf you don't include `channel_and_threads` or set it to `False`, this will _only_ demolish bridges involving the _current specific channel/thread_. If instead you set `channel_and_threads` to `True`, this will demolish _all_ bridges involving the current channel/thread, its parent channel if it's a thread, and all of its or its parent channel's threads."
+                + "\n\nNote that even if you recreate any of the bridges, the messages previously bridged will no longer be connected and so they will not share future reactions, edits, or deletions.",
                 ephemeral=True,
             )
         else:
@@ -576,7 +577,9 @@ async def demolish(interaction: discord.Interaction, target: str):
     name="demolish_all",
     description="Demolish all bridges to and from this channel.",
 )
-async def demolish_all(interaction: discord.Interaction):
+async def demolish_all(
+    interaction: discord.Interaction, channel_and_threads: bool | None = None
+):
     message_channel = interaction.channel
     if not isinstance(message_channel, (discord.TextChannel, discord.Thread)):
         await interaction.response.send_message(
@@ -596,11 +599,39 @@ async def demolish_all(interaction: discord.Interaction):
         )
         return
 
-    inbound_bridges = bridges.get_inbound_bridges(message_channel.id)
-    outbound_bridges = bridges.get_outbound_bridges(message_channel.id)
-    if not inbound_bridges and not outbound_bridges:
+    # If channel_and_threads I'm going to demolish all bridges connected to the current channel and its threads
+    if channel_and_threads:
+        if isinstance(message_channel, discord.Thread):
+            thread_parent_channel = message_channel.parent
+            if not isinstance(thread_parent_channel, discord.TextChannel):
+                await interaction.response.send_message(
+                    "Please run this command from a text channel or a thread off one.",
+                    ephemeral=True,
+                )
+                return
+        else:
+            thread_parent_channel = message_channel
+
+        channels_to_check = [thread_parent_channel] + thread_parent_channel.threads
+    else:
+        channels_to_check = [message_channel]
+    lists_of_bridges = {
+        channel: (
+            bridges.get_inbound_bridges(channel.id),
+            bridges.get_outbound_bridges(channel.id),
+        )
+        for channel in channels_to_check
+    }
+
+    found_bridges = any(
+        [
+            inbound_bridges is not None or outbound_bridges is not None
+            for _, (inbound_bridges, outbound_bridges) in lists_of_bridges.items()
+        ]
+    )
+    if not found_bridges:
         await interaction.response.send_message(
-            "There are no bridges associated with the current channel.",
+            "There are no bridges associated with the current channel or thread(s).",
             ephemeral=True,
         )
         return
@@ -608,71 +639,86 @@ async def demolish_all(interaction: discord.Interaction):
     await interaction.response.defer(thinking=True, ephemeral=True)
 
     # I'll make a list of all channels that are currently bridged to or from this channel
-    paired_channels: set[int]
-    if inbound_bridges:
-        paired_channels = set(inbound_bridges.keys())
-    else:
-        paired_channels = set()
-
-    exceptions: set[int] = set()
-    if outbound_bridges:
-        for target_id in outbound_bridges.keys():
-            target_channel = globals.get_channel_from_id(target_id)
-            assert isinstance(target_channel, (discord.TextChannel, discord.Thread))
-            target_channel_user = target_channel.guild.get_member(interaction.user.id)
-            if (
-                not target_channel_user
-                or not target_channel.permissions_for(
-                    target_channel_user
-                ).manage_webhooks
-                or not target_channel.permissions_for(
-                    target_channel.guild.me
-                ).manage_webhooks
-            ):
-                # If I don't have Manage Webhooks permission in the target, I can't destroy the bridge from there
-                exceptions.add(target_id)
-            else:
-                paired_channels.add(target_id)
-
     bridges_being_demolished = []
-    for channel_id in paired_channels:
-        bridges_being_demolished.append(demolish_bridges(channel_id, message_channel))
-
-    session = None
     try:
         session = SQLSession(engine)
-        message_channel_id = str(message_channel.id)
-        exceptions_list = [str(i) for i in exceptions]
-
-        delete_demolished_bridges = SQLDelete(DBBridge).where(
-            sql_or(
-                DBBridge.target == message_channel_id,
-                sql_and(
-                    DBBridge.source == message_channel_id,
-                    DBBridge.target.not_in(exceptions_list),
-                ),
-            )
-        )
-        session.execute(delete_demolished_bridges)
-
-        delete_demolished_messages = SQLDelete(DBMessageMap).where(
-            sql_or(
-                DBMessageMap.target_channel == message_channel_id,
-                sql_and(
-                    DBMessageMap.source_channel == message_channel_id,
-                    DBMessageMap.target_channel.not_in(exceptions_list),
-                ),
-            )
-        )
-        session.execute(delete_demolished_messages)
     except SQLError:
         await interaction.followup.send(
-            "❌ There was an issue with the connection to the database; thread and bridge creation failed.",
+            "❌ There was an issue with the connection to the database; bridge demolition failed.",
             ephemeral=True,
         )
-        if session:
-            session.close()
         return
+
+    for channel_to_demolish, (
+        inbound_bridges,
+        outbound_bridges,
+    ) in lists_of_bridges.items():
+        paired_channels: set[int]
+        if inbound_bridges:
+            paired_channels = set(inbound_bridges.keys())
+        else:
+            paired_channels = set()
+
+        exceptions: set[int] = set()
+        if outbound_bridges:
+            for target_id in outbound_bridges.keys():
+                target_channel = globals.get_channel_from_id(target_id)
+                assert isinstance(target_channel, (discord.TextChannel, discord.Thread))
+                target_channel_user = target_channel.guild.get_member(
+                    interaction.user.id
+                )
+                if (
+                    not target_channel_user
+                    or not target_channel.permissions_for(
+                        target_channel_user
+                    ).manage_webhooks
+                    or not target_channel.permissions_for(
+                        target_channel.guild.me
+                    ).manage_webhooks
+                ):
+                    # If I don't have Manage Webhooks permission in the target, I can't destroy the bridge from there
+                    exceptions.add(target_id)
+                else:
+                    paired_channels.add(target_id)
+
+        try:
+            message_channel_id = str(message_channel.id)
+            exceptions_list = [str(i) for i in exceptions]
+
+            delete_demolished_bridges = SQLDelete(DBBridge).where(
+                sql_or(
+                    DBBridge.target == message_channel_id,
+                    sql_and(
+                        DBBridge.source == message_channel_id,
+                        DBBridge.target.not_in(exceptions_list),
+                    ),
+                )
+            )
+            session.execute(delete_demolished_bridges)
+
+            delete_demolished_messages = SQLDelete(DBMessageMap).where(
+                sql_or(
+                    DBMessageMap.target_channel == message_channel_id,
+                    sql_and(
+                        DBMessageMap.source_channel == message_channel_id,
+                        DBMessageMap.target_channel.not_in(exceptions_list),
+                    ),
+                )
+            )
+            session.execute(delete_demolished_messages)
+        except SQLError:
+            await interaction.followup.send(
+                "❌ There was an issue with the connection to the database; bridge demolition failed.",
+                ephemeral=True,
+            )
+            if session:
+                session.close()
+            return
+
+        for channel_id in paired_channels:
+            bridges_being_demolished.append(
+                demolish_bridges(channel_id, channel_to_demolish)
+            )
 
     session.commit()
     session.close()
