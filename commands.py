@@ -374,7 +374,7 @@ async def auto_bridge_threads(
 
             response = "✅ Threads will now be automatically created across bridges when they are created in this channel."
         else:
-            stop_auto_bridging_threads_helper(message_channel.id)
+            stop_auto_bridging_threads_helper(message_channel.id, session)
 
             response = "✅ Threads will no longer be automatically created across bridges when they are created in this channel."
 
