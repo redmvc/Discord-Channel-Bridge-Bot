@@ -1,5 +1,5 @@
 import asyncio
-from typing import Coroutine
+from typing import Coroutine, Iterable
 
 import discord
 from sqlalchemy import Delete as SQLDelete
@@ -1014,25 +1014,46 @@ async def bridge_thread_helper(
     session.close()
 
 
-def stop_auto_bridging_threads_helper(channel_id: int, session: SQLSession):
-    """Remove a channel from the auto_bridge_thread_channels table and list.
+def stop_auto_bridging_threads_helper(
+    channel_ids_to_remove: int | Iterable[int], session: SQLSession | None = None
+):
+    """Remove a group of channels from the auto_bridge_thread_channels table and list.
 
     #### Args:
-        - `channel_id`: The ID of the channel to remove.
-        - `session`: SQL session for accessing the database.
+        - `channel_ids_to_remove`: The IDs of the channels to remove.
+        - `session`: SQL session for accessing the database. Optional, default None.
 
     #### Raises:
         - `SQLError`: Something went wrong accessing or modifying the database.
     """
+    if not isinstance(channel_ids_to_remove, set):
+        if isinstance(channel_ids_to_remove, int):
+            channel_ids_to_remove = {channel_ids_to_remove}
+        else:
+            channel_ids_to_remove = set(channel_ids_to_remove)
+
+    if not session:
+        session = SQLSession(engine)
+        close_after = True
+    else:
+        close_after = False
+
     session.execute(
         SQLDelete(DBAutoBridgeThreadChannels).where(
-            DBAutoBridgeThreadChannels.channel == str(channel_id)
+            DBAutoBridgeThreadChannels.channel.in_(
+                [str(id) for id in channel_ids_to_remove]
+            )
         )
     )
-    try:
-        globals.auto_bridge_thread_channels.remove(channel_id)
-    except Exception:
-        pass
+    globals.auto_bridge_thread_channels = [
+        channel_id
+        for channel_id in globals.auto_bridge_thread_channels
+        if channel_id not in channel_ids_to_remove
+    ]
+
+    if close_after:
+        session.commit()
+        session.close()
 
 
 # @globals.command_tree.context_menu(name="List Reactions")
