@@ -34,8 +34,8 @@ async def help(interaction: discord.Interaction, command: str | None = None):
             + "\n- edits to the original message will be reflected in the bridged messages;"
             + "\n- whenever someone adds a reaction to one message the bot will add the same reaction (if it can) to all of its mirrors;"
             + "\n- and deleting the original message will delete its copies (but not vice-versa)."
-            + "\nThreads created in a channel do not automatically get matched to other channels bridged to it; create and bridge them manually or use the `/bridge_thread` command."
-            + "\n\nList of commands: `/bridge`, `/outbound`, `/inbound`, `/bridge_thread`, `/demolish`, `/demolish_all`, `/help`.\nType `/help command` for detailed explanation of a command.",
+            + "\nThreads created in a channel do not automatically get matched to other channels bridged to it; create and bridge them manually or use the `/bridge_thread` or `/auto_bridge_threads` command."
+            + "\n\nList of commands: `/bridge`, `/outbound`, `/inbound`, `/bridge_thread`, `/auto_bridge_threads`, `/demolish`, `/demolish_all`, `/help`.\nType `/help command` for detailed explanation of a command.",
             ephemeral=True,
         )
     else:
