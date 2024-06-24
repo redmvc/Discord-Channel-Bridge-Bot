@@ -263,8 +263,14 @@ class Bridges:
             return
 
         await self._outbound_bridges[source_id][target_id].destroy_webhook()
+
         del self._outbound_bridges[source_id][target_id]
+        if len(self._outbound_bridges[source_id]) == 0:
+            del self._outbound_bridges[source_id]
+
         del self._inbound_bridges[target_id][source_id]
+        if len(self._inbound_bridges[target_id]) == 0:
+            del self._inbound_bridges[target_id]
 
     def get_one_way_bridge(
         self,
