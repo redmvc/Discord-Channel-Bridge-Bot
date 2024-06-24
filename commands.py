@@ -280,10 +280,14 @@ async def bridge_thread(interaction: discord.Interaction):
     assert interaction.guild
     if (
         not message_thread.permissions_for(interaction.user).manage_webhooks
+        or not message_thread.permissions_for(interaction.user).create_public_threads
         or not message_thread.permissions_for(interaction.guild.me).manage_webhooks
+        or not message_thread.permissions_for(
+            interaction.guild.me
+        ).create_public_threads
     ):
         await interaction.response.send_message(
-            "Please make sure both you and the bot have 'Manage Webhooks' permission in both this and target channels.",
+            "Please make sure both you and the bot have Manage Webhooks and Create Public Threads permissions in both this and target channels.",
             ephemeral=True,
         )
         return
