@@ -11,7 +11,13 @@ from sqlalchemy.orm import Session as SQLSession
 
 import globals
 from bridge import Bridge, bridges
-from database import DBBridge, DBMessageMap, engine, sql_upsert
+from database import (
+    DBAutoBridgeThreadChannels,
+    DBBridge,
+    DBMessageMap,
+    engine,
+    sql_upsert,
+)
 from validations import validate_types
 
 
@@ -56,6 +62,12 @@ async def help(interaction: discord.Interaction, command: str | None = None):
             await interaction.response.send_message(
                 "`/bridge_thread`"
                 + "\nWhen this command is called from within a thread that is in a channel that is bridged to other channels, the bot will attempt to create new threads in all such channels and bridge them to the original one. If the original channel is bridged to threads or if you don't have create thread permissions in the other channels, this command may not run to completion.",
+                ephemeral=True,
+            )
+        elif command == "auto_bridge_threads":
+            await interaction.response.send_message(
+                "`/auto_bridge_threads`"
+                + "\nWhen this command is called from within a channel that is bridged to other channels, the bot will enable or disable automatic thread bridging, so that any threads created in this channel will also be created across all bridges involving it. You will need to run this command from within each channel you wish to enable automatic thread creation from.",
                 ephemeral=True,
             )
         elif command == "demolish":
@@ -464,6 +476,94 @@ async def bridge_thread(interaction: discord.Interaction):
 
     session.commit()
     session.close()
+
+
+@discord.app_commands.guild_only()
+@globals.command_tree.command(
+    name="auto_bridge_threads",
+    description="Enable or disable automatic thread bridging from this channel.",
+)
+async def auto_bridge_threads(
+    interaction: discord.Interaction,
+):
+    message_channel = interaction.channel
+    if not isinstance(message_channel, discord.TextChannel):
+        await interaction.response.send_message(
+            "Please run this command from a text channel.", ephemeral=True
+        )
+        return
+
+    assert isinstance(interaction.user, discord.Member)
+    assert interaction.guild
+    if (
+        not message_channel.permissions_for(interaction.user).manage_webhooks
+        or not message_channel.permissions_for(interaction.guild.me).manage_webhooks
+    ):
+        await interaction.response.send_message(
+            "Please make sure both you and the bot have Manage Webhooks and Create Public Threads permissions in both this and target channels.",
+            ephemeral=True,
+        )
+        return
+
+    outbound_bridges = bridges.get_outbound_bridges(message_channel.id)
+    inbound_bridges = bridges.get_inbound_bridges(message_channel.id)
+    if not outbound_bridges and not inbound_bridges:
+        await interaction.response.send_message(
+            "This channel isn't bridged to any other channels.", ephemeral=True
+        )
+        return
+
+    # I need to check that the current channel is bridged to at least one other channel (as opposed to only threads)
+    at_least_one_channel = False
+    for bridge_list in (outbound_bridges, inbound_bridges):
+        if not bridge_list:
+            continue
+
+        for target_id, bridge in bridge_list.items():
+            if target_id == bridge.webhook.channel_id:
+                at_least_one_channel = True
+                break
+
+        if at_least_one_channel:
+            break
+    if not at_least_one_channel:
+        await interaction.response.send_message(
+            "This channel is only bridged to threads.", ephemeral=True
+        )
+        return
+
+    await interaction.response.defer(thinking=True, ephemeral=True)
+
+    session = None
+    try:
+        session = SQLSession(engine)
+        if message_channel.id not in globals.auto_bridge_thread_channels:
+            session.add(DBAutoBridgeThreadChannels(channel=str(message_channel.id)))
+            globals.auto_bridge_thread_channels.append(message_channel.id)
+
+            response = "✅ Threads will now be automatically created across bridges when they are created in this channel."
+        else:
+            session.execute(
+                SQLDelete(DBAutoBridgeThreadChannels).where(
+                    DBAutoBridgeThreadChannels.channel == str(message_channel.id)
+                )
+            )
+            globals.auto_bridge_thread_channels.remove(message_channel.id)
+
+            response = "✅ Threads will no longer be automatically created across bridges when they are created in this channel."
+
+        session.commit()
+        session.close()
+    except SQLError:
+        await interaction.followup.send(
+            "❌ There was an issue with the connection to the database; setting or unsetting automatic thread creation across bridges failed.",
+            ephemeral=True,
+        )
+        if session:
+            session.close()
+        return
+
+    await interaction.followup.send(response, ephemeral=True)
 
 
 @discord.app_commands.guild_only()

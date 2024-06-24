@@ -13,6 +13,7 @@ To add this bot to your server, visit [this link](https://discord.com/oauth2/aut
 - The bot will mirror messages, attachments, reactions, edits, and deletions.
   - It will not mirror thread creation; if you want threads in bridged channels to be mirrored, you need to run the bridge command from within them.
     - Alternatively, you can run the command `/bridge_thread` from within a new thread and it will try to create threads in all channels bridged to the current one following the same bridge rules present in the parent channel.
+    - Another option is running the command `/auto_bridge_threads` from a channel; this will cause thread creation in that channel to be mirrored (though you'll need to run that channel on each side of each bridge for mirrors to work in all directions). Running this command again will revert to the default behaviour.
 - You can run the command `/demolish target` to demolish all bridges between the current and target channels/threads.
   - You can run the command `/demolish_all` to demolish all bridges to and from the current channel/thread (and, optionally, its threads or its parent channel's threads).
 - `/help` will give you a list of commands. `/help command_name` will explain the usage of the specific command passed as argument.
