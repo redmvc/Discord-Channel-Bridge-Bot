@@ -15,6 +15,7 @@ from bridge import Bridge, bridges
 from database import (
     DBAutoBridgeThreadChannels,
     DBBridge,
+    DBEmojiMap,
     DBMessageMap,
     engine,
     sql_upsert,
@@ -1144,6 +1145,77 @@ def validate_auto_bridge_thread_channels(
         return
 
     stop_auto_bridging_threads_helper(channel_ids_to_remove, session)
+
+
+def map_emoji_helper(
+    external_emoji: discord.Emoji | discord.PartialEmoji | None,
+    internal_emoji: discord.Emoji,
+    session: SQLSession | None = None,
+):
+    """Create a mapping between external and internal emoji, recording it locally and saving it in the emoji_mappings table.
+
+    #### Args:
+        - `external_emoji`: The custom emoji that is not present in any servers the bot is in.
+        - `internal_emoji`: An emoji the bot has in its emoji server.
+        - `session`: A connection to the database. Defaults to None.
+
+    #### Raises:
+        - `UnknownDBDialectError`: Invalid database dialect registered in `settings.json` file.
+        - `SQLError`: SQL statement inferred from arguments was invalid or database connection failed.
+    """
+    if not external_emoji or not external_emoji.id:
+        return
+
+    types_to_validate: dict[str, tuple] = {
+        "external_emoji": (external_emoji, (discord.Emoji, discord.PartialEmoji)),
+        "internal_emoji": (internal_emoji, discord.Emoji),
+    }
+    if session:
+        types_to_validate["session"] = (session, SQLSession)
+    validate_types(types_to_validate)
+
+    if isinstance(external_emoji, discord.PartialEmoji):
+        external_emoji = globals.client.get_emoji(external_emoji.id)
+        if not external_emoji:
+            return
+
+    globals.emoji_mappings[external_emoji.id] = internal_emoji.id
+
+    if external_emoji and external_emoji.guild:
+        external_emoji_server_name = external_emoji.guild.name
+    else:
+        external_emoji_server_name = ""
+
+    if not session:
+        session = SQLSession(engine)
+        close_after = True
+    else:
+        close_after = False
+
+    try:
+        upsert_emoji = sql_upsert(
+            DBEmojiMap,
+            {
+                "external_emoji": str(external_emoji.id),
+                "external_emoji_name": external_emoji.name,
+                "external_emoji_server_name": external_emoji_server_name,
+                "internal_emoji": str(internal_emoji.id),
+            },
+            {
+                "internal_emoji": str(internal_emoji.id),
+            },
+        )
+
+        session.execute(upsert_emoji)
+    except SQLError as e:
+        if session:
+            session.close()
+
+        raise e
+
+    if close_after:
+        session.commit()
+        session.close()
 
 
 # @globals.command_tree.context_menu(name="List Reactions")
