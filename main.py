@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import TypedDict, cast
+from typing import Coroutine, TypedDict, cast
 from warnings import warn
 
 import discord
@@ -595,6 +595,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                 )
             ).first()
             message_id_to_skip: int | None = None
+            async_add_reactions: list[Coroutine] = []
             if isinstance(source_message_map, DBMessageMap):
                 # This message was bridged, so find the original one, react to it, and then find any other bridged messages from it
                 source_channel = await globals.get_channel_from_id(
@@ -611,7 +612,9 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                         source_message_id
                     )
                     if source_message:
-                        await source_message.add_reaction(reaction_emoji)
+                        async_add_reactions.append(
+                            source_message.add_reaction(reaction_emoji)
+                        )
                 except discord.HTTPException as e:
                     warn(
                         "Ran into a Discord exception while trying to add a reaction across a bridge:\n"
@@ -627,6 +630,8 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
 
             outbound_bridges = bridges.get_outbound_bridges(source_message_id)
             if not outbound_bridges:
+                if len(async_add_reactions) > 0:
+                    await async_add_reactions[0]
                 return
 
             bridged_messages: ScalarResult[DBMessageMap] = session.scalars(
@@ -637,7 +642,6 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                     )
                 )
             )
-            async_add_reactions = []
             for message_row in bridged_messages:
                 target_message_id = int(message_row.target_message)
                 target_channel_id = int(message_row.target_channel)
