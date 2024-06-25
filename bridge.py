@@ -15,8 +15,14 @@ class Bridge:
     source_id : int
         The ID of the source channel of the bridge.
 
+    source_channel : TextChannel | Thread
+        The source channel of the bridge.
+
     target_id : int
         The ID of the target channel of the bridge.
+
+    target_channel : TextChannel | Thread
+        The target channel of the bridge.
 
     webhook : discord.Webhook
         A webhook connecting those channels
@@ -110,6 +116,7 @@ class Bridge:
             validate_types({"webhook": (webhook, discord.Webhook)})
             validate_webhook(webhook, target_channel)
 
+        # If I already have a webhook, I'll destroy it and replace it with a new one
         await self._destroy_webhook("Recycling webhook.")
 
         if webhook:
