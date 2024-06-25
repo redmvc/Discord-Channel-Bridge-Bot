@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session as SQLSession
 from sqlalchemy.orm import mapped_column
 from sqlalchemy.sql._typing import _DMLTableArgument
 
-from globals import credentials
+from globals import settings
 from validations import validate_types
 
 
@@ -51,7 +51,7 @@ class DBBridge(DBBase):
 
 class DBMessageMap(DBBase):
     """
-    An SQLAlchemy ORM class listing the mappings between bridged messages.
+    An SQLAlchemy ORM class representing a database table listing the mappings between bridged messages.
 
     #### Columns
     - `id (INT)`: The id number of a mapping, has `PRIMARY KEY` and `AUTO_INCREMENT`.
@@ -72,7 +72,7 @@ class DBMessageMap(DBBase):
 
 class DBAutoBridgeThreadChannels(DBBase):
     """
-    An SQLAlchemy ORM class listing all channels that will automatically bridge newly-created threads.
+    An SQLAlchemy ORM class representing a database table listing all channels that will automatically bridge newly-created threads.
 
     #### Columns
     - `id (INT)`: The id number of an entry, has `PRIMARY KEY` and `AUTO_INCREMENT`.
@@ -83,6 +83,25 @@ class DBAutoBridgeThreadChannels(DBBase):
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     channel: Mapped[str] = mapped_column(String(32), nullable=False)
+
+
+class DBEmojiMap(DBBase):
+    """
+    An SQLAlchemy ORM class representing a database table matching external emoji we couldn't find with emoji we have stored in our emoji server.
+
+    #### Columns
+    - `external_emoji (VARCHAR(32))`: The ID of the external emoji which had been missing. Has `PRIMARY KEY`.
+    - `external_emoji_name (VARCHAR(32))`: The name of the external emoji on its original server.
+    - `external_emoji_server_name (VARCHAR(32))`: The name of the original server this emoji is from.
+    - `internal_emoji (VARCHAR(32))`: The ID of the internal emoji that we created to match it.
+    """
+
+    __tablename__ = "emoji_mapping"
+
+    external_emoji: Mapped[str] = mapped_column(String(32), primary_key=True)
+    external_emoji_name: Mapped[str] = mapped_column(String(32))
+    external_emoji_server_name: Mapped[str] = mapped_column(String(32))
+    internal_emoji: Mapped[str] = mapped_column(String(32), nullable=False)
 
 
 def sql_upsert(
@@ -99,7 +118,7 @@ def sql_upsert(
 
     ### Raises:
         - `ValueError`: `insert_values` does not have any keys not present in `update_values`.
-        - `UnknownDBDialectError`: Invalid database dialect registered in `credentials` file.
+        - `UnknownDBDialectError`: Invalid database dialect registered in `settings.json` file.
         - `SQLError`: SQL statement inferred from arguments was invalid or database connection failed.
 
     #### Returns:
@@ -166,7 +185,7 @@ def sql_upsert(
 
 # Create the engine connecting to the database
 engine = create_engine(
-    f"{credentials['db_dialect']}+{credentials['db_driver']}://{credentials['db_user']}:{credentials['db_pwd']}@{credentials['db_host']}:{credentials['db_port']}/{credentials['db_name']}"
+    f"{settings['db_dialect']}+{settings['db_driver']}://{settings['db_user']}:{settings['db_pwd']}@{settings['db_host']}:{settings['db_port']}/{settings['db_name']}"
 )
 
 # Create all tables represented by the above classes, if they haven't already been created

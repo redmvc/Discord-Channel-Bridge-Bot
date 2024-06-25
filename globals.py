@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import json
 
+import aiohttp
 import discord
 
-from validations import validate_types
+from validations import validate_types, HTTPResponseError
 
 """
 The format of this variable is
@@ -17,10 +19,11 @@ The format of this variable is
     "db_port": database port,
     "db_user": "database username",
     "db_pwd": "database password",
-    "db_name": "database name"
+    "db_name": "database name",
+    "emoji_server_id": "id of the server for storing emoji"
 }
 """
-credentials: dict[str, str | int] = json.load(open("credentials.json"))
+settings: dict[str, str | int] = json.load(open("settings.json"))
 
 # Variables for connection to the Discord client
 intents = discord.Intents()
@@ -40,6 +43,12 @@ is_ready: bool = False
 
 # Channels which will automatically create threads in bridged channels
 auto_bridge_thread_channels: set[int] = set()
+
+# Server which can be used to store unknown emoji for mirroring reactions
+emoji_server: discord.Guild | None = None
+
+# Dictionary mapping external emoji to internal emoji
+emoji_mappings: dict[int, int] = {}
 
 
 async def mention_to_channel(
@@ -179,6 +188,37 @@ async def get_channel_member(
             channel_member = None
 
     return channel_member
+
+
+async def get_image_from_URL(url: str) -> bytes:
+    """Return an image stored in a URL.
+
+    #### Args:
+        - `url`: The URL of the image to get.
+
+    #### Raises:
+        - `HTTPResponseError`: HTTP request to fetch image returned a status other than 200.
+        - `InvalidURL`: Argument was not a valid URL.
+        - `RuntimeError`: Session connection failed.
+        - `ServerTimeoutError`: Connection to server timed out.
+    """
+    image_bytes: io.BytesIO | None = None
+    async with aiohttp.ClientSession(
+        headers={"User-Agent": "Discord Channel Bridge Bot/0.1"}
+    ) as session:
+        async with session.get(url) as response:
+            if response.status != 200:
+                raise HTTPResponseError(
+                    f"Failed to retrieve image from URL: HTTP status {response.status}."
+                )
+
+            response_buffer = await response.read()
+            image_bytes = io.BytesIO(response_buffer)
+
+    if not image_bytes:
+        raise Exception("Unknown problem occurred trying to fetch image.")
+
+    return image_bytes.read()
 
 
 async def wait_until_ready() -> bool:

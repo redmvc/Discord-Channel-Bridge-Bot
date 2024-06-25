@@ -13,6 +13,10 @@ class WebhookChannelError(Exception):
     pass
 
 
+class HTTPResponseError(Exception):
+    pass
+
+
 def natural_language_concat(items: Sequence[str]) -> str:
     if len(items) == 2:
         return items[0] + " or " + items[1]

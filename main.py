@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import random
 from typing import Coroutine, TypedDict, cast
 from warnings import warn
 
@@ -16,7 +17,14 @@ from sqlalchemy.orm import Session as SQLSession
 import commands
 import globals
 from bridge import bridges
-from database import DBAutoBridgeThreadChannels, DBBridge, DBMessageMap, engine
+from database import (
+    DBAutoBridgeThreadChannels,
+    DBBridge,
+    DBEmojiMap,
+    DBMessageMap,
+    engine,
+    sql_upsert,
+)
 from validations import validate_types
 
 
@@ -116,6 +124,31 @@ async def on_ready():
             )
             session.execute(delete_invalid_webhooks)
 
+        # Next I try to identify mapped emoji
+        select_mapped_emoji: SQLSelect = SQLSelect(DBEmojiMap)
+        mapped_emoji_query_result: ScalarResult[DBEmojiMap] = session.scalars(
+            select_mapped_emoji
+        )
+        emoji_not_found = set()
+        for emoji_map in mapped_emoji_query_result:
+            if emoji_map.internal_emoji in emoji_not_found:
+                continue
+
+            internal_emoji_id = int(emoji_map.internal_emoji)
+            if not globals.client.get_emoji(internal_emoji_id):
+                emoji_not_found.add(emoji_map.internal_emoji)
+            else:
+                # The emoji is registered
+                globals.emoji_mappings[int(emoji_map.external_emoji)] = (
+                    internal_emoji_id
+                )
+
+        if len(emoji_not_found) > 0:
+            delete_missing_internal_emoji = SQLDelete(DBEmojiMap).where(
+                DBEmojiMap.internal_emoji.in_(list(emoji_not_found))
+            )
+            session.execute(delete_missing_internal_emoji)
+
         session.commit()
 
         # And next I identify all automatically-thread-bridging channels
@@ -131,6 +164,38 @@ async def on_ready():
                 for auto_bridge_thread_channel in auto_thread_query_result
             }
         )
+
+    # Finally I'll check whether I have a registered emoji server and save it if so
+    emoji_server_id = globals.settings.get("emoji_server_id")
+    try:
+        if emoji_server_id and not isinstance(emoji_server_id, int):
+            emoji_server_id = int(emoji_server_id)
+    except Exception:
+        print(
+            "Emoji server ID stored in settings.json file does not resolve to a valid integer."
+        )
+        emoji_server_id = None
+
+    if emoji_server_id:
+        emoji_server_id = cast(int, emoji_server_id)
+        emoji_server = globals.client.get_guild(emoji_server_id)
+        if not emoji_server:
+            try:
+                emoji_server = await globals.client.fetch_guild(emoji_server_id)
+            except Exception:
+                emoji_server = None
+
+        if not emoji_server:
+            print("Couldn't find emoji server with ID registered in settings.json.")
+        elif (
+            not emoji_server.me.guild_permissions.manage_expressions
+            or not emoji_server.me.guild_permissions.create_expressions
+        ):
+            print(
+                "I don't have Create Expressions or Manage Expressions permissions in the emoji server."
+            )
+        else:
+            globals.emoji_server = emoji_server
 
     await globals.command_tree.sync()
     print(f"{globals.client.user} is connected to the following servers:\n")
@@ -567,22 +632,31 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
 
     # Check whether I have access to the emoji
     reaction_emoji: discord.Emoji | discord.PartialEmoji | str | None
-    reaction_emoji = payload.emoji
-    if reaction_emoji.is_custom_emoji():
+    if payload.emoji.is_custom_emoji():
         # Custom emoji, I need to check whether it exists and is available to me
-        if reaction_emoji.id:
-            reaction_emoji = globals.client.get_emoji(reaction_emoji.id)
-            if not reaction_emoji:
-                return
-
-            if not reaction_emoji.available:
-                # TODO set up a personal emoji server to add emoji to
-                return
-        else:
+        if not payload.emoji.id:
             return
+
+        reaction_emoji = globals.client.get_emoji(payload.emoji.id)
+        if not reaction_emoji or not reaction_emoji.available:
+            reaction_emoji = None
+            # Couldn't find the reactji, will try to see if I've got it mapped locally
+            mapped_emoji_id = globals.emoji_mappings.get(payload.emoji.id)
+            if mapped_emoji_id:
+                # I already have this Emoji mapped locally
+                reaction_emoji = globals.client.get_emoji(mapped_emoji_id)
+
+        if not reaction_emoji:
+            # I don't have the emoji mapped locally, I'll add it to my server and update my map
+            try:
+                reaction_emoji = await copy_emoji_into_server(payload.emoji)
+                if not reaction_emoji:
+                    return
+            except Exception:
+                return
     else:
         # It's a standard emoji, it's fine
-        reaction_emoji = reaction_emoji.name
+        reaction_emoji = payload.emoji.name
 
     # Find all messages matching this one
     session = None
@@ -690,6 +764,99 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
     await asyncio.gather(*async_add_reactions)
 
 
+async def copy_emoji_into_server(
+    missing_emoji: discord.PartialEmoji,
+) -> discord.Emoji | None:
+    """Try to create an emoji in the emoji server and, if successful, return it.
+
+    #### Args:
+        - `missing_emoji`: The emoji we are trying to copy into our emoji server.
+
+    #### Raises:
+        - `Forbidden`: Emoji server permissions not set correctly.
+        - `HTTPResponseError`: HTTP request to fetch emoji image returned a status other than 200.
+        - `InvalidURL`: URL generated from emoji ID was not valid.
+        - `RuntimeError`: Session connection to the server to fetch image from URL failed.
+        - `ServerTimeoutError`: Connection to server to fetch image from URL timed out.
+    """
+    if not globals.emoji_server:
+        return None
+
+    image = await globals.get_image_from_URL(
+        f"https://cdn.discordapp.com/emojis/{missing_emoji.id}.png?v=1"
+    )
+
+    delete_existing_emoji_query = None
+    try:
+        emoji = await globals.emoji_server.create_custom_emoji(
+            name=missing_emoji.name, image=image, reason="Bridging reaction."
+        )
+    except discord.Forbidden as e:
+        print("Emoji server permissions not set correctly.")
+        raise e
+    except discord.HTTPException as e:
+        if len(globals.emoji_server.emojis) == 0:
+            # Something weird happened, the error was not due to a full server
+            raise e
+
+        # Try to delete an emoji from the server and then add this again.
+        emoji_to_delete = random.choice(globals.emoji_server.emojis)
+        globals.emoji_mappings = {
+            external_id: internal_id
+            for external_id, internal_id in globals.emoji_mappings.items()
+            if internal_id != emoji_to_delete.id
+        }
+        delete_existing_emoji_query = SQLDelete(DBEmojiMap).where(
+            DBEmojiMap.internal_emoji == str(emoji_to_delete.id)
+        )
+        await emoji_to_delete.delete()
+
+        try:
+            emoji = await globals.emoji_server.create_custom_emoji(
+                name=missing_emoji.name, image=image, reason="Bridging reaction."
+            )
+        except discord.Forbidden as e:
+            print("Emoji server permissions not set correctly.")
+            raise e
+
+    if emoji:
+        # Copied the emoji, going to update my table
+        if missing_emoji.id:
+            globals.emoji_mappings[missing_emoji.id] = emoji.id
+
+            missing_full_emoji = globals.client.get_emoji(missing_emoji.id)
+            if missing_full_emoji and missing_full_emoji.guild:
+                emoji_server_name = missing_full_emoji.guild.name
+            else:
+                emoji_server_name = ""
+
+        try:
+            with SQLSession(engine) as session:
+                if delete_existing_emoji_query is not None:
+                    session.execute(delete_existing_emoji_query)
+
+                upsert_emoji = sql_upsert(
+                    DBEmojiMap,
+                    {
+                        "external_emoji": str(missing_emoji.id),
+                        "external_emoji_name": missing_emoji.name,
+                        "external_emoji_server_name": emoji_server_name,
+                        "internal_emoji": str(emoji.id),
+                    },
+                    {
+                        "internal_emoji": str(emoji.id),
+                    },
+                )
+
+                session.execute(upsert_emoji)
+                session.commit()
+        except SQLError as e:
+            warn("Couldn't add emoji mapping to table.")
+            print(e)
+
+    return emoji
+
+
 @globals.client.event
 async def on_thread_create(thread: discord.Thread):
     """Create matching threads across a bridge if the created thread's parent channel has auto-bridge-threads enabled.
@@ -733,4 +900,4 @@ async def on_thread_create(thread: discord.Thread):
         await bridge_message_helper(last_message)
 
 
-globals.client.run(cast(str, globals.credentials["app_token"]), reconnect=True)
+globals.client.run(cast(str, globals.settings["app_token"]), reconnect=True)
