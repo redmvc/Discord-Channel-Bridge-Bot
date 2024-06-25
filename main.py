@@ -532,11 +532,10 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
 
     # Check whether I have access to the emoji
     reaction_emoji: discord.Emoji | discord.PartialEmoji | str | None
-    reaction_emoji = payload.emoji
-    if reaction_emoji.is_custom_emoji():
+    if payload.emoji.is_custom_emoji():
         # Custom emoji, I need to check whether it exists and is available to me
-        if reaction_emoji.id:
-            reaction_emoji = globals.client.get_emoji(reaction_emoji.id)
+        if payload.emoji.id:
+            reaction_emoji = globals.client.get_emoji(payload.emoji.id)
             if not reaction_emoji:
                 return
 
@@ -547,7 +546,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
             return
     else:
         # It's a standard emoji, it's fine
-        reaction_emoji = reaction_emoji.name
+        reaction_emoji = payload.emoji.name
 
     # Find all messages matching this one
     try:
