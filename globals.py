@@ -17,7 +17,8 @@ The format of this variable is
     "db_port": database port,
     "db_user": "database username",
     "db_pwd": "database password",
-    "db_name": "database name"
+    "db_name": "database name",
+    "emoji_server_id": "id of the server for storing emoji"
 }
 """
 settings: dict[str, str | int] = json.load(open("settings.json"))
@@ -40,6 +41,9 @@ is_ready: bool = False
 
 # Channels which will automatically create threads in bridged channels
 auto_bridge_thread_channels: set[int] = set()
+
+# Server which can be used to store unknown emoji for mirroring reactions
+emoji_server: discord.Guild | None = None
 
 
 async def mention_to_channel(

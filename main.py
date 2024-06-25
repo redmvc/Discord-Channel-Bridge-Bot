@@ -118,6 +118,38 @@ async def on_ready():
 
     session.close()
 
+    # Finally I'll check whether I have a registered emoji server and save it if so
+    emoji_server_id = globals.settings.get("emoji_server_id")
+    try:
+        if emoji_server_id and not isinstance(emoji_server_id, int):
+            emoji_server_id = int(emoji_server_id)
+    except Exception:
+        print(
+            "Emoji server ID stored in settings.json file does not resolve to a valid integer."
+        )
+        emoji_server_id = None
+
+    if emoji_server_id:
+        emoji_server_id = cast(int, emoji_server_id)
+        emoji_server = globals.client.get_guild(emoji_server_id)
+        if not emoji_server:
+            try:
+                emoji_server = await globals.client.fetch_guild(emoji_server_id)
+            except Exception:
+                emoji_server = None
+
+        if not emoji_server:
+            print("Couldn't find emoji server with ID registered in settings.json.")
+        elif (
+            not emoji_server.me.guild_permissions.manage_expressions
+            or not emoji_server.me.guild_permissions.create_expressions
+        ):
+            print(
+                "I don't have Create Expressions or Manage Expressions permissions in the emoji server."
+            )
+        else:
+            globals.emoji_server = emoji_server
+
     await globals.command_tree.sync()
     print(f"{globals.client.user} is connected to the following servers:\n")
     for server in globals.client.guilds:
