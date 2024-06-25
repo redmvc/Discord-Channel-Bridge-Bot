@@ -638,7 +638,15 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
 
         reaction_emoji = globals.client.get_emoji(payload.emoji.id)
         if not reaction_emoji or not reaction_emoji.available:
-            # Couldn't find the reactji, will try to get the image and create it in my emoji server
+            reaction_emoji = None
+            # Couldn't find the reactji, will try to see if I've got it mapped locally
+            mapped_emoji_id = globals.emoji_mappings.get(payload.emoji.id)
+            if mapped_emoji_id:
+                # I already have this Emoji mapped locally
+                reaction_emoji = globals.client.get_emoji(mapped_emoji_id)
+
+        if not reaction_emoji:
+            # I don't have the emoji mapped locally, I'll add it to my server
             try:
                 reaction_emoji = await copy_emoji_into_server(payload.emoji)
                 if not reaction_emoji:
