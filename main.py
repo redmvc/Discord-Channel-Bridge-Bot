@@ -422,6 +422,7 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
                     DBMessageMap.source_message == payload.message_id
                 )
             )
+            async_message_edits = []
             for message_row in bridged_messages:
                 target_channel_id = int(message_row.target_channel)
                 bridge = outbound_bridges.get(target_channel_id)
@@ -441,10 +442,12 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
                     thread_splat = {"thread": bridged_channel}
 
                 try:
-                    await bridge.webhook.edit_message(
-                        message_id=int(message_row.target_message),
-                        content=updated_message_content,
-                        **thread_splat,
+                    async_message_edits.append(
+                        bridge.webhook.edit_message(
+                            message_id=int(message_row.target_message),
+                            content=updated_message_content,
+                            **thread_splat,
+                        )
                     )
                 except discord.HTTPException as e:
                     warn(
@@ -453,6 +456,8 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
                     )
     except SQLError as e:
         warn("Ran into an SQL error while trying to edit a message:\n" + str(e))
+
+    await asyncio.gather(*async_message_edits)
 
 
 @globals.client.event
