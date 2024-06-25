@@ -152,14 +152,13 @@ async def bridge(interaction: discord.Interaction, target: str):
         except Exception:
             pass
 
-    create_bridges = []
     session = None
     try:
         session = SQLSession(engine)
-        create_bridges = [
+        await asyncio.gather(
             create_bridge_and_db(message_channel, target_channel, session),
             create_bridge_and_db(target_channel, message_channel, session),
-        ]
+        )
     except SQLError:
         await interaction.followup.send(
             "❌ There was an issue with the connection to the database; bridge creation failed.",
@@ -177,7 +176,7 @@ async def bridge(interaction: discord.Interaction, target: str):
         ephemeral=True,
     )
 
-    await asyncio.gather(*(join_threads + create_bridges))
+    await asyncio.gather(*join_threads)
 
 
 @discord.app_commands.guild_only()
@@ -766,20 +765,11 @@ async def create_bridge_and_db(
             {"webhook": str(bridge.webhook.id)},
         )
         session.execute(insert_bridge_row)
-
     except SQLError as e:
         if session:
             session.close()
 
-        raise SQLError(
-            message=e._message(),
-            statement=e.statement,
-            params=e.params,
-            orig=e.orig,
-            hide_parameters=e.hide_parameters,
-            code=e.code,
-            ismulti=e.ismulti,
-        )
+        raise e
     except Exception as e:
         if session:
             session.close()
