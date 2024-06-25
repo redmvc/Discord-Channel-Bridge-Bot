@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import io
 import json
+import random
 
 import aiohttp
 import discord
@@ -209,6 +210,54 @@ async def get_image_from_URL(url: str) -> bytes:
         raise Exception("Unknown problem occurred trying to fetch image.")
 
     return image_bytes.read()
+
+
+async def copy_emoji_into_server(
+    missing_emoji: discord.PartialEmoji,
+) -> discord.Emoji | None:
+    """Try to create an emoji in the emoji server and, if successful, return it.
+
+    #### Args:
+        - `missing_emoji`: The emoji we are trying to copy into our emoji server.
+
+    #### Raises:
+        - `Forbidden`: Emoji server permissions not set correctly.
+        - `HTTPResponseError`: HTTP request to fetch emoji image returned a status other than 200.
+        - `InvalidURL`: URL generated from emoji ID was not valid.
+        - `RuntimeError`: Session connection to the server to fetch image from URL failed.
+        - `ServerTimeoutError`: Connection to server to fetch image from URL timed out.
+    """
+    if not emoji_server:
+        return None
+
+    image = await get_image_from_URL(
+        f"https://cdn.discordapp.com/emojis/{missing_emoji.id}.png?v=1"
+    )
+
+    try:
+        emoji = await emoji_server.create_custom_emoji(
+            name=missing_emoji.name, image=image, reason="Bridging reaction."
+        )
+    except discord.Forbidden as e:
+        print("Emoji server permissions not set correctly.")
+        raise e
+    except discord.HTTPException as e:
+        if len(emoji_server.emojis) == 0:
+            # Something weird happened, the error was not due to a full server
+            raise e
+
+        # Try to delete an emoji from the server and then add this again.
+        await random.choice(emoji_server.emojis).delete()
+
+        try:
+            emoji = await emoji_server.create_custom_emoji(
+                name=missing_emoji.name, image=image, reason="Bridging reaction."
+            )
+        except discord.Forbidden as e:
+            print("Emoji server permissions not set correctly.")
+            raise e
+
+    return emoji
 
 
 async def wait_until_ready() -> bool:
