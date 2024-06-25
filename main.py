@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import random
 from typing import Coroutine, TypedDict, cast
 from warnings import warn
 
@@ -639,7 +640,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         if not reaction_emoji or not reaction_emoji.available:
             # Couldn't find the reactji, will try to get the image and create it in my emoji server
             try:
-                reaction_emoji = await globals.copy_emoji_into_server(payload.emoji)
+                reaction_emoji = await copy_emoji_into_server(payload.emoji)
                 if not reaction_emoji:
                     return
             except Exception:
@@ -752,6 +753,54 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         )
 
     await asyncio.gather(*async_add_reactions)
+
+
+async def copy_emoji_into_server(
+    missing_emoji: discord.PartialEmoji,
+) -> discord.Emoji | None:
+    """Try to create an emoji in the emoji server and, if successful, return it.
+
+    #### Args:
+        - `missing_emoji`: The emoji we are trying to copy into our emoji server.
+
+    #### Raises:
+        - `Forbidden`: Emoji server permissions not set correctly.
+        - `HTTPResponseError`: HTTP request to fetch emoji image returned a status other than 200.
+        - `InvalidURL`: URL generated from emoji ID was not valid.
+        - `RuntimeError`: Session connection to the server to fetch image from URL failed.
+        - `ServerTimeoutError`: Connection to server to fetch image from URL timed out.
+    """
+    if not globals.emoji_server:
+        return None
+
+    image = await globals.get_image_from_URL(
+        f"https://cdn.discordapp.com/emojis/{missing_emoji.id}.png?v=1"
+    )
+
+    try:
+        emoji = await globals.emoji_server.create_custom_emoji(
+            name=missing_emoji.name, image=image, reason="Bridging reaction."
+        )
+    except discord.Forbidden as e:
+        print("Emoji server permissions not set correctly.")
+        raise e
+    except discord.HTTPException as e:
+        if len(globals.emoji_server.emojis) == 0:
+            # Something weird happened, the error was not due to a full server
+            raise e
+
+        # Try to delete an emoji from the server and then add this again.
+        await random.choice(globals.emoji_server.emojis).delete()
+
+        try:
+            emoji = await globals.emoji_server.create_custom_emoji(
+                name=missing_emoji.name, image=image, reason="Bridging reaction."
+            )
+        except discord.Forbidden as e:
+            print("Emoji server permissions not set correctly.")
+            raise e
+
+    return emoji
 
 
 @globals.client.event
