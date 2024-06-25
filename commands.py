@@ -105,7 +105,7 @@ async def bridge(interaction: discord.Interaction, target: str):
         )
         return
 
-    target_channel = globals.mention_to_channel(target)
+    target_channel = await globals.mention_to_channel(target)
     if not isinstance(target_channel, (discord.TextChannel, discord.Thread)):
         # The argument passed needs to be a channel or thread
         await interaction.response.send_message(
@@ -122,11 +122,13 @@ async def bridge(interaction: discord.Interaction, target: str):
 
     assert isinstance(interaction.user, discord.Member)
     assert interaction.guild
-    target_channel_user = target_channel.guild.get_member(interaction.user.id)
+    target_channel_member = await globals.get_channel_member(
+        target_channel, interaction.user.id
+    )
     if (
         not message_channel.permissions_for(interaction.user).manage_webhooks
-        or not target_channel_user
-        or not target_channel.permissions_for(target_channel_user).manage_webhooks
+        or not target_channel_member
+        or not target_channel.permissions_for(target_channel_member).manage_webhooks
         or not message_channel.permissions_for(interaction.guild.me).manage_webhooks
         or not target_channel.permissions_for(target_channel.guild.me).manage_webhooks
     ):
@@ -191,7 +193,7 @@ async def outbound(interaction: discord.Interaction, target: str):
         )
         return
 
-    target_channel = globals.mention_to_channel(target)
+    target_channel = await globals.mention_to_channel(target)
     if not isinstance(target_channel, (discord.TextChannel, discord.Thread)):
         # The argument passed needs to be a channel or thread
         await interaction.response.send_message(
@@ -208,11 +210,13 @@ async def outbound(interaction: discord.Interaction, target: str):
 
     assert isinstance(interaction.user, discord.Member)
     assert interaction.guild
-    target_channel_user = target_channel.guild.get_member(interaction.user.id)
+    target_channel_member = await globals.get_channel_member(
+        target_channel, interaction.user.id
+    )
     if (
         not message_channel.permissions_for(interaction.user).manage_webhooks
-        or not target_channel_user
-        or not target_channel.permissions_for(target_channel_user).manage_webhooks
+        or not target_channel_member
+        or not target_channel.permissions_for(target_channel_member).manage_webhooks
         or not message_channel.permissions_for(interaction.guild.me).manage_webhooks
         or not target_channel.permissions_for(target_channel.guild.me).manage_webhooks
     ):
@@ -258,7 +262,7 @@ async def inbound(interaction: discord.Interaction, source: str):
         )
         return
 
-    source_channel = globals.mention_to_channel(source)
+    source_channel = await globals.mention_to_channel(source)
     if not isinstance(source_channel, (discord.TextChannel, discord.Thread)):
         # The argument passed needs to be a channel or thread
         await interaction.response.send_message(
@@ -275,11 +279,13 @@ async def inbound(interaction: discord.Interaction, source: str):
 
     assert isinstance(interaction.user, discord.Member)
     assert interaction.guild
-    source_channel_user = source_channel.guild.get_member(interaction.user.id)
+    source_channel_member = await globals.get_channel_member(
+        source_channel, interaction.user.id
+    )
     if (
         not message_channel.permissions_for(interaction.user).manage_webhooks
-        or not source_channel_user
-        or not source_channel.permissions_for(source_channel_user).manage_webhooks
+        or not source_channel_member
+        or not source_channel.permissions_for(source_channel_member).manage_webhooks
         or not message_channel.permissions_for(interaction.guild.me).manage_webhooks
         or not source_channel.permissions_for(source_channel.guild.me).manage_webhooks
     ):
@@ -446,7 +452,7 @@ async def demolish(interaction: discord.Interaction, target: str):
         )
         return
 
-    target_channel = globals.mention_to_channel(target)
+    target_channel = await globals.mention_to_channel(target)
     if not isinstance(target_channel, (discord.TextChannel, discord.Thread)):
         # The argument passed needs to be a channel or thread
         await interaction.response.send_message(
@@ -457,11 +463,13 @@ async def demolish(interaction: discord.Interaction, target: str):
 
     assert isinstance(interaction.user, discord.Member)
     assert interaction.guild
-    target_channel_user = target_channel.guild.get_member(interaction.user.id)
+    target_channel_member = await globals.get_channel_member(
+        target_channel, interaction.user.id
+    )
     if (
         not message_channel.permissions_for(interaction.user).manage_webhooks
-        or not target_channel_user
-        or not target_channel.permissions_for(target_channel_user).manage_webhooks
+        or not target_channel_member
+        or not target_channel.permissions_for(target_channel_member).manage_webhooks
         or not message_channel.permissions_for(interaction.guild.me).manage_webhooks
         or not target_channel.permissions_for(target_channel.guild.me).manage_webhooks
     ):
@@ -634,15 +642,15 @@ async def demolish_all(
         exceptions: set[int] = set()
         if outbound_bridges:
             for target_id in outbound_bridges.keys():
-                target_channel = globals.get_channel_from_id(target_id)
+                target_channel = await globals.get_channel_from_id(target_id)
                 assert isinstance(target_channel, (discord.TextChannel, discord.Thread))
-                target_channel_user = target_channel.guild.get_member(
-                    interaction.user.id
+                target_channel_member = await globals.get_channel_member(
+                    target_channel, interaction.user.id
                 )
                 if (
-                    not target_channel_user
+                    not target_channel_member
                     or not target_channel.permissions_for(
-                        target_channel_user
+                        target_channel_member
                     ).manage_webhooks
                     or not target_channel.permissions_for(
                         target_channel.guild.me
@@ -909,6 +917,7 @@ async def bridge_thread_helper(
 
         matching_starting_messages: dict[int, int] = {}
         try:
+            # I don't need to store it I just need to know whether it exists
             await thread_to_bridge.parent.fetch_message(thread_to_bridge.id)
 
             source_starting_message = session.scalars(
@@ -959,18 +968,18 @@ async def bridge_thread_helper(
                 continue
 
             for channel_id in list_of_bridges.keys():
-                channel = globals.get_channel_from_id(channel_id)
+                channel = await globals.get_channel_from_id(channel_id)
                 if not isinstance(channel, discord.TextChannel):
                     # I can't create a thread inside a thread
                     if channel:
                         bridged_threads.append(channel.id)
                     continue
 
-                channel_user = channel.guild.get_member(user_id)
+                channel_member = await globals.get_channel_member(channel, user_id)
                 if (
-                    not channel_user
-                    or not channel.permissions_for(channel_user).manage_webhooks
-                    or not channel.permissions_for(channel_user).create_public_threads
+                    not channel_member
+                    or not channel.permissions_for(channel_member).manage_webhooks
+                    or not channel.permissions_for(channel_member).create_public_threads
                     or not channel.permissions_for(channel.guild.me).manage_webhooks
                     or not channel.permissions_for(
                         channel.guild.me
@@ -1014,10 +1023,10 @@ async def bridge_thread_helper(
                     except Exception:
                         pass
 
-                    if channel_user:
+                    if channel_member:
                         try:
                             add_user_to_threads.append(
-                                new_thread.add_user(channel_user)
+                                new_thread.add_user(channel_member)
                             )
                         except Exception:
                             pass
@@ -1191,7 +1200,7 @@ def validate_auto_bridge_thread_channels(
 #     message_id_to_skip: int | None = None
 #     if isinstance(source_message_map, DBMessageMap):
 #         # This message was bridged, so find the original one and then find any other bridged messages from it
-#         source_channel = globals.get_channel_from_id(
+#         source_channel = await globals.get_channel_from_id(
 #             int(source_message_map.source_channel)
 #         )
 #         if source_channel:
@@ -1224,7 +1233,7 @@ def validate_auto_bridge_thread_channels(
 #         if not outbound_bridges or not outbound_bridges.get(target_channel_id):
 #             continue
 
-#         bridged_channel = globals.get_channel_from_id(target_channel_id)
+#         bridged_channel = await globals.get_channel_from_id(target_channel_id)
 #         if not isinstance(bridged_channel, (discord.TextChannel, discord.Thread)):
 #             continue
 
