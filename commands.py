@@ -865,6 +865,14 @@ async def bridge_thread_helper(
     #### Asserts:
         - `isinstance(thread_to_bridge.parent, discord.TextChannel)`
     """
+    types_to_validate: dict = {
+        "thread_to_bridge": (thread_to_bridge, discord.Thread),
+        "user_id": (user_id, int),
+    }
+    if interaction:
+        types_to_validate["interaction"] = (interaction, discord.Interaction)
+    validate_types(types_to_validate)
+
     assert isinstance(thread_to_bridge.parent, discord.TextChannel)
 
     outbound_bridges = bridges.get_outbound_bridges(thread_to_bridge.parent.id)
@@ -1082,6 +1090,13 @@ def stop_auto_bridging_threads_helper(
     #### Raises:
         - `SQLError`: Something went wrong accessing or modifying the database.
     """
+    types_to_validate: dict = {
+        "channel_ids_to_remove": (channel_ids_to_remove, (int, Iterable))
+    }
+    if session:
+        types_to_validate["session"] = (session, SQLSession)
+    validate_types(types_to_validate)
+
     if not isinstance(channel_ids_to_remove, set):
         if isinstance(channel_ids_to_remove, int):
             channel_ids_to_remove = {channel_ids_to_remove}
@@ -1121,6 +1136,8 @@ def validate_auto_bridge_thread_channels(
     #### Raises:
         - `SQLError`: Something went wrong accessing or modifying the database.
     """
+    validate_types({"channel_ids_to_check": (channel_ids_to_check, (int, Iterable))})
+
     if not isinstance(channel_ids_to_check, set):
         if isinstance(channel_ids_to_check, int):
             channel_ids_to_check = {channel_ids_to_check}
