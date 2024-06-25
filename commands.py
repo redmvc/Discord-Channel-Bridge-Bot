@@ -123,6 +123,13 @@ async def bridge(interaction: discord.Interaction, target: str):
     assert isinstance(interaction.user, discord.Member)
     assert interaction.guild
     target_channel_member = target_channel.guild.get_member(interaction.user.id)
+    if not target_channel_member:
+        try:
+            target_channel_member = await target_channel.guild.fetch_member(
+                interaction.user.id
+            )
+        except Exception:
+            target_channel_member = None
     if (
         not message_channel.permissions_for(interaction.user).manage_webhooks
         or not target_channel_member
@@ -209,6 +216,13 @@ async def outbound(interaction: discord.Interaction, target: str):
     assert isinstance(interaction.user, discord.Member)
     assert interaction.guild
     target_channel_member = target_channel.guild.get_member(interaction.user.id)
+    if not target_channel_member:
+        try:
+            target_channel_member = await target_channel.guild.fetch_member(
+                interaction.user.id
+            )
+        except Exception:
+            target_channel_member = None
     if (
         not message_channel.permissions_for(interaction.user).manage_webhooks
         or not target_channel_member
@@ -276,6 +290,13 @@ async def inbound(interaction: discord.Interaction, source: str):
     assert isinstance(interaction.user, discord.Member)
     assert interaction.guild
     source_channel_member = source_channel.guild.get_member(interaction.user.id)
+    if not source_channel_member:
+        try:
+            source_channel_member = await source_channel.guild.fetch_member(
+                interaction.user.id
+            )
+        except Exception:
+            source_channel_member = None
     if (
         not message_channel.permissions_for(interaction.user).manage_webhooks
         or not source_channel_member
@@ -458,6 +479,13 @@ async def demolish(interaction: discord.Interaction, target: str):
     assert isinstance(interaction.user, discord.Member)
     assert interaction.guild
     target_channel_member = target_channel.guild.get_member(interaction.user.id)
+    if not target_channel_member:
+        try:
+            target_channel_member = await target_channel.guild.fetch_member(
+                interaction.user.id
+            )
+        except Exception:
+            target_channel_member = None
     if (
         not message_channel.permissions_for(interaction.user).manage_webhooks
         or not target_channel_member
@@ -639,6 +667,13 @@ async def demolish_all(
                 target_channel_member = target_channel.guild.get_member(
                     interaction.user.id
                 )
+                if not target_channel_member:
+                    try:
+                        target_channel_member = await target_channel.guild.fetch_member(
+                            interaction.user.id
+                        )
+                    except Exception:
+                        target_channel_member = None
                 if (
                     not target_channel_member
                     or not target_channel.permissions_for(
@@ -968,6 +1003,11 @@ async def bridge_thread_helper(
                     continue
 
                 channel_member = channel.guild.get_member(user_id)
+                if not channel_member:
+                    try:
+                        channel_member = await channel.guild.fetch_member(user_id)
+                    except Exception:
+                        channel_member = None
                 if (
                     not channel_member
                     or not channel.permissions_for(channel_member).manage_webhooks
