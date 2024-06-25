@@ -1,4 +1,3 @@
-import asyncio
 from typing import cast
 
 import discord
@@ -49,9 +48,8 @@ class Bridge:
         """
 
         self = Bridge()
-        await asyncio.gather(
-            self._add_source_and_target(source, target), self.add_webhook(webhook)
-        )
+        await self._add_source_and_target(source, target)
+        await self.add_webhook(webhook)
         return self
 
     def __init__(self) -> None:
