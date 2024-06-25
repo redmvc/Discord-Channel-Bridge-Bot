@@ -39,13 +39,15 @@ async def on_ready():
 
     with SQLSession(engine) as session:
         # I am going to try to identify all existing bridges
-        registered_bridges: ScalarResult[DBBridge] = session.scalars(
-            SQLSelect(DBBridge)
-        )
         invalid_channels: set[str] = set()
         invalid_webhooks: set[str] = set()
         create_bridges = []
-        for bridge in registered_bridges:
+
+        select_all_bridges: SQLSelect = SQLSelect(DBBridge)
+        bridge_query_result: ScalarResult[DBBridge] = session.scalars(
+            select_all_bridges
+        )
+        for bridge in bridge_query_result:
             source_id_str = bridge.source
             target_id_str = bridge.target
             webhook_id_str = bridge.webhook
@@ -113,13 +115,16 @@ async def on_ready():
         session.commit()
 
         # And next I identify all automatically-thread-bridging channels
-        registered_auto_bridge_thread_channels: ScalarResult[
+        select_auto_bridge_thread_channels: SQLSelect = SQLSelect(
             DBAutoBridgeThreadChannels
-        ] = session.scalars(SQLSelect(DBAutoBridgeThreadChannels))
+        )
+        auto_thread_query_result: ScalarResult[DBAutoBridgeThreadChannels] = (
+            session.scalars(select_auto_bridge_thread_channels)
+        )
         globals.auto_bridge_thread_channels = globals.auto_bridge_thread_channels.union(
             {
                 int(auto_bridge_thread_channel.channel)
-                for auto_bridge_thread_channel in registered_auto_bridge_thread_channels
+                for auto_bridge_thread_channel in auto_thread_query_result
             }
         )
 
@@ -181,44 +186,50 @@ async def bridge_message_helper(message: discord.Message):
     session = None
     try:
         with SQLSession(engine) as session:
-            reply_bridges: dict[int, int] = {}
-            reply_reference = False
+            bridged_reply_to: dict[int, int] = {}
+            reply_has_ping = False
             if message.reference and message.reference.message_id:
                 # This message is a reply to another message, so we should try to link to its match on the other side of bridges
-                # reply_bridges will be a dict whose keys are channel IDs and whose values are the IDs of messages matching the message I'm replying to in those channels
-                reply_id = message.reference.message_id
+                # bridged_reply_to will be a dict whose keys are channel IDs and whose values are the IDs of messages matching the message I'm replying to in those channels
+                replied_to_id = message.reference.message_id
 
                 # identify if this reply "pinged" the target, to know whether to add the @ symbol UI
-                reply_message = message.reference.resolved
-                reply_reference = isinstance(reply_message, discord.Message) and any(
-                    x.id == reply_message.author.id for x in message.mentions
+                replied_to_message = message.reference.resolved
+                reply_has_ping = isinstance(
+                    replied_to_message, discord.Message
+                ) and any(
+                    x.id == replied_to_message.author.id for x in message.mentions
                 )
 
-                # First, check whether the message replied to was itself bridged from somewhere
-                reply_source_match = session.scalars(
+                # First, check whether the message replied to was itself bridged from a different channel
+                local_replied_to_message_map: DBMessageMap | None = session.scalars(
                     SQLSelect(DBMessageMap).where(
-                        DBMessageMap.target_message == str(reply_id)
+                        DBMessageMap.target_message == str(replied_to_id)
                     )
                 ).first()
-                if isinstance(reply_source_match, DBMessageMap):
+                if isinstance(local_replied_to_message_map, DBMessageMap):
                     # So the message replied to was bridged from elsewhere
-                    reply_source_id = int(reply_source_match.source_message)
-                    reply_source_channel_id = int(reply_source_match.source_channel)
-                    reply_bridges[reply_source_channel_id] = reply_source_id
+                    source_replied_to_id = int(
+                        local_replied_to_message_map.source_message
+                    )
+                    reply_source_channel_id = int(
+                        local_replied_to_message_map.source_channel
+                    )
+                    bridged_reply_to[reply_source_channel_id] = source_replied_to_id
                 else:
-                    # The message this is replying to might have been the source of a bridge, not the target
-                    reply_source_id = reply_id
+                    source_replied_to_id = replied_to_id
                     reply_source_channel_id = message.channel.id
 
                 # Now find all other bridged versions of the message we're replying to
-                reply_bridge_match: ScalarResult[DBMessageMap] = session.scalars(
-                    SQLSelect(DBMessageMap).where(
-                        DBMessageMap.source_message == str(reply_source_id)
-                    )
+                select_bridged_reply_to: SQLSelect = SQLSelect(DBMessageMap).where(
+                    DBMessageMap.source_message == str(source_replied_to_id)
                 )
-                for message_match in reply_bridge_match:
-                    reply_bridges[int(message_match.target_channel)] = int(
-                        message_match.target_message
+                query_result: ScalarResult[DBMessageMap] = session.scalars(
+                    select_bridged_reply_to
+                )
+                for message_map in query_result:
+                    bridged_reply_to[int(message_map.target_channel)] = int(
+                        message_map.target_message
                     )
 
             # Send a message out to each target webhook
@@ -239,37 +250,38 @@ async def bridge_message_helper(message: discord.Message):
                 )
 
                 # Try to find whether the user who sent this message is on the other side of the bridge and if so what their name and avatar would be
-                tgt_member = await globals.get_channel_member(
+                bridged_member = await globals.get_channel_member(
                     webhook_channel, message.author.id
                 )
-                if tgt_member:
-                    tgt_member_name = tgt_member.display_name
-                    tgt_avatar_url = tgt_member.display_avatar
+                if bridged_member:
+                    bridged_member_name = bridged_member.display_name
+                    bridged_avatar_url = bridged_member.display_avatar
                 else:
-                    tgt_member_name = message.author.display_name
-                    tgt_avatar_url = message.author.display_avatar
+                    bridged_member_name = message.author.display_name
+                    bridged_avatar_url = message.author.display_avatar
 
-                if reply_bridges.get(target_id):
+                if bridged_reply_to.get(target_id):
                     # This message is replying to a message that is bridged
                     try:
-                        replied_message = await target_channel.fetch_message(
-                            reply_bridges[target_id]
+                        message_replied_to = await target_channel.fetch_message(
+                            bridged_reply_to[target_id]
                         )
 
                         def truncate(msg: str, length: int) -> str:
                             return msg if len(msg) < length else msg[: length - 1] + "…"
 
                         display_name = discord.utils.escape_markdown(
-                            replied_message.author.display_name
+                            message_replied_to.author.display_name
                         )
+
                         # Discord represents ping "ON" vs "OFF" replies with an @ symbol before the reply author name
                         # copy this behavior here
-                        if reply_reference:
+                        if reply_has_ping:
                             display_name = "@" + display_name
 
                         replied_content = truncate(
                             discord.utils.remove_markdown(
-                                replied_message.clean_content
+                                message_replied_to.clean_content
                             ),
                             50,
                         )
@@ -277,15 +289,15 @@ async def bridge_message_helper(message: discord.Message):
                             discord.Embed.from_dict(
                                 {
                                     "type": "rich",
-                                    "url": replied_message.jump_url,
+                                    "url": message_replied_to.jump_url,
                                     "thumbnail": {
-                                        "url": replied_message.author.display_avatar.replace(
+                                        "url": message_replied_to.author.display_avatar.replace(
                                             size=16
                                         ).url,
                                         "height": 18,
                                         "width": 18,
                                     },
-                                    "description": f"**[↪]({replied_message.jump_url}) {display_name}**  {replied_content}",
+                                    "description": f"**[↪]({message_replied_to.jump_url}) {display_name}**  {replied_content}",
                                 }
                             ),
                         ]
@@ -308,8 +320,8 @@ async def bridge_message_helper(message: discord.Message):
                     allowed_mentions=discord.AllowedMentions(
                         users=True, roles=False, everyone=False
                     ),
-                    avatar_url=tgt_avatar_url,
-                    username=tgt_member_name,
+                    avatar_url=bridged_avatar_url,
+                    username=bridged_member_name,
                     embeds=list(message.embeds + reply_embed),
                     files=attachments,  # might throw HHTPException if too large?
                     wait=True,
