@@ -14,10 +14,6 @@ from sqlalchemy.sql._typing import _DMLTableArgument
 
 from globals import credentials
 
-engine = create_engine(
-    f"{credentials['db_dialect']}+{credentials['db_driver']}://{credentials['db_user']}:{credentials['db_pwd']}@{credentials['db_host']}:{credentials['db_port']}/{credentials['db_name']}"
-)
-
 
 class DBBase(DeclarativeBase):
     pass
@@ -125,4 +121,7 @@ def sql_upsert(
         raise e
 
 
+engine = create_engine(
+    f"{credentials['db_dialect']}+{credentials['db_driver']}://{credentials['db_user']}:{credentials['db_pwd']}@{credentials['db_host']}:{credentials['db_port']}/{credentials['db_name']}"
+)
 DBBase.metadata.create_all(engine)
