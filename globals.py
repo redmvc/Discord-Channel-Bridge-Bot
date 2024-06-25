@@ -7,7 +7,7 @@ import json
 import aiohttp
 import discord
 
-from validations import validate_types
+from validations import validate_types, HTTPResponseError
 
 """
 The format of this variable is
@@ -188,6 +188,7 @@ async def get_image_from_URL(url: str) -> bytes:
 
     #### Raises:
         - `AssertionError`: Something went wrong fetching the image.
+        - `HTTPResponseError`: HTTP request to fetch image returned a status other than 200.
         - `InvalidURL`: Argument was not a valid URL.
         - `RuntimeError`: Session connection failed.
         - `ServerTimeoutError`: Connection to server timed out.
@@ -198,8 +199,8 @@ async def get_image_from_URL(url: str) -> bytes:
     ) as session:
         async with session.get(url) as resp:
             if resp.status != 200:
-                raise Exception(
-                    f"HttpProcessingError: {resp.status} Retrieving image failed!"
+                raise HTTPResponseError(
+                    f"Failed to retrieve image from URL: HTTP status {resp.status}."
                 )
 
             resp_buffer = await resp.read()
