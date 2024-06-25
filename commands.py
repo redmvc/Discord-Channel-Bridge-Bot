@@ -909,6 +909,7 @@ async def bridge_thread_helper(
 
         matching_starting_messages: dict[int, int] = {}
         try:
+            # I don't need to store it I just need to know whether it exists
             await thread_to_bridge.parent.fetch_message(thread_to_bridge.id)
 
             source_starting_message = session.scalars(
