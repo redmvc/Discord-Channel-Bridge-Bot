@@ -237,7 +237,7 @@ async def bridge_message_helper(message: discord.Message):
                     )
 
             # Send a message out to each target webhook
-            successful_bridges: dict[str, str] = {}
+            async_bridged_messages = []
             for target_id, bridge in outbound_bridges.items():
                 webhook = bridge.webhook
                 if not webhook:
@@ -256,86 +256,115 @@ async def bridge_message_helper(message: discord.Message):
                         continue
                     thread_splat = {"thread": target_channel}
 
-                # Try to find whether the user who sent this message is on the other side of the bridge and if so what their name and avatar would be
-                bridged_member = await globals.get_channel_member(
-                    webhook_channel, message.author.id
-                )
-                if bridged_member:
-                    bridged_member_name = bridged_member.display_name
-                    bridged_avatar_url = bridged_member.display_avatar
-                else:
-                    bridged_member_name = message.author.display_name
-                    bridged_avatar_url = message.author.display_avatar
+                # Create an async version of bridging this message to gather at the end
+                async def bridge_message(
+                    webhook_channel: discord.TextChannel,
+                    message: discord.Message,
+                    target_id: int,
+                    bridged_reply_to: dict[int, int],
+                    target_channel: discord.TextChannel | discord.Thread,
+                    reply_has_ping: bool,
+                    thread_splat: ThreadSplat,
+                    webhook: discord.Webhook,
+                ):
+                    # Try to find whether the user who sent this message is on the other side of the bridge and if so what their name and avatar would be
+                    bridged_member = await globals.get_channel_member(
+                        webhook_channel, message.author.id
+                    )
+                    if bridged_member:
+                        bridged_member_name = bridged_member.display_name
+                        bridged_avatar_url = bridged_member.display_avatar
+                    else:
+                        bridged_member_name = message.author.display_name
+                        bridged_avatar_url = message.author.display_avatar
 
-                if bridged_reply_to.get(target_id):
-                    # The message being replied to is also bridged to this channel, so I'll create an embed to represent this
-                    try:
-                        message_replied_to = await target_channel.fetch_message(
-                            bridged_reply_to[target_id]
-                        )
+                    if bridged_reply_to.get(target_id):
+                        # The message being replied to is also bridged to this channel, so I'll create an embed to represent this
+                        try:
+                            message_replied_to = await target_channel.fetch_message(
+                                bridged_reply_to[target_id]
+                            )
 
-                        def truncate(msg: str, length: int) -> str:
-                            return msg if len(msg) < length else msg[: length - 1] + "…"
+                            def truncate(msg: str, length: int) -> str:
+                                return (
+                                    msg
+                                    if len(msg) < length
+                                    else msg[: length - 1] + "…"
+                                )
 
-                        display_name = discord.utils.escape_markdown(
-                            message_replied_to.author.display_name
-                        )
+                            display_name = discord.utils.escape_markdown(
+                                message_replied_to.author.display_name
+                            )
 
-                        # Discord represents ping "ON" vs "OFF" replies with an @ symbol before the reply author name
-                        # copy this behavior here
-                        if reply_has_ping:
-                            display_name = "@" + display_name
+                            # Discord represents ping "ON" vs "OFF" replies with an @ symbol before the reply author name
+                            # copy this behavior here
+                            if reply_has_ping:
+                                display_name = "@" + display_name
 
-                        replied_content = truncate(
-                            discord.utils.remove_markdown(
-                                message_replied_to.clean_content
-                            ),
-                            50,
-                        )
-                        reply_embed = [
-                            discord.Embed.from_dict(
-                                {
-                                    "type": "rich",
-                                    "url": message_replied_to.jump_url,
-                                    "thumbnail": {
-                                        "url": message_replied_to.author.display_avatar.replace(
-                                            size=16
-                                        ).url,
-                                        "height": 18,
-                                        "width": 18,
-                                    },
-                                    "description": f"**[↪]({message_replied_to.jump_url}) {display_name}**  {replied_content}",
-                                }
-                            ),
-                        ]
-                    except discord.HTTPException:
+                            replied_content = truncate(
+                                discord.utils.remove_markdown(
+                                    message_replied_to.clean_content
+                                ),
+                                50,
+                            )
+                            reply_embed = [
+                                discord.Embed.from_dict(
+                                    {
+                                        "type": "rich",
+                                        "url": message_replied_to.jump_url,
+                                        "thumbnail": {
+                                            "url": message_replied_to.author.display_avatar.replace(
+                                                size=16
+                                            ).url,
+                                            "height": 18,
+                                            "width": 18,
+                                        },
+                                        "description": f"**[↪]({message_replied_to.jump_url}) {display_name}**  {replied_content}",
+                                    }
+                                ),
+                            ]
+                        except discord.HTTPException:
+                            reply_embed = []
+                    else:
                         reply_embed = []
-                else:
-                    reply_embed = []
 
-                attachments = []
-                for attachment in message.attachments:
-                    attachments.append(await attachment.to_file())
+                    attachments = []
+                    for attachment in message.attachments:
+                        attachments.append(await attachment.to_file())
 
-                bridged_message = await webhook.send(
-                    content=message.content,
-                    allowed_mentions=discord.AllowedMentions(
-                        users=True, roles=False, everyone=False
-                    ),
-                    avatar_url=bridged_avatar_url,
-                    username=bridged_member_name,
-                    embeds=list(message.embeds + reply_embed),
-                    files=attachments,  # might throw HHTPException if too large?
-                    wait=True,
-                    **thread_splat,
+                    return webhook.send(
+                        content=message.content,
+                        allowed_mentions=discord.AllowedMentions(
+                            users=True, roles=False, everyone=False
+                        ),
+                        avatar_url=bridged_avatar_url,
+                        username=bridged_member_name,
+                        embeds=list(message.embeds + reply_embed),
+                        files=attachments,  # might throw HHTPException if too large?
+                        wait=True,
+                        **thread_splat,
+                    )
+
+                async_bridged_messages.append(
+                    bridge_message(
+                        webhook_channel,
+                        message,
+                        target_id,
+                        bridged_reply_to,
+                        target_channel,
+                        reply_has_ping,
+                        thread_splat,
+                        webhook,
+                    )
                 )
 
-                successful_bridges[str(target_id)] = str(bridged_message.id)
-
-            if len(successful_bridges) == 0:
+            if len(async_bridged_messages) == 0:
                 return
 
             # Insert references to the linked messages into the message_mappings table
+            bridged_messages: list[discord.WebhookMessage] = await asyncio.gather(
+                *async_bridged_messages
+            )
             source_message_id_str = str(message.id)
             source_channel_id_str = str(message.channel.id)
             session.add_all(
@@ -343,10 +372,10 @@ async def bridge_message_helper(message: discord.Message):
                     DBMessageMap(
                         source_message=source_message_id_str,
                         source_channel=source_channel_id_str,
-                        target_message=bridged_message_id,
-                        target_channel=bridged_channel_id,
+                        target_message=message.id,
+                        target_channel=message.channel.id,
                     )
-                    for bridged_message_id, bridged_channel_id in successful_bridges.items()
+                    for message in bridged_messages
                 ]
             )
 
