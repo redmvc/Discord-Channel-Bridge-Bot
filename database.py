@@ -117,27 +117,27 @@ def sql_upsert(
             "insert_values must have at least one key not present in update_values."
         )
 
-    session = None
-    try:
-        db_dialect = engine.dialect.name
-        if db_dialect == "mysql":
-            return (
-                mysql.insert(table)
-                .values(insert_values)
-                .on_duplicate_key_update(update_values)
-            )
-        elif db_dialect in {"postgresql", "sqlite"}:
-            insert: postgresql.Insert | sqlite.Insert
-            if db_dialect == "postgresql":
-                insert = postgresql.insert(table)
-            else:
-                insert = sqlite.insert(table)
-
-            return insert.values(insert_values).on_conflict_do_update(
-                index_elements=indices, set_=update_values
-            )
+    db_dialect = engine.dialect.name
+    if db_dialect == "mysql":
+        return (
+            mysql.insert(table)
+            .values(insert_values)
+            .on_duplicate_key_update(update_values)
+        )
+    elif db_dialect in {"postgresql", "sqlite"}:
+        insert: postgresql.Insert | sqlite.Insert
+        if db_dialect == "postgresql":
+            insert = postgresql.insert(table)
         else:
-            # I'll do a manual update in this case
+            insert = sqlite.insert(table)
+
+        return insert.values(insert_values).on_conflict_do_update(
+            index_elements=indices, set_=update_values
+        )
+    else:
+        # I'll do a manual update in this case
+        session = None
+        try:
             session = SQLSession(engine)
             index_values = [
                 getattr(table, idx) == insert_values[idx] for idx in indices
@@ -151,10 +151,10 @@ def sql_upsert(
             session.close()
 
             return upsert
-    except SQLError as e:
-        if session:
-            session.close()
-        raise e
+        except SQLError as e:
+            if session:
+                session.close()
+            raise e
 
 
 # Create the engine connecting to the database
