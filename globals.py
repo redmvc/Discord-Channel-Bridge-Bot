@@ -187,7 +187,6 @@ async def get_image_from_URL(url: str) -> bytes:
         - `url`: The URL of the image to get.
 
     #### Raises:
-        - `AssertionError`: Something went wrong fetching the image.
         - `HTTPResponseError`: HTTP request to fetch image returned a status other than 200.
         - `InvalidURL`: Argument was not a valid URL.
         - `RuntimeError`: Session connection failed.
@@ -205,8 +204,6 @@ async def get_image_from_URL(url: str) -> bytes:
 
             response_buffer = await response.read()
             image_bytes = io.BytesIO(response_buffer)
-            assert isinstance(image_bytes, io.BytesIO)
-            assert image_bytes is not None
 
     if not image_bytes:
         raise Exception("Unknown problem occurred trying to fetch image.")
