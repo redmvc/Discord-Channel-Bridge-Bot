@@ -157,7 +157,10 @@ def sql_upsert(
         raise e
 
 
+# Create the engine connecting to the database
 engine = create_engine(
     f"{credentials['db_dialect']}+{credentials['db_driver']}://{credentials['db_user']}:{credentials['db_pwd']}@{credentials['db_host']}:{credentials['db_port']}/{credentials['db_name']}"
 )
+
+# Create all tables represented by the above classes, if they haven't already been created
 DBBase.metadata.create_all(engine)
