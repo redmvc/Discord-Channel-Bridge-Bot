@@ -786,6 +786,7 @@ async def copy_emoji_into_server(
         f"https://cdn.discordapp.com/emojis/{missing_emoji.id}.png?v=1"
     )
 
+    delete_existing_emoji_query = None
     try:
         emoji = await globals.emoji_server.create_custom_emoji(
             name=missing_emoji.name, image=image, reason="Bridging reaction."
@@ -799,7 +800,16 @@ async def copy_emoji_into_server(
             raise e
 
         # Try to delete an emoji from the server and then add this again.
-        await random.choice(globals.emoji_server.emojis).delete()
+        emoji_to_delete = random.choice(globals.emoji_server.emojis)
+        globals.emoji_mappings = {
+            external_id: internal_id
+            for external_id, internal_id in globals.emoji_mappings.items()
+            if internal_id != emoji_to_delete.id
+        }
+        delete_existing_emoji_query = SQLDelete(DBEmojiMap).where(
+            DBEmojiMap.internal_emoji == str(emoji_to_delete.id)
+        )
+        await emoji_to_delete.delete()
 
         try:
             emoji = await globals.emoji_server.create_custom_emoji(
@@ -822,6 +832,9 @@ async def copy_emoji_into_server(
 
         try:
             with SQLSession(engine) as session:
+                if delete_existing_emoji_query is not None:
+                    session.execute(delete_existing_emoji_query)
+
                 upsert_emoji = sql_upsert(
                     DBEmojiMap,
                     {
