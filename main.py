@@ -21,6 +21,7 @@ from validations import validate_types
 
 
 class ThreadSplat(TypedDict, total=False):
+    """Helper class to perform bridge operations on threads."""
     thread: discord.Thread
 
 
@@ -251,6 +252,13 @@ async def bridge_message_helper(message: discord.Message):
                     discord.TextChannel | discord.Thread, target_channel
                 )
 
+                thread_splat: ThreadSplat = {}
+                if target_id != webhook_channel.id:
+                    # The target channel is not the same as the webhook's channel, so it should be a thread
+                    if not isinstance(target_channel, discord.Thread):
+                        continue
+                    thread_splat = {"thread": target_channel}
+
                 # Try to find whether the user who sent this message is on the other side of the bridge and if so what their name and avatar would be
                 bridged_member = await globals.get_channel_member(
                     webhook_channel, message.author.id
@@ -312,11 +320,6 @@ async def bridge_message_helper(message: discord.Message):
                 for attachment in message.attachments:
                     attachments.append(await attachment.to_file())
 
-                thread_splat: ThreadSplat = {}
-                if target_id != webhook_channel.id:
-                    if not isinstance(target_channel, discord.Thread):
-                        continue
-                    thread_splat = {"thread": target_channel}
                 bridged_message = await webhook.send(
                     content=message.content,
                     allowed_mentions=discord.AllowedMentions(
