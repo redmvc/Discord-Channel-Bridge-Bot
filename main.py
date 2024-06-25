@@ -337,13 +337,13 @@ async def bridge_message_helper(message: discord.Message):
                 return
 
             # Insert references to the linked messages into the message_mappings table
-            source_message_id = str(message.id)
-            source_channel_id = str(message.channel.id)
+            source_message_id_str = str(message.id)
+            source_channel_id_str = str(message.channel.id)
             session.add_all(
                 [
                     DBMessageMap(
-                        source_message=source_message_id,
-                        source_channel=source_channel_id,
+                        source_message=source_message_id_str,
+                        source_channel=source_channel_id_str,
                         target_message=str(bridged_message_id),
                         target_channel=str(bridged_channel_id),
                     )
