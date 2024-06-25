@@ -42,7 +42,7 @@ is_ready: bool = False
 auto_bridge_thread_channels: set[int] = set()
 
 
-def mention_to_channel(
+async def mention_to_channel(
     link_or_mention: str,
 ) -> discord.guild.GuildChannel | discord.Thread | discord.abc.PrivateChannel | None:
     """Return the channel referenced by a channel mention or a Discord link to a channel.
@@ -71,10 +71,10 @@ def mention_to_channel(
         except ValueError:
             return None
 
-    return get_channel_from_id(channel_id)
+    return await get_channel_from_id(channel_id)
 
 
-def get_channel_from_id(
+async def get_channel_from_id(
     channel_or_id: (
         discord.guild.GuildChannel | discord.Thread | discord.abc.PrivateChannel | int
     ),
@@ -107,6 +107,11 @@ def get_channel_from_id(
 
     if isinstance(channel_or_id, int):
         channel = client.get_channel(channel_or_id)
+        if not channel:
+            try:
+                channel = await client.fetch_channel(channel_or_id)
+            except Exception:
+                channel = None
     else:
         channel = channel_or_id
 

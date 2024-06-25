@@ -51,13 +51,13 @@ async def on_ready():
             continue
 
         source_id = int(source_id_str)
-        source_channel = globals.get_channel_from_id(int(source_id))
+        source_channel = await globals.get_channel_from_id(int(source_id))
         if not source_channel:
             # If I don't have access to the source channel, delete bridges from and to it
             invalid_channels.add(source_id_str)
 
         target_id = int(target_id_str)
-        target_channel = globals.get_channel_from_id(int(target_id))
+        target_channel = await globals.get_channel_from_id(int(target_id))
         if not target_channel:
             # If I don't have access to the source channel, delete bridges from and to it
             invalid_channels.add(target_id_str)
@@ -226,7 +226,7 @@ async def bridge_message_helper(message: discord.Message):
             if not isinstance(webhook_channel, discord.TextChannel):
                 continue
 
-            target_channel = globals.get_channel_from_id(target_id)
+            target_channel = await globals.get_channel_from_id(target_id)
             target_channel = cast(discord.TextChannel | discord.Thread, target_channel)
 
             # Try to find whether the user who sent this message is on the other side of the bridge and if so what their name and avatar would be
@@ -381,7 +381,7 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
             if not bridge:
                 continue
 
-            bridged_channel = globals.get_channel_from_id(target_channel_id)
+            bridged_channel = await globals.get_channel_from_id(target_channel_id)
             if not isinstance(bridged_channel, (discord.TextChannel, discord.Thread)):
                 continue
 
@@ -442,7 +442,7 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
             if not bridge:
                 continue
 
-            bridged_channel = globals.get_channel_from_id(target_channel_id)
+            bridged_channel = await globals.get_channel_from_id(target_channel_id)
             if not isinstance(bridged_channel, (discord.TextChannel, discord.Thread)):
                 continue
 
@@ -534,7 +534,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         message_id_to_skip: int | None = None
         if isinstance(source_message_map, DBMessageMap):
             # This message was bridged, so find the original one, react to it, and then find any other bridged messages from it
-            source_channel = globals.get_channel_from_id(
+            source_channel = await globals.get_channel_from_id(
                 int(source_message_map.source_channel)
             )
             if not source_channel:
@@ -581,7 +581,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
             if not bridge:
                 continue
 
-            bridged_channel = globals.get_channel_from_id(target_channel_id)
+            bridged_channel = await globals.get_channel_from_id(target_channel_id)
             if not isinstance(bridged_channel, (discord.TextChannel, discord.Thread)):
                 continue
 
