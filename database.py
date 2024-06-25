@@ -12,10 +12,10 @@ from sqlalchemy.orm import Session as SQLSession
 from sqlalchemy.orm import mapped_column
 from sqlalchemy.sql._typing import _DMLTableArgument
 
-from globals import credentials
+from globals import settings
 
 engine = create_engine(
-    f"{credentials['db_dialect']}+{credentials['db_driver']}://{credentials['db_user']}:{credentials['db_pwd']}@{credentials['db_host']}:{credentials['db_port']}/{credentials['db_name']}"
+    f"{settings['db_dialect']}+{settings['db_driver']}://{settings['db_user']}:{settings['db_pwd']}@{settings['db_host']}:{settings['db_port']}/{settings['db_name']}"
 )
 
 
@@ -66,7 +66,7 @@ def sql_upsert(
 
     ### Raises:
         - `ValueError`: `insert_values` does not have any keys not present in `update_values`.
-        - `UnknownDBDialectError`: Invalid database dialect registered in `credentials` file.
+        - `UnknownDBDialectError`: Invalid database dialect registered in `settings.json` file.
         - `SQLError`: SQL statement inferred from arguments was invalid or database connection failed.
 
     #### Returns:

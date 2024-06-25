@@ -20,7 +20,7 @@ The format of this variable is
     "db_name": "database name"
 }
 """
-credentials: dict[str, str | int] = json.load(open("credentials.json"))
+settings: dict[str, str | int] = json.load(open("settings.json"))
 
 # Variables for connection to the Discord client
 intents = discord.Intents()

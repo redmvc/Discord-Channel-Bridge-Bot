@@ -637,4 +637,4 @@ async def on_thread_create(thread: discord.Thread):
         await bridge_message_helper(thread.last_message)
 
 
-globals.client.run(cast(str, globals.credentials["app_token"]), reconnect=True)
+globals.client.run(cast(str, globals.settings["app_token"]), reconnect=True)

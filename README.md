@@ -24,12 +24,12 @@ To add this bot to your server, visit [this link](https://discord.com/oauth2/aut
 It's very straightforward to run your own copy of this bot. You'll need access to an SQL database running MySQL, PostgreSQL, or SQLite, and a Discord developer account.
 1. Go to the [applications page](https://discord.com/developers/applications) on the Discord Developers platform and create a new application.
 2. Under the "Bot" tab, make sure your bot has access to the "Server Members Intent" and the "Message Content Intent".
-   - Grab the authorisation token from that page, too, and save it to store it in your credentials file later.
+   - Grab the authorisation token from that page, too, and save it to store it in your settings file later.
 3. Generate an install link under the "Installation" tab:
    - Use the "Guild Install" authorization method.
    - Add the `applications.commands` and `bot` scopes.
    - Add the `Add Reactions`, `Attach Files`, `Create Public Threads`, `Embed Links`, `Read Message History`, `Read Messages/View Channels`, `Send Messages`, `Send Messages in Threads`, `Use External Emojis`, `Use External Stickers`, and `Use Slash Commands` default permissions.
-4. Create a `credentials.json` file in the same folder as your `main.py` file with the following entries, filling them out with the appropriate values for your own application and server:
+4. Create a `settings.json` file in the same folder as your `main.py` file with the following entries, filling them out with the appropriate values for your own application and server:
    ```json
    {
        "app_token": "the token you got in step 2",
