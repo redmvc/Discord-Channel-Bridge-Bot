@@ -197,14 +197,14 @@ async def get_image_from_URL(url: str) -> bytes:
     async with aiohttp.ClientSession(
         headers={"User-Agent": "Discord Channel Bridge Bot/0.1"}
     ) as session:
-        async with session.get(url) as resp:
-            if resp.status != 200:
+        async with session.get(url) as response:
+            if response.status != 200:
                 raise HTTPResponseError(
-                    f"Failed to retrieve image from URL: HTTP status {resp.status}."
+                    f"Failed to retrieve image from URL: HTTP status {response.status}."
                 )
 
-            resp_buffer = await resp.read()
-            image_bytes = io.BytesIO(resp_buffer)
+            response_buffer = await response.read()
+            image_bytes = io.BytesIO(response_buffer)
             assert isinstance(image_bytes, io.BytesIO)
             assert image_bytes is not None
 
