@@ -117,7 +117,6 @@ class Bridge:
         if webhook:
             self._webhook = webhook
         else:
-            assert isinstance(target_channel, discord.TextChannel | discord.Thread)
             if isinstance(target_channel, discord.Thread):
                 webhook_channel = target_channel.parent
             else:
