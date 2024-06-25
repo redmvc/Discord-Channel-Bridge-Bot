@@ -50,7 +50,7 @@ class Bridge:
 
         self = Bridge()
         await asyncio.gather(
-            self._add_source_and_target(source, target), self.add_webhook(webhook)
+            self._add_source_and_target(source, target), self._add_webhook(webhook)
         )
         return self
 
@@ -94,7 +94,7 @@ class Bridge:
         self._source_id = globals.get_id_from_channel(source)
         self._target_id = globals.get_id_from_channel(target)
 
-    async def add_webhook(self, webhook: discord.Webhook | None = None) -> None:
+    async def _add_webhook(self, webhook: discord.Webhook | None = None) -> None:
         """Add an existing webhook to this Bridge or create a new one for it.
 
         #### Args:
@@ -142,7 +142,7 @@ class Bridge:
         if not webhook:
             return
 
-        await self.add_webhook(webhook)
+        await self._add_webhook(webhook)
 
     async def destroy_webhook(self, reason: str = "User request."):
         """Destroys the Bridge's webhook if it exists.
