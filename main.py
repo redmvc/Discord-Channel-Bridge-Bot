@@ -62,7 +62,7 @@ async def on_ready():
             target_id = int(target_id_str)
             target_channel = await globals.get_channel_from_id(int(target_id))
             if not target_channel:
-                # If I don't have access to the source channel, delete bridges from and to it
+                # If I don't have access to the target channel, delete bridges from and to it
                 invalid_channels.add(target_id_str)
 
             try:
