@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import json
 
+import aiohttp
 import discord
 
 from validations import validate_types
@@ -176,6 +178,39 @@ async def get_channel_member(
             channel_member = None
 
     return channel_member
+
+
+async def get_image_from_URL(url: str) -> bytes:
+    """Return an image stored in a URL.
+
+    #### Args:
+        - `url`: The URL of the image to get.
+
+    #### Raises:
+        - `AssertionError`: Something went wrong fetching the image.
+        - `InvalidURL`: Argument was not a valid URL.
+        - `RuntimeError`: Session connection failed.
+        - `ServerTimeoutError`: Connection to server timed out.
+    """
+    image_bytes: io.BytesIO | None = None
+    async with aiohttp.ClientSession(
+        headers={"User-Agent": "Discord Channel Bridge Bot/0.1"}
+    ) as session:
+        async with session.get(url) as resp:
+            if resp.status != 200:
+                raise Exception(
+                    f"HttpProcessingError: {resp.status} Retrieving image failed!"
+                )
+
+            resp_buffer = await resp.read()
+            image_bytes = io.BytesIO(resp_buffer)
+            assert isinstance(image_bytes, io.BytesIO)
+            assert image_bytes is not None
+
+    if not image_bytes:
+        raise Exception("Unknown problem occurred trying to fetch image.")
+
+    return image_bytes.read()
 
 
 async def wait_until_ready() -> bool:
