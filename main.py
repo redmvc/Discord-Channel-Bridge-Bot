@@ -113,8 +113,12 @@ async def on_ready():
     registered_auto_bridge_thread_channels: ScalarResult[DBAutoBridgeThreadChannels] = (
         session.scalars(SQLSelect(DBAutoBridgeThreadChannels))
     )
-    for auto_bridge_thread_channel in registered_auto_bridge_thread_channels:
-        globals.auto_bridge_thread_channels.add(int(auto_bridge_thread_channel.channel))
+    globals.auto_bridge_thread_channels = globals.auto_bridge_thread_channels.union(
+        {
+            int(auto_bridge_thread_channel.channel)
+            for auto_bridge_thread_channel in registered_auto_bridge_thread_channels
+        }
+    )
 
     session.close()
 
