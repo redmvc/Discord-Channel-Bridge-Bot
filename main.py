@@ -237,8 +237,7 @@ async def bridge_message_helper(message: discord.Message):
                     )
 
             # Send a message out to each target webhook
-            bridged_message_ids = []
-            bridged_channel_ids = list(outbound_bridges.keys())
+            successful_bridges: dict[str, str] = {}
             for target_id, bridge in outbound_bridges.items():
                 webhook = bridge.webhook
                 if not webhook:
@@ -331,9 +330,9 @@ async def bridge_message_helper(message: discord.Message):
                     **thread_splat,
                 )
 
-                bridged_message_ids.append(bridged_message.id)
+                successful_bridges[str(target_id)] = str(bridged_message.id)
 
-            if len(bridged_message_ids) == 0:
+            if len(successful_bridges) == 0:
                 return
 
             # Insert references to the linked messages into the message_mappings table
@@ -344,12 +343,10 @@ async def bridge_message_helper(message: discord.Message):
                     DBMessageMap(
                         source_message=source_message_id_str,
                         source_channel=source_channel_id_str,
-                        target_message=str(bridged_message_id),
-                        target_channel=str(bridged_channel_id),
+                        target_message=bridged_message_id,
+                        target_channel=bridged_channel_id,
                     )
-                    for bridged_message_id, bridged_channel_id in zip(
-                        bridged_message_ids, bridged_channel_ids
-                    )
+                    for bridged_message_id, bridged_channel_id in successful_bridges.items()
                 ]
             )
 
