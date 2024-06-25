@@ -534,16 +534,18 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
     reaction_emoji: discord.Emoji | discord.PartialEmoji | str | None
     if payload.emoji.is_custom_emoji():
         # Custom emoji, I need to check whether it exists and is available to me
-        if payload.emoji.id:
-            reaction_emoji = globals.client.get_emoji(payload.emoji.id)
-            if not reaction_emoji:
-                return
-
-            if not reaction_emoji.available:
-                # TODO set up a personal emoji server to add emoji to
-                return
-        else:
+        if not payload.emoji.id:
             return
+
+        reaction_emoji = globals.client.get_emoji(payload.emoji.id)
+        if not reaction_emoji or not reaction_emoji.available:
+            # Couldn't find the reactji, will try to get the image and create it in my emoji server
+            try:
+                reaction_emoji = await globals.copy_emoji_into_server(payload.emoji)
+                if not reaction_emoji:
+                    return
+            except Exception:
+                return
     else:
         # It's a standard emoji, it's fine
         reaction_emoji = payload.emoji.name
