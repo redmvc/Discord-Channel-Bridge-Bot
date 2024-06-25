@@ -490,6 +490,7 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
                     DBMessageMap.source_message == payload.message_id
                 )
             )
+            async_message_deletes = []
             for message_row in bridged_messages:
                 target_channel_id = int(message_row.target_channel)
                 bridge = outbound_bridges.get(target_channel_id)
@@ -509,9 +510,11 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
                     thread_splat = {"thread": bridged_channel}
 
                 try:
-                    await bridge.webhook.delete_message(
-                        int(message_row.target_message),
-                        **thread_splat,
+                    async_message_deletes.append(
+                        bridge.webhook.delete_message(
+                            int(message_row.target_message),
+                            **thread_splat,
+                        )
                     )
                 except discord.HTTPException as e:
                     warn(
@@ -537,6 +540,8 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
 
         warn("Ran into an SQL error while trying to delete a message:\n" + str(e))
         return
+
+    await asyncio.gather(*async_message_deletes)
 
 
 @globals.client.event
