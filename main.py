@@ -22,6 +22,7 @@ from validations import validate_types
 
 class ThreadSplat(TypedDict, total=False):
     """Helper class to perform bridge operations on threads."""
+
     thread: discord.Thread
 
 
