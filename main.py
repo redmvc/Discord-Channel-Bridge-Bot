@@ -268,7 +268,7 @@ async def bridge_message_helper(message: discord.Message):
                     bridged_avatar_url = message.author.display_avatar
 
                 if bridged_reply_to.get(target_id):
-                    # The message being replied to is also bridged to this channel
+                    # The message being replied to is also bridged to this channel, so I'll create an embed to represent this
                     try:
                         message_replied_to = await target_channel.fetch_message(
                             bridged_reply_to[target_id]
