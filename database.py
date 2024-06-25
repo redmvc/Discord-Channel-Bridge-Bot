@@ -146,17 +146,16 @@ def sql_upsert(
         # I'll do a manual update in this case
         session = None
         try:
-            session = SQLSession(engine)
-            index_values = [
-                getattr(table, idx) == insert_values[idx] for idx in indices
-            ]
-            upsert: UpdateBase
-            if session.execute(SQLSelect(table).where(*index_values)).first():
-                # Values with those keys do exist, so I update
-                upsert = SQLUpdate(table).where(*index_values).values(update_values)
-            else:
-                upsert = other_db_insert(table).values(insert_values)
-            session.close()
+            with SQLSession(engine) as session:
+                index_values = [
+                    getattr(table, idx) == insert_values[idx] for idx in indices
+                ]
+                upsert: UpdateBase
+                if session.execute(SQLSelect(table).where(*index_values)).first():
+                    # Values with those keys do exist, so I update
+                    upsert = SQLUpdate(table).where(*index_values).values(update_values)
+                else:
+                    upsert = other_db_insert(table).values(insert_values)
 
             return upsert
         except SQLError as e:

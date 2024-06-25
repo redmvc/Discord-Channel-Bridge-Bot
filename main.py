@@ -37,91 +37,91 @@ async def on_ready():
     if globals.is_ready:
         return
 
-    # I am going to try to identify all existing bridges
-    session = SQLSession(engine)
-    registered_bridges: ScalarResult[DBBridge] = session.scalars(SQLSelect(DBBridge))
-    invalid_channels: set[str] = set()
-    invalid_webhooks: set[str] = set()
-    create_bridges = []
-    for bridge in registered_bridges:
-        source_id_str = bridge.source
-        target_id_str = bridge.target
-        webhook_id_str = bridge.webhook
+    with SQLSession(engine) as session:
+        # I am going to try to identify all existing bridges
+        registered_bridges: ScalarResult[DBBridge] = session.scalars(
+            SQLSelect(DBBridge)
+        )
+        invalid_channels: set[str] = set()
+        invalid_webhooks: set[str] = set()
+        create_bridges = []
+        for bridge in registered_bridges:
+            source_id_str = bridge.source
+            target_id_str = bridge.target
+            webhook_id_str = bridge.webhook
 
-        if webhook_id_str in invalid_webhooks:
-            continue
+            if webhook_id_str in invalid_webhooks:
+                continue
 
-        source_id = int(source_id_str)
-        source_channel = await globals.get_channel_from_id(int(source_id))
-        if not source_channel:
-            # If I don't have access to the source channel, delete bridges from and to it
-            invalid_channels.add(source_id_str)
-
-        target_id = int(target_id_str)
-        target_channel = await globals.get_channel_from_id(int(target_id))
-        if not target_channel:
-            # If I don't have access to the source channel, delete bridges from and to it
-            invalid_channels.add(target_id_str)
-
-        try:
-            webhook = await globals.client.fetch_webhook(int(webhook_id_str))
-
+            source_id = int(source_id_str)
+            source_channel = await globals.get_channel_from_id(int(source_id))
             if not source_channel:
-                # I have access to the target webhook but not to the source channel anymore so I'll delete the webhook
-                await webhook.delete(reason="Source channel no longer available.")
-                raise Exception
-            elif target_channel:
-                # I have access to both the source and target channels and to the webhook
-                create_bridges.append(
-                    commands.create_bridge(source_id, target_id, webhook)
+                # If I don't have access to the source channel, delete bridges from and to it
+                invalid_channels.add(source_id_str)
+
+            target_id = int(target_id_str)
+            target_channel = await globals.get_channel_from_id(int(target_id))
+            if not target_channel:
+                # If I don't have access to the source channel, delete bridges from and to it
+                invalid_channels.add(target_id_str)
+
+            try:
+                webhook = await globals.client.fetch_webhook(int(webhook_id_str))
+
+                if not source_channel:
+                    # I have access to the target webhook but not to the source channel anymore so I'll delete the webhook
+                    await webhook.delete(reason="Source channel no longer available.")
+                    raise Exception
+                elif target_channel:
+                    # I have access to both the source and target channels and to the webhook
+                    create_bridges.append(
+                        commands.create_bridge(source_id, target_id, webhook)
+                    )
+            except Exception:
+                invalid_webhooks.add(webhook_id_str)
+
+                if source_channel and target_channel:
+                    # There *should* be a webhook there and I have access to the channels
+                    create_bridges.append(
+                        commands.create_bridge_and_db(source_id, target_id, session)
+                    )
+        await asyncio.gather(*create_bridges)
+
+        if len(invalid_channels) > 0:
+            delete_invalid_channels = SQLDelete(DBBridge).where(
+                sql_or(
+                    DBBridge.source.in_(invalid_channels),
+                    DBBridge.target.in_(invalid_channels),
                 )
-        except Exception:
-            invalid_webhooks.add(webhook_id_str)
+            )
+            session.execute(delete_invalid_channels)
 
-            if source_channel and target_channel:
-                # There *should* be a webhook there and I have access to the channels
-                create_bridges.append(
-                    commands.create_bridge_and_db(source_id, target_id, session)
+            delete_invalid_messages = SQLDelete(DBMessageMap).where(
+                sql_or(
+                    DBMessageMap.source_channel.in_(invalid_channels),
+                    DBMessageMap.target_channel.in_(invalid_channels),
                 )
-    await asyncio.gather(*create_bridges)
-
-    if len(invalid_channels) > 0:
-        delete_invalid_channels = SQLDelete(DBBridge).where(
-            sql_or(
-                DBBridge.source.in_(invalid_channels),
-                DBBridge.target.in_(invalid_channels),
             )
-        )
-        session.execute(delete_invalid_channels)
+            session.execute(delete_invalid_messages)
 
-        delete_invalid_messages = SQLDelete(DBMessageMap).where(
-            sql_or(
-                DBMessageMap.source_channel.in_(invalid_channels),
-                DBMessageMap.target_channel.in_(invalid_channels),
+        if len(invalid_webhooks) > 0:
+            delete_invalid_webhooks = SQLDelete(DBBridge).where(
+                DBBridge.webhook.in_(invalid_webhooks)
             )
+            session.execute(delete_invalid_webhooks)
+
+        session.commit()
+
+        # And next I identify all automatically-thread-bridging channels
+        registered_auto_bridge_thread_channels: ScalarResult[
+            DBAutoBridgeThreadChannels
+        ] = session.scalars(SQLSelect(DBAutoBridgeThreadChannels))
+        globals.auto_bridge_thread_channels = globals.auto_bridge_thread_channels.union(
+            {
+                int(auto_bridge_thread_channel.channel)
+                for auto_bridge_thread_channel in registered_auto_bridge_thread_channels
+            }
         )
-        session.execute(delete_invalid_messages)
-
-    if len(invalid_webhooks) > 0:
-        delete_invalid_webhooks = SQLDelete(DBBridge).where(
-            DBBridge.webhook.in_(invalid_webhooks)
-        )
-        session.execute(delete_invalid_webhooks)
-
-    session.commit()
-
-    # And next I identify all automatically-thread-bridging channels
-    registered_auto_bridge_thread_channels: ScalarResult[DBAutoBridgeThreadChannels] = (
-        session.scalars(SQLSelect(DBAutoBridgeThreadChannels))
-    )
-    globals.auto_bridge_thread_channels = globals.auto_bridge_thread_channels.union(
-        {
-            int(auto_bridge_thread_channel.channel)
-            for auto_bridge_thread_channel in registered_auto_bridge_thread_channels
-        }
-    )
-
-    session.close()
 
     await globals.command_tree.sync()
     print(f"{globals.client.user} is connected to the following servers:\n")
@@ -180,169 +180,172 @@ async def bridge_message_helper(message: discord.Message):
 
     session = None
     try:
-        session = SQLSession(engine)
-        reply_bridges: dict[int, int] = {}
-        reply_reference = False
-        if message.reference and message.reference.message_id:
-            # This message is a reply to another message, so we should try to link to its match on the other side of bridges
-            # reply_bridges will be a dict whose keys are channel IDs and whose values are the IDs of messages matching the message I'm replying to in those channels
-            reply_id = message.reference.message_id
+        with SQLSession(engine) as session:
+            reply_bridges: dict[int, int] = {}
+            reply_reference = False
+            if message.reference and message.reference.message_id:
+                # This message is a reply to another message, so we should try to link to its match on the other side of bridges
+                # reply_bridges will be a dict whose keys are channel IDs and whose values are the IDs of messages matching the message I'm replying to in those channels
+                reply_id = message.reference.message_id
 
-            # identify if this reply "pinged" the target, to know whether to add the @ symbol UI
-            reply_message = message.reference.resolved
-            reply_reference = isinstance(reply_message, discord.Message) and any(
-                x.id == reply_message.author.id for x in message.mentions
-            )
-
-            # First, check whether the message replied to was itself bridged from somewhere
-            reply_source_match = session.scalars(
-                SQLSelect(DBMessageMap).where(
-                    DBMessageMap.target_message == str(reply_id)
-                )
-            ).first()
-            if isinstance(reply_source_match, DBMessageMap):
-                # So the message replied to was bridged from elsewhere
-                reply_source_id = int(reply_source_match.source_message)
-                reply_source_channel_id = int(reply_source_match.source_channel)
-                reply_bridges[reply_source_channel_id] = reply_source_id
-            else:
-                # The message this is replying to might have been the source of a bridge, not the target
-                reply_source_id = reply_id
-                reply_source_channel_id = message.channel.id
-
-            # Now find all other bridged versions of the message we're replying to
-            reply_bridge_match: ScalarResult[DBMessageMap] = session.scalars(
-                SQLSelect(DBMessageMap).where(
-                    DBMessageMap.source_message == str(reply_source_id)
-                )
-            )
-            for message_match in reply_bridge_match:
-                reply_bridges[int(message_match.target_channel)] = int(
-                    message_match.target_message
+                # identify if this reply "pinged" the target, to know whether to add the @ symbol UI
+                reply_message = message.reference.resolved
+                reply_reference = isinstance(reply_message, discord.Message) and any(
+                    x.id == reply_message.author.id for x in message.mentions
                 )
 
-        # Send a message out to each target webhook
-        bridged_message_ids = []
-        bridged_channel_ids = list(outbound_bridges.keys())
-        for target_id, bridge in outbound_bridges.items():
-            webhook = bridge.webhook
-            if not webhook:
-                continue
+                # First, check whether the message replied to was itself bridged from somewhere
+                reply_source_match = session.scalars(
+                    SQLSelect(DBMessageMap).where(
+                        DBMessageMap.target_message == str(reply_id)
+                    )
+                ).first()
+                if isinstance(reply_source_match, DBMessageMap):
+                    # So the message replied to was bridged from elsewhere
+                    reply_source_id = int(reply_source_match.source_message)
+                    reply_source_channel_id = int(reply_source_match.source_channel)
+                    reply_bridges[reply_source_channel_id] = reply_source_id
+                else:
+                    # The message this is replying to might have been the source of a bridge, not the target
+                    reply_source_id = reply_id
+                    reply_source_channel_id = message.channel.id
 
-            webhook_channel = webhook.channel
-            if not isinstance(webhook_channel, discord.TextChannel):
-                continue
-
-            target_channel = await globals.get_channel_from_id(target_id)
-            target_channel = cast(discord.TextChannel | discord.Thread, target_channel)
-
-            # Try to find whether the user who sent this message is on the other side of the bridge and if so what their name and avatar would be
-            tgt_member = await globals.get_channel_member(
-                webhook_channel, message.author.id
-            )
-            if tgt_member:
-                tgt_member_name = tgt_member.display_name
-                tgt_avatar_url = tgt_member.display_avatar
-            else:
-                tgt_member_name = message.author.display_name
-                tgt_avatar_url = message.author.display_avatar
-
-            if reply_bridges.get(target_id):
-                # This message is replying to a message that is bridged
-                try:
-                    replied_message = await target_channel.fetch_message(
-                        reply_bridges[target_id]
+                # Now find all other bridged versions of the message we're replying to
+                reply_bridge_match: ScalarResult[DBMessageMap] = session.scalars(
+                    SQLSelect(DBMessageMap).where(
+                        DBMessageMap.source_message == str(reply_source_id)
+                    )
+                )
+                for message_match in reply_bridge_match:
+                    reply_bridges[int(message_match.target_channel)] = int(
+                        message_match.target_message
                     )
 
-                    def truncate(msg: str, length: int) -> str:
-                        return msg if len(msg) < length else msg[: length - 1] + "…"
-
-                    display_name = discord.utils.escape_markdown(
-                        replied_message.author.display_name
-                    )
-                    # Discord represents ping "ON" vs "OFF" replies with an @ symbol before the reply author name
-                    # copy this behavior here
-                    if reply_reference:
-                        display_name = "@" + display_name
-
-                    replied_content = truncate(
-                        discord.utils.remove_markdown(replied_message.clean_content),
-                        50,
-                    )
-                    reply_embed = [
-                        discord.Embed.from_dict(
-                            {
-                                "type": "rich",
-                                "url": replied_message.jump_url,
-                                "thumbnail": {
-                                    "url": replied_message.author.display_avatar.replace(
-                                        size=16
-                                    ).url,
-                                    "height": 18,
-                                    "width": 18,
-                                },
-                                "description": f"**[↪]({replied_message.jump_url}) {display_name}**  {replied_content}",
-                            }
-                        ),
-                    ]
-                except discord.HTTPException:
-                    reply_embed = []
-            else:
-                reply_embed = []
-
-            attachments = []
-            for attachment in message.attachments:
-                attachments.append(await attachment.to_file())
-
-            thread_splat: ThreadSplat = {}
-            if target_id != webhook_channel.id:
-                if not isinstance(target_channel, discord.Thread):
+            # Send a message out to each target webhook
+            bridged_message_ids = []
+            bridged_channel_ids = list(outbound_bridges.keys())
+            for target_id, bridge in outbound_bridges.items():
+                webhook = bridge.webhook
+                if not webhook:
                     continue
-                thread_splat = {"thread": target_channel}
-            bridged_message = await webhook.send(
-                content=message.content,
-                allowed_mentions=discord.AllowedMentions(
-                    users=True, roles=False, everyone=False
-                ),
-                avatar_url=tgt_avatar_url,
-                username=tgt_member_name,
-                embeds=list(message.embeds + reply_embed),
-                files=attachments,  # might throw HHTPException if too large?
-                wait=True,
-                **thread_splat,
+
+                webhook_channel = webhook.channel
+                if not isinstance(webhook_channel, discord.TextChannel):
+                    continue
+
+                target_channel = await globals.get_channel_from_id(target_id)
+                target_channel = cast(
+                    discord.TextChannel | discord.Thread, target_channel
+                )
+
+                # Try to find whether the user who sent this message is on the other side of the bridge and if so what their name and avatar would be
+                tgt_member = await globals.get_channel_member(
+                    webhook_channel, message.author.id
+                )
+                if tgt_member:
+                    tgt_member_name = tgt_member.display_name
+                    tgt_avatar_url = tgt_member.display_avatar
+                else:
+                    tgt_member_name = message.author.display_name
+                    tgt_avatar_url = message.author.display_avatar
+
+                if reply_bridges.get(target_id):
+                    # This message is replying to a message that is bridged
+                    try:
+                        replied_message = await target_channel.fetch_message(
+                            reply_bridges[target_id]
+                        )
+
+                        def truncate(msg: str, length: int) -> str:
+                            return msg if len(msg) < length else msg[: length - 1] + "…"
+
+                        display_name = discord.utils.escape_markdown(
+                            replied_message.author.display_name
+                        )
+                        # Discord represents ping "ON" vs "OFF" replies with an @ symbol before the reply author name
+                        # copy this behavior here
+                        if reply_reference:
+                            display_name = "@" + display_name
+
+                        replied_content = truncate(
+                            discord.utils.remove_markdown(
+                                replied_message.clean_content
+                            ),
+                            50,
+                        )
+                        reply_embed = [
+                            discord.Embed.from_dict(
+                                {
+                                    "type": "rich",
+                                    "url": replied_message.jump_url,
+                                    "thumbnail": {
+                                        "url": replied_message.author.display_avatar.replace(
+                                            size=16
+                                        ).url,
+                                        "height": 18,
+                                        "width": 18,
+                                    },
+                                    "description": f"**[↪]({replied_message.jump_url}) {display_name}**  {replied_content}",
+                                }
+                            ),
+                        ]
+                    except discord.HTTPException:
+                        reply_embed = []
+                else:
+                    reply_embed = []
+
+                attachments = []
+                for attachment in message.attachments:
+                    attachments.append(await attachment.to_file())
+
+                thread_splat: ThreadSplat = {}
+                if target_id != webhook_channel.id:
+                    if not isinstance(target_channel, discord.Thread):
+                        continue
+                    thread_splat = {"thread": target_channel}
+                bridged_message = await webhook.send(
+                    content=message.content,
+                    allowed_mentions=discord.AllowedMentions(
+                        users=True, roles=False, everyone=False
+                    ),
+                    avatar_url=tgt_avatar_url,
+                    username=tgt_member_name,
+                    embeds=list(message.embeds + reply_embed),
+                    files=attachments,  # might throw HHTPException if too large?
+                    wait=True,
+                    **thread_splat,
+                )
+
+                bridged_message_ids.append(bridged_message.id)
+
+            if len(bridged_message_ids) == 0:
+                session.close()
+                return
+
+            # Insert references to the linked messages into the message_mappings table
+            source_message_id = str(message.id)
+            source_channel_id = str(message.channel.id)
+            session.add_all(
+                [
+                    DBMessageMap(
+                        source_message=source_message_id,
+                        source_channel=source_channel_id,
+                        target_message=str(bridged_message_id),
+                        target_channel=str(bridged_channel_id),
+                    )
+                    for bridged_message_id, bridged_channel_id in zip(
+                        bridged_message_ids, bridged_channel_ids
+                    )
+                ]
             )
 
-            bridged_message_ids.append(bridged_message.id)
-
-        if len(bridged_message_ids) == 0:
-            session.close()
-            return
-
-        # Insert references to the linked messages into the message_mappings table
-        source_message_id = str(message.id)
-        source_channel_id = str(message.channel.id)
-        session.add_all(
-            [
-                DBMessageMap(
-                    source_message=source_message_id,
-                    source_channel=source_channel_id,
-                    target_message=str(bridged_message_id),
-                    target_channel=str(bridged_channel_id),
-                )
-                for bridged_message_id, bridged_channel_id in zip(
-                    bridged_message_ids, bridged_channel_ids
-                )
-            ]
-        )
+            session.commit()
     except SQLError as e:
         if session:
             session.close()
 
         warn("Ran into an SQL error while trying to bridge a message:\n" + str(e))
         return
-
-    session.commit()
-    session.close()
 
 
 @globals.client.event
@@ -371,43 +374,43 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
 
     # Find all messages matching this one
     try:
-        session = SQLSession(engine)
-        bridged_messages: ScalarResult[DBMessageMap] = session.scalars(
-            SQLSelect(DBMessageMap).where(
-                DBMessageMap.source_message == payload.message_id
+        with SQLSession(engine) as session:
+            bridged_messages: ScalarResult[DBMessageMap] = session.scalars(
+                SQLSelect(DBMessageMap).where(
+                    DBMessageMap.source_message == payload.message_id
+                )
             )
-        )
-        for message_row in bridged_messages:
-            target_channel_id = int(message_row.target_channel)
-            bridge = outbound_bridges.get(target_channel_id)
-            if not bridge:
-                continue
-
-            bridged_channel = await globals.get_channel_from_id(target_channel_id)
-            if not isinstance(bridged_channel, (discord.TextChannel, discord.Thread)):
-                continue
-
-            thread_splat: ThreadSplat = {}
-            if isinstance(bridged_channel, discord.Thread):
-                if not isinstance(bridged_channel.parent, discord.TextChannel):
+            for message_row in bridged_messages:
+                target_channel_id = int(message_row.target_channel)
+                bridge = outbound_bridges.get(target_channel_id)
+                if not bridge:
                     continue
-                thread_splat = {"thread": bridged_channel}
 
-            try:
-                await bridge.webhook.edit_message(
-                    message_id=int(message_row.target_message),
-                    content=updated_message_content,
-                    **thread_splat,
-                )
-            except discord.HTTPException as e:
-                warn(
-                    "Ran into a Discord exception while trying to edit a message across a bridge:\n"
-                    + str(e)
-                )
+                bridged_channel = await globals.get_channel_from_id(target_channel_id)
+                if not isinstance(
+                    bridged_channel, (discord.TextChannel, discord.Thread)
+                ):
+                    continue
+
+                thread_splat: ThreadSplat = {}
+                if isinstance(bridged_channel, discord.Thread):
+                    if not isinstance(bridged_channel.parent, discord.TextChannel):
+                        continue
+                    thread_splat = {"thread": bridged_channel}
+
+                try:
+                    await bridge.webhook.edit_message(
+                        message_id=int(message_row.target_message),
+                        content=updated_message_content,
+                        **thread_splat,
+                    )
+                except discord.HTTPException as e:
+                    warn(
+                        "Ran into a Discord exception while trying to edit a message across a bridge:\n"
+                        + str(e)
+                    )
     except SQLError as e:
         warn("Ran into an SQL error while trying to edit a message:\n" + str(e))
-
-    session.close()
 
 
 @globals.client.event
@@ -432,58 +435,59 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
     # Find all messages matching this one
     session = None
     try:
-        session = SQLSession(engine)
-        bridged_messages: ScalarResult[DBMessageMap] = session.scalars(
-            SQLSelect(DBMessageMap).where(
-                DBMessageMap.source_message == payload.message_id
+        with SQLSession(engine) as session:
+            bridged_messages: ScalarResult[DBMessageMap] = session.scalars(
+                SQLSelect(DBMessageMap).where(
+                    DBMessageMap.source_message == payload.message_id
+                )
             )
-        )
-        for message_row in bridged_messages:
-            target_channel_id = int(message_row.target_channel)
-            bridge = outbound_bridges.get(target_channel_id)
-            if not bridge:
-                continue
-
-            bridged_channel = await globals.get_channel_from_id(target_channel_id)
-            if not isinstance(bridged_channel, (discord.TextChannel, discord.Thread)):
-                continue
-
-            thread_splat: ThreadSplat = {}
-            if isinstance(bridged_channel, discord.Thread):
-                if not isinstance(bridged_channel.parent, discord.TextChannel):
+            for message_row in bridged_messages:
+                target_channel_id = int(message_row.target_channel)
+                bridge = outbound_bridges.get(target_channel_id)
+                if not bridge:
                     continue
-                thread_splat = {"thread": bridged_channel}
 
-            try:
-                await bridge.webhook.delete_message(
-                    int(message_row.target_message),
-                    **thread_splat,
-                )
-            except discord.HTTPException as e:
-                warn(
-                    "Ran into a Discord exception while trying to delete a message across a bridge:\n"
-                    + str(e)
-                )
+                bridged_channel = await globals.get_channel_from_id(target_channel_id)
+                if not isinstance(
+                    bridged_channel, (discord.TextChannel, discord.Thread)
+                ):
+                    continue
 
-        # If the message was bridged, delete its row
-        # If it was a source of bridged messages, delete all rows of its bridged versions
-        session.execute(
-            SQLDelete(DBMessageMap).where(
-                sql_or(
-                    DBMessageMap.source_message == str(payload.message_id),
-                    DBMessageMap.target_message == str(payload.message_id),
+                thread_splat: ThreadSplat = {}
+                if isinstance(bridged_channel, discord.Thread):
+                    if not isinstance(bridged_channel.parent, discord.TextChannel):
+                        continue
+                    thread_splat = {"thread": bridged_channel}
+
+                try:
+                    await bridge.webhook.delete_message(
+                        int(message_row.target_message),
+                        **thread_splat,
+                    )
+                except discord.HTTPException as e:
+                    warn(
+                        "Ran into a Discord exception while trying to delete a message across a bridge:\n"
+                        + str(e)
+                    )
+
+            # If the message was bridged, delete its row
+            # If it was a source of bridged messages, delete all rows of its bridged versions
+            session.execute(
+                SQLDelete(DBMessageMap).where(
+                    sql_or(
+                        DBMessageMap.source_message == str(payload.message_id),
+                        DBMessageMap.target_message == str(payload.message_id),
+                    )
                 )
             )
-        )
+
+            session.commit()
     except SQLError as e:
         if session:
             session.close()
 
         warn("Ran into an SQL error while trying to delete a message:\n" + str(e))
         return
-
-    session.commit()
-    session.close()
 
 
 @globals.client.event
@@ -525,76 +529,83 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         reaction_emoji = reaction_emoji.name
 
     # Find all messages matching this one
+    session = None
     try:
         # First, check whether this message is bridged, in which case I need to find its source
-        session = SQLSession(engine)
-        source_message_map = session.scalars(
-            SQLSelect(DBMessageMap).where(
-                DBMessageMap.target_message == str(payload.message_id),
-            )
-        ).first()
-        message_id_to_skip: int | None = None
-        if isinstance(source_message_map, DBMessageMap):
-            # This message was bridged, so find the original one, react to it, and then find any other bridged messages from it
-            source_channel = await globals.get_channel_from_id(
-                int(source_message_map.source_channel)
-            )
-            if not source_channel:
+        with SQLSession(engine) as session:
+            source_message_map = session.scalars(
+                SQLSelect(DBMessageMap).where(
+                    DBMessageMap.target_message == str(payload.message_id),
+                )
+            ).first()
+            message_id_to_skip: int | None = None
+            if isinstance(source_message_map, DBMessageMap):
+                # This message was bridged, so find the original one, react to it, and then find any other bridged messages from it
+                source_channel = await globals.get_channel_from_id(
+                    int(source_message_map.source_channel)
+                )
+                if not source_channel:
+                    return
+
+                assert isinstance(source_channel, (discord.TextChannel, discord.Thread))
+
+                source_message_id = int(source_message_map.source_message)
+                try:
+                    source_message = await source_channel.fetch_message(
+                        source_message_id
+                    )
+                    if source_message:
+                        await source_message.add_reaction(reaction_emoji)
+                except discord.HTTPException as e:
+                    warn(
+                        "Ran into a Discord exception while trying to add a reaction across a bridge:\n"
+                        + str(e)
+                    )
+
+                message_id_to_skip = (
+                    payload.message_id
+                )  # Don't add a reaction back to this message
+            else:
+                # This message is (or might be) the source
+                source_message_id = payload.message_id
+
+            outbound_bridges = bridges.get_outbound_bridges(source_message_id)
+            if not outbound_bridges:
+                session.close()
                 return
 
-            assert isinstance(source_channel, (discord.TextChannel, discord.Thread))
-
-            source_message_id = int(source_message_map.source_message)
-            try:
-                source_message = await source_channel.fetch_message(source_message_id)
-                if source_message:
-                    await source_message.add_reaction(reaction_emoji)
-            except discord.HTTPException as e:
-                warn(
-                    "Ran into a Discord exception while trying to add a reaction across a bridge:\n"
-                    + str(e)
-                )
-
-            message_id_to_skip = (
-                payload.message_id
-            )  # Don't add a reaction back to this message
-        else:
-            # This message is (or might be) the source
-            source_message_id = payload.message_id
-
-        outbound_bridges = bridges.get_outbound_bridges(source_message_id)
-        if not outbound_bridges:
-            session.close()
-            return
-
-        bridged_messages: ScalarResult[DBMessageMap] = session.scalars(
-            SQLSelect(DBMessageMap).where(
-                sql_and(
-                    DBMessageMap.source_message == str(source_message_id),
-                    DBMessageMap.target_message != str(message_id_to_skip),
+            bridged_messages: ScalarResult[DBMessageMap] = session.scalars(
+                SQLSelect(DBMessageMap).where(
+                    sql_and(
+                        DBMessageMap.source_message == str(source_message_id),
+                        DBMessageMap.target_message != str(message_id_to_skip),
+                    )
                 )
             )
-        )
-        for message_row in bridged_messages:
-            target_message_id = int(message_row.target_message)
-            target_channel_id = int(message_row.target_channel)
+            for message_row in bridged_messages:
+                target_message_id = int(message_row.target_message)
+                target_channel_id = int(message_row.target_channel)
 
-            bridge = outbound_bridges.get(target_channel_id)
-            if not bridge:
-                continue
+                bridge = outbound_bridges.get(target_channel_id)
+                if not bridge:
+                    continue
 
-            bridged_channel = await globals.get_channel_from_id(target_channel_id)
-            if not isinstance(bridged_channel, (discord.TextChannel, discord.Thread)):
-                continue
+                bridged_channel = await globals.get_channel_from_id(target_channel_id)
+                if not isinstance(
+                    bridged_channel, (discord.TextChannel, discord.Thread)
+                ):
+                    continue
 
-            try:
-                bridged_message = await bridged_channel.fetch_message(target_message_id)
-                await bridged_message.add_reaction(reaction_emoji)
-            except discord.HTTPException as e:
-                warn(
-                    "Ran into a Discord exception while trying to add a reaction across a bridge:\n"
-                    + str(e)
-                )
+                try:
+                    bridged_message = await bridged_channel.fetch_message(
+                        target_message_id
+                    )
+                    await bridged_message.add_reaction(reaction_emoji)
+                except discord.HTTPException as e:
+                    warn(
+                        "Ran into a Discord exception while trying to add a reaction across a bridge:\n"
+                        + str(e)
+                    )
     except SQLError as e:
         if session:
             session.close()
@@ -603,8 +614,6 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
             "Ran into an SQL error while trying to add a reaction to a message:\n"
             + str(e)
         )
-
-    session.close()
 
 
 @globals.client.event
