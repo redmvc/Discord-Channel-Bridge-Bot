@@ -275,11 +275,11 @@ async def inbound(interaction: discord.Interaction, source: str):
 
     assert isinstance(interaction.user, discord.Member)
     assert interaction.guild
-    source_channel_user = source_channel.guild.get_member(interaction.user.id)
+    source_channel_member = source_channel.guild.get_member(interaction.user.id)
     if (
         not message_channel.permissions_for(interaction.user).manage_webhooks
-        or not source_channel_user
-        or not source_channel.permissions_for(source_channel_user).manage_webhooks
+        or not source_channel_member
+        or not source_channel.permissions_for(source_channel_member).manage_webhooks
         or not message_channel.permissions_for(interaction.guild.me).manage_webhooks
         or not source_channel.permissions_for(source_channel.guild.me).manage_webhooks
     ):
