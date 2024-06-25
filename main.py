@@ -582,11 +582,13 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                 message_id_to_skip = (
                     payload.message_id
                 )  # Don't add a reaction back to this message
+                source_channel_id = source_channel.id
             else:
                 # This message is (or might be) the source
                 source_message_id = payload.message_id
+                source_channel_id = payload.channel_id
 
-            outbound_bridges = bridges.get_outbound_bridges(source_message_id)
+            outbound_bridges = bridges.get_outbound_bridges(source_channel_id)
             if not outbound_bridges:
                 return
 
