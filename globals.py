@@ -155,6 +155,25 @@ def get_id_from_channel(
         return channel_or_id.id
 
 
+async def get_channel_member(
+    channel: discord.abc.GuildChannel | discord.Thread, member_id: int
+) -> discord.Member | None:
+    """Return a channel's member by their ID, or None if they can't be found.
+
+    #### Args:
+        - `channel`: The channel to look for a member in.
+        - `member_id`: Their ID.
+    """
+    channel_member = channel.guild.get_member(member_id)
+    if not channel_member:
+        try:
+            channel_member = await channel.guild.fetch_member(member_id)
+        except Exception:
+            channel_member = None
+
+    return channel_member
+
+
 async def wait_until_ready() -> bool:
     """Returns True when the bot is ready or False if it times out."""
     if is_ready:

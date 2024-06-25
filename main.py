@@ -230,14 +230,9 @@ async def bridge_message_helper(message: discord.Message):
             target_channel = cast(discord.TextChannel | discord.Thread, target_channel)
 
             # Try to find whether the user who sent this message is on the other side of the bridge and if so what their name and avatar would be
-            tgt_member = webhook_channel.guild.get_member(message.author.id)
-            if not tgt_member:
-                try:
-                    tgt_member = await webhook_channel.guild.fetch_member(
-                        message.author.id
-                    )
-                except Exception:
-                    tgt_member = None
+            tgt_member = await globals.get_channel_member(
+                webhook_channel, message.author.id
+            )
             if tgt_member:
                 tgt_member_name = tgt_member.display_name
                 tgt_avatar_url = tgt_member.display_avatar
