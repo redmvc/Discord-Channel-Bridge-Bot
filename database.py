@@ -13,6 +13,7 @@ from sqlalchemy.orm import mapped_column
 from sqlalchemy.sql._typing import _DMLTableArgument
 
 from globals import settings
+from validations import validate_types
 
 
 class DBBase(DeclarativeBase):
@@ -68,6 +69,13 @@ def sql_upsert(
     #### Returns:
         - `Insert`: The updated Insert command.
     """
+    validate_types(
+        {
+            "insert_values": (insert_values, dict),
+            "update_values": (update_values, dict),
+        }
+    )
+
     insert_keys = set(insert_values.keys())
     update_keys = set(update_values.keys())
     if not update_keys.issubset(insert_keys):
