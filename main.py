@@ -333,7 +333,6 @@ async def bridge_message_helper(message: discord.Message):
                 bridged_message_ids.append(bridged_message.id)
 
             if len(bridged_message_ids) == 0:
-                session.close()
                 return
 
             # Insert references to the linked messages into the message_mappings table
@@ -591,7 +590,6 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
 
             outbound_bridges = bridges.get_outbound_bridges(source_message_id)
             if not outbound_bridges:
-                session.close()
                 return
 
             bridged_messages: ScalarResult[DBMessageMap] = session.scalars(
