@@ -637,6 +637,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                     )
                 )
             )
+            async_add_reactions = []
             for message_row in bridged_messages:
                 target_message_id = int(message_row.target_message)
                 target_channel_id = int(message_row.target_channel)
@@ -652,10 +653,20 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                     continue
 
                 try:
-                    bridged_message = await bridged_channel.fetch_message(
-                        target_message_id
+
+                    async def add_reaction(
+                        bridged_channel: discord.TextChannel | discord.Thread,
+                        target_message_id: int,
+                        reaction_emoji: discord.Emoji | str,
+                    ):
+                        bridged_message = await bridged_channel.fetch_message(
+                            target_message_id
+                        )
+                        await bridged_message.add_reaction(reaction_emoji)
+
+                    async_add_reactions.append(
+                        add_reaction(bridged_channel, target_message_id, reaction_emoji)
                     )
-                    await bridged_message.add_reaction(reaction_emoji)
                 except discord.HTTPException as e:
                     warn(
                         "Ran into a Discord exception while trying to add a reaction across a bridge:\n"
@@ -669,6 +680,8 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
             "Ran into an SQL error while trying to add a reaction to a message:\n"
             + str(e)
         )
+
+    await asyncio.gather(*async_add_reactions)
 
 
 @globals.client.event
