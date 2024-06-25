@@ -247,10 +247,7 @@ async def bridge_message_helper(message: discord.Message):
                 if not isinstance(webhook_channel, discord.TextChannel):
                     continue
 
-                target_channel = await globals.get_channel_from_id(target_id)
-                target_channel = cast(
-                    discord.TextChannel | discord.Thread, target_channel
-                )
+                target_channel = await bridge.target_channel
 
                 thread_splat: ThreadSplat = {}
                 if target_id != webhook_channel.id:
