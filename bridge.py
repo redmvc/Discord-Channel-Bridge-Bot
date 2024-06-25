@@ -15,8 +15,14 @@ class Bridge:
     source_id : int
         The ID of the source channel of the bridge.
 
+    source_channel : TextChannel | Thread
+        The source channel of the bridge.
+
     target_id : int
         The ID of the target channel of the bridge.
+
+    target_channel : TextChannel | Thread
+        The target channel of the bridge.
 
     webhook : discord.Webhook
         A webhook connecting those channels
@@ -49,7 +55,7 @@ class Bridge:
 
         self = Bridge()
         await self._add_source_and_target(source, target)
-        await self.add_webhook(webhook)
+        await self._add_webhook(webhook)
         return self
 
     def __init__(self) -> None:
@@ -92,7 +98,7 @@ class Bridge:
         self._source_id = globals.get_id_from_channel(source)
         self._target_id = globals.get_id_from_channel(target)
 
-    async def add_webhook(self, webhook: discord.Webhook | None = None) -> None:
+    async def _add_webhook(self, webhook: discord.Webhook | None = None) -> None:
         """Add an existing webhook to this Bridge or create a new one for it.
 
         #### Args:
@@ -110,12 +116,12 @@ class Bridge:
             validate_types({"webhook": (webhook, discord.Webhook)})
             validate_webhook(webhook, target_channel)
 
-        await self.destroy_webhook("Recycling webhook.")
+        # If I already have a webhook, I'll destroy it and replace it with a new one
+        await self._destroy_webhook("Recycling webhook.")
 
         if webhook:
             self._webhook = webhook
         else:
-            assert isinstance(target_channel, discord.TextChannel | discord.Thread)
             if isinstance(target_channel, discord.Thread):
                 webhook_channel = target_channel.parent
             else:
@@ -141,9 +147,9 @@ class Bridge:
         if not webhook:
             return
 
-        await self.add_webhook(webhook)
+        await self._add_webhook(webhook)
 
-    async def destroy_webhook(self, reason: str = "User request."):
+    async def _destroy_webhook(self, reason: str = "User request."):
         """Destroys the Bridge's webhook if it exists.
 
         #### Args:
@@ -274,7 +280,7 @@ class Bridges:
         ].get(target_id):
             return
 
-        await self._outbound_bridges[source_id][target_id].destroy_webhook()
+        await self._outbound_bridges[source_id][target_id]._destroy_webhook()
 
         del self._outbound_bridges[source_id][target_id]
         if len(self._outbound_bridges[source_id]) == 0:
