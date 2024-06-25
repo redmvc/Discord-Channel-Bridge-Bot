@@ -48,6 +48,9 @@ auto_bridge_thread_channels: set[int] = set()
 # Server which can be used to store unknown emoji for mirroring reactions
 emoji_server: discord.Guild | None = None
 
+# Dictionary mapping external emoji to internal emoji
+emoji_mappings: dict[int, int] = {}
+
 
 async def mention_to_channel(
     link_or_mention: str,
