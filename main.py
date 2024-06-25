@@ -781,8 +781,12 @@ async def copy_emoji_into_server(
     if not globals.emoji_server:
         return None
 
+    if missing_emoji.animated:
+        ext = "gif"
+    else:
+        ext = "png"
     image = await globals.get_image_from_URL(
-        f"https://cdn.discordapp.com/emojis/{missing_emoji.id}.png?v=1"
+        f"https://cdn.discordapp.com/emojis/{missing_emoji.id}.{ext}?v=1"
     )
 
     delete_existing_emoji_query = None
