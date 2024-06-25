@@ -332,7 +332,7 @@ async def bridge_message_helper(message: discord.Message):
                     for attachment in message.attachments:
                         attachments.append(await attachment.to_file())
 
-                    return webhook.send(
+                    return await webhook.send(
                         content=message.content,
                         allowed_mentions=discord.AllowedMentions(
                             users=True, roles=False, everyone=False
