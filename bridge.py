@@ -110,7 +110,7 @@ class Bridge:
             validate_types({"webhook": (webhook, discord.Webhook)})
             validate_webhook(webhook, target_channel)
 
-        await self.destroy_webhook("Recycling webhook.")
+        await self._destroy_webhook("Recycling webhook.")
 
         if webhook:
             self._webhook = webhook
@@ -142,7 +142,7 @@ class Bridge:
 
         await self._add_webhook(webhook)
 
-    async def destroy_webhook(self, reason: str = "User request."):
+    async def _destroy_webhook(self, reason: str = "User request."):
         """Destroys the Bridge's webhook if it exists.
 
         #### Args:
@@ -273,7 +273,7 @@ class Bridges:
         ].get(target_id):
             return
 
-        await self._outbound_bridges[source_id][target_id].destroy_webhook()
+        await self._outbound_bridges[source_id][target_id]._destroy_webhook()
 
         del self._outbound_bridges[source_id][target_id]
         if len(self._outbound_bridges[source_id]) == 0:
