@@ -23,6 +23,7 @@ from database import (
     DBEmojiMap,
     DBMessageMap,
     engine,
+    sql_upsert,
 )
 from validations import validate_types
 
@@ -646,7 +647,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                 reaction_emoji = globals.client.get_emoji(mapped_emoji_id)
 
         if not reaction_emoji:
-            # I don't have the emoji mapped locally, I'll add it to my server
+            # I don't have the emoji mapped locally, I'll add it to my server and update my map
             try:
                 reaction_emoji = await copy_emoji_into_server(payload.emoji)
                 if not reaction_emoji:
@@ -807,6 +808,38 @@ async def copy_emoji_into_server(
         except discord.Forbidden as e:
             print("Emoji server permissions not set correctly.")
             raise e
+
+    if emoji:
+        # Copied the emoji, going to update my table
+        if missing_emoji.id:
+            globals.emoji_mappings[missing_emoji.id] = emoji.id
+
+            missing_full_emoji = globals.client.get_emoji(missing_emoji.id)
+            if missing_full_emoji and missing_full_emoji.guild:
+                emoji_server_name = missing_full_emoji.guild.name
+            else:
+                emoji_server_name = ""
+
+        try:
+            with SQLSession(engine) as session:
+                upsert_emoji = sql_upsert(
+                    DBEmojiMap,
+                    {
+                        "external_emoji": str(missing_emoji.id),
+                        "external_emoji_name": missing_emoji.name,
+                        "external_emoji_server_name": emoji_server_name,
+                        "internal_emoji": str(emoji.id),
+                    },
+                    {
+                        "internal_emoji": str(emoji.id),
+                    },
+                )
+
+                session.execute(upsert_emoji)
+                session.commit()
+        except SQLError as e:
+            warn("Couldn't add emoji mapping to table.")
+            print(e)
 
     return emoji
 
