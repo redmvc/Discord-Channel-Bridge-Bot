@@ -26,7 +26,9 @@ class ThreadSplat(TypedDict, total=False):
 
 @globals.client.event
 async def on_ready():
-    """Called when the client is done preparing the data received from Discord. Usually after login is successful and the Client.guilds and co. are filled up.
+    """Load the data registered in the database into memory.
+
+    This function is called when the client is done preparing the data received from Discord. Usually after login is successful and the Client.guilds and co. are filled up.
 
     #### Raises:
         - `ChannelTypeError`: The source or target channels of some existing Bridge are not text channels nor threads off a text channel.
@@ -138,9 +140,9 @@ async def on_ready():
 
 @globals.client.event
 async def on_message(message: discord.Message):
-    """Called when a Message is created and sent.
+    """Mirror a message across bridges, if possible.
 
-    This requires Intents.messages to be enabled.
+    This function is called when a Message is created and sent. Requires Intents.messages to be enabled.
 
     #### Raises:
         - `HTTPException`: Sending a message failed.
@@ -166,7 +168,7 @@ async def on_message(message: discord.Message):
 
 
 async def bridge_message_helper(message: discord.Message):
-    """Mirrors a message to any of its outbound bridge targets.
+    """Mirror a message to any of its outbound bridge targets.
 
     #### Args:
         - `message`: The message to bridge.
@@ -362,7 +364,9 @@ async def bridge_message_helper(message: discord.Message):
 
 @globals.client.event
 async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
-    """Called when a message is edited. Unlike `on_message_edit()`, this is called regardless of the state of the internal message cache.
+    """Edit bridged versions of a message, if possible.
+
+    This function is called when a message is edited. Unlike `on_message_edit()`, this is called regardless of the state of the internal message cache.
 
     #### Args:
         - `payload`: The raw event payload data.
@@ -427,7 +431,9 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
 
 @globals.client.event
 async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
-    """Called when a message is deleted. Unlike `on_message_delete()`, this is called regardless of the message being in the internal message cache or not.
+    """Delete bridged versions of a message, if possible.
+
+    This function is called when a message is deleted. Unlike `on_message_delete()`, this is called regardless of the message being in the internal message cache or not.
 
     #### Args:
         - `payload`: The raw event payload data.
@@ -504,7 +510,9 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
 
 @globals.client.event
 async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
-    """Called when a message has a reaction added. Unlike `on_reaction_add()`, this is called regardless of the state of the internal message cache.
+    """Bridge reactions added to a message, if possible.
+
+    This function is called when a message has a reaction added. Unlike `on_reaction_add()`, this is called regardless of the state of the internal message cache.
 
     #### Args:
         - `payload`: The raw event payload data.
@@ -630,7 +638,9 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
 
 @globals.client.event
 async def on_thread_create(thread: discord.Thread):
-    """Called whenever a thread is created.
+    """Create matching threads across a bridge if the created thread's parent channel has auto-bridge-threads enabled.
+
+    This function is called whenever a thread is created.
 
     #### Args:
         - `thread`: The thread that was created.
