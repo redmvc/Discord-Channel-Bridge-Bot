@@ -16,7 +16,13 @@ from sqlalchemy.orm import Session as SQLSession
 import commands
 import globals
 from bridge import bridges
-from database import DBAutoBridgeThreadChannels, DBBridge, DBMessageMap, engine
+from database import (
+    DBAutoBridgeThreadChannels,
+    DBBridge,
+    DBEmojiMap,
+    DBMessageMap,
+    engine,
+)
 from validations import validate_types
 
 
@@ -115,6 +121,31 @@ async def on_ready():
                 DBBridge.webhook.in_(invalid_webhooks)
             )
             session.execute(delete_invalid_webhooks)
+
+        # Next I try to identify mapped emoji
+        select_mapped_emoji: SQLSelect = SQLSelect(DBEmojiMap)
+        mapped_emoji_query_result: ScalarResult[DBEmojiMap] = session.scalars(
+            select_mapped_emoji
+        )
+        emoji_not_found = set()
+        for emoji_map in mapped_emoji_query_result:
+            if emoji_map.internal_emoji in emoji_not_found:
+                continue
+
+            internal_emoji_id = int(emoji_map.internal_emoji)
+            if not globals.client.get_emoji(internal_emoji_id):
+                emoji_not_found.add(emoji_map.internal_emoji)
+            else:
+                # The emoji is registered
+                globals.emoji_mappings[int(emoji_map.external_emoji)] = (
+                    internal_emoji_id
+                )
+
+        if len(emoji_not_found) > 0:
+            delete_missing_internal_emoji = SQLDelete(DBEmojiMap).where(
+                DBEmojiMap.internal_emoji.in_(list(emoji_not_found))
+            )
+            session.execute(delete_missing_internal_emoji)
 
         session.commit()
 
