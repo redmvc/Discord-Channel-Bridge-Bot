@@ -4,9 +4,9 @@ This bot is a simple Python bot for bridging messages between Discord text chann
 ### Usage
 To add this bot to your server, visit [this link](https://discord.com/oauth2/authorize?client_id=1253380419773136947) and invite it. From there, usage is simple:
 
-- Within a text channel or thread, you can use the `/bridge target` slash-command to create a two-way bridge between the channel or thread you are currently typing in and the target.
+- Within a text channel or thread, you can use the `/bridge target` slash-command to create a bridge between the channel or thread you are currently typing in and the target.
   - `target` can be either a Discord link (i.e. `https://discord.com/channels/server_id/channel_or_thread_id`) or a channel/thread mention (i.e. `<#channel_or_thread_id>`).
-  - You can instead use the command `/outbound target` to create an outbound-only bridge—that is, one in which only messages from the current channel/thread are sent to the other channel/thread and not vice-versa—or `/inbound target` to create an inbound-only bridge—the converse, the current channel/thread will receive but not send messages.
+  - You can instead use the command `/bridge target outbound` to create an outbound-only bridge—that is, one in which only messages from the current channel/thread are sent to the other channel/thread and not vice-versa—or `/bridge target inbound` to create an inbound-only bridge—the converse, the current channel/thread will receive but not send messages.
   - The bot needs to be in both channels/threads and it and you need to have Manage Webhooks permissions in both channels/threads.
   - It's possible to create channel-thread bridges, not just channel-channel and thread-thread ones.
   - You need to run this command for every channel/thread pair involved. That is, if you want to bridge channels/threads A, B, and C, you will need to run `/bridge B` and `/bridge C` from channel/thread A, then `/bridge C` from channel/thread B (or some other order).
