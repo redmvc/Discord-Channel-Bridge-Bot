@@ -26,6 +26,7 @@ from validations import validate_types
     name="help",
     description="Return a list of commands or detailed information about a command.",
 )
+@discord.app_commands.describe(command="The command to get detailed information about.")
 async def help(interaction: discord.Interaction, command: str | None = None):
     if not command:
         await interaction.response.send_message(
@@ -85,6 +86,10 @@ async def help(interaction: discord.Interaction, command: str | None = None):
 @globals.command_tree.command(
     name="bridge",
     description="Create a bridge between two channels.",
+)
+@discord.app_commands.describe(
+    target="The channel to and/or from which to bridge.",
+    direction="Whether to create an outbound or inbound bridge. Leave blank to create both.",
 )
 @discord.app_commands.choices(
     direction=[
@@ -314,6 +319,9 @@ async def auto_bridge_threads(
     name="demolish",
     description="Demolish all bridges between this and target channel.",
 )
+@discord.app_commands.describe(
+    target="The channel to and from whose bridges to destroy."
+)
 async def demolish(interaction: discord.Interaction, target: str):
     message_channel = interaction.channel
     if not isinstance(message_channel, (discord.TextChannel, discord.Thread)):
@@ -422,6 +430,9 @@ async def demolish(interaction: discord.Interaction, target: str):
 @globals.command_tree.command(
     name="demolish_all",
     description="Demolish all bridges to and from this channel.",
+)
+@discord.app_commands.describe(
+    channel_and_threads="Set to true to demolish bridges attached to this channel's parent and/or other threads.",
 )
 async def demolish_all(
     interaction: discord.Interaction, channel_and_threads: bool | None = None
