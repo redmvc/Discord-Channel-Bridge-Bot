@@ -26,6 +26,7 @@ from validations import validate_types
     name="help",
     description="Return a list of commands or detailed information about a command.",
 )
+@discord.app_commands.describe(command="The command to get detailed information about.")
 async def help(interaction: discord.Interaction, command: str | None = None):
     if not command:
         await interaction.response.send_message(
@@ -36,27 +37,16 @@ async def help(interaction: discord.Interaction, command: str | None = None):
             + "\n- whenever someone adds a reaction to one message the bot will add the same reaction (if it can) to all of its mirrors;"
             + "\n- and deleting the original message will delete its copies (but not vice-versa)."
             + "\nThreads created in a channel do not automatically get matched to other channels bridged to it; create and bridge them manually or use the `/bridge_thread` or `/auto_bridge_threads` command."
-            + "\n\nList of commands: `/bridge`, `/outbound`, `/inbound`, `/bridge_thread`, `/auto_bridge_threads`, `/demolish`, `/demolish_all`, `/help`.\nType `/help command` for detailed explanation of a command.",
+            + "\n\nList of commands: `/bridge`, `/bridge_thread`, `/auto_bridge_threads`, `/demolish`, `/demolish_all`, `/help`.\nType `/help command` for detailed explanation of a command.",
             ephemeral=True,
         )
     else:
         command = command.lower()
         if command == "bridge":
             await interaction.response.send_message(
-                "`/bridge target`"
-                + "\nCreates a two-way bridge between the current channel/thread and target channel/thread. `target` must be a link to another channel or thread, its ID, or a mention to it.",
-                ephemeral=True,
-            )
-        elif command == "outbound":
-            await interaction.response.send_message(
-                "`/outbound target`"
-                + "\nCreates a one-way bridge from the current channel/thread to the target channel/thread, so that messages sent in the current channel will be mirrored there but not vice-versa. `target` must be a link to another channel or thread, its ID, or a mention to it.",
-                ephemeral=True,
-            )
-        elif command == "inbound":
-            await interaction.response.send_message(
-                "`/inbound source`"
-                + "\nCreates a one-way bridge from the source channel/thread to the current channel/thread, so that messages sent in the source channel will be mirrored here but not vice-versa. `source` must be a link to another channel or thread, its ID, or a mention to it.",
+                "`/bridge target [direction]`"
+                + "\nCreates a bridge between the current channel/thread and target channel/thread. `target` must be a link to another channel or thread, its ID, or a mention to it."
+                + "\nIf `direction` isn't included, the bridge is two-way; if it's set to `inbound` it will only send messages from the target channel to the current channel; if it's set to `outbound` it will only send messages from the current channel to the target channel.",
                 ephemeral=True,
             )
         elif command == "bridge_thread":
@@ -95,9 +85,23 @@ async def help(interaction: discord.Interaction, command: str | None = None):
 @discord.app_commands.guild_only()
 @globals.command_tree.command(
     name="bridge",
-    description="Create a two-way bridge between two channels.",
+    description="Create a bridge between two channels.",
 )
-async def bridge(interaction: discord.Interaction, target: str):
+@discord.app_commands.describe(
+    target="The channel to and/or from which to bridge.",
+    direction="Whether to create an outbound or inbound bridge. Leave blank to create both.",
+)
+@discord.app_commands.choices(
+    direction=[
+        discord.app_commands.Choice(name="outbound", value="outbound"),
+        discord.app_commands.Choice(name="inbound", value="inbound"),
+    ]
+)
+async def bridge(
+    interaction: discord.Interaction,
+    target: str,
+    direction: str | None = None,
+):
     message_channel = interaction.channel
     if not isinstance(message_channel, (discord.TextChannel, discord.Thread)):
         await interaction.response.send_message(
@@ -155,10 +159,17 @@ async def bridge(interaction: discord.Interaction, target: str):
     session = None
     try:
         with SQLSession(engine) as session:
-            await asyncio.gather(
-                create_bridge_and_db(message_channel, target_channel, session),
-                create_bridge_and_db(target_channel, message_channel, session),
-            )
+            create_bridges = []
+            if direction != "inbound":
+                create_bridges.append(
+                    create_bridge_and_db(message_channel, target_channel, session)
+                )
+            if direction != "outbound":
+                create_bridges.append(
+                    create_bridge_and_db(target_channel, message_channel, session)
+                )
+
+            await asyncio.gather(*create_bridges)
             session.commit()
     except SQLError:
         await interaction.followup.send(
@@ -169,150 +180,18 @@ async def bridge(interaction: discord.Interaction, target: str):
             session.close()
         return
 
+    if not direction:
+        direction_str = "either"
+    elif direction == "inbound":
+        direction_str = "the other"
+    else:
+        direction_str = "this"
     await interaction.followup.send(
-        "✅ Bridge created! Try sending a message from either channel 😁",
+        f"✅ Bridge created! Try sending a message from {direction_str} channel 😁",
         ephemeral=True,
     )
 
     await asyncio.gather(*join_threads)
-
-
-@discord.app_commands.guild_only()
-@globals.command_tree.command(
-    name="outbound",
-    description="Create an outbound bridge from this channel to target channel.",
-)
-async def outbound(interaction: discord.Interaction, target: str):
-    message_channel = interaction.channel
-    if not isinstance(message_channel, (discord.TextChannel, discord.Thread)):
-        await interaction.response.send_message(
-            "Please run this command from a text channel or a thread.", ephemeral=True
-        )
-        return
-
-    target_channel = await globals.mention_to_channel(target)
-    if not isinstance(target_channel, (discord.TextChannel, discord.Thread)):
-        # The argument passed needs to be a channel or thread
-        await interaction.response.send_message(
-            "Unsupported argument passed. Please pass a channel reference, ID, or link.",
-            ephemeral=True,
-        )
-        return
-
-    if target_channel.id == message_channel.id:
-        await interaction.response.send_message(
-            "You can't bridge a channel to itself.", ephemeral=True
-        )
-        return
-
-    assert isinstance(interaction.user, discord.Member)
-    assert interaction.guild
-    target_channel_member = await globals.get_channel_member(
-        target_channel, interaction.user.id
-    )
-    if (
-        not message_channel.permissions_for(interaction.user).manage_webhooks
-        or not target_channel_member
-        or not target_channel.permissions_for(target_channel_member).manage_webhooks
-        or not message_channel.permissions_for(interaction.guild.me).manage_webhooks
-        or not target_channel.permissions_for(target_channel.guild.me).manage_webhooks
-    ):
-        await interaction.response.send_message(
-            "Please make sure both you and the bot have 'Manage Webhooks' permission in both this and target channels.",
-            ephemeral=True,
-        )
-        return
-
-    await interaction.response.defer(thinking=True, ephemeral=True)
-
-    join_threads: list[Coroutine] = []
-    if isinstance(message_channel, discord.Thread) and not message_channel.me:
-        try:
-            join_threads.append(message_channel.join())
-        except Exception:
-            pass
-    if isinstance(target_channel, discord.Thread) and not target_channel.me:
-        try:
-            join_threads.append(target_channel.join())
-        except Exception:
-            pass
-
-    create_bridge = create_bridge_and_db(message_channel, target_channel)
-
-    await interaction.followup.send(
-        "✅ Bridge created! Try sending a message from this channel 😁",
-        ephemeral=True,
-    )
-    await asyncio.gather(*(join_threads + [create_bridge]))
-
-
-@discord.app_commands.guild_only()
-@globals.command_tree.command(
-    name="inbound",
-    description="Create an inbound bridge from source channel to this channel.",
-)
-async def inbound(interaction: discord.Interaction, source: str):
-    message_channel = interaction.channel
-    if not isinstance(message_channel, (discord.TextChannel, discord.Thread)):
-        await interaction.response.send_message(
-            "Please run this command from a text channel or a thread.", ephemeral=True
-        )
-        return
-
-    source_channel = await globals.mention_to_channel(source)
-    if not isinstance(source_channel, (discord.TextChannel, discord.Thread)):
-        # The argument passed needs to be a channel or thread
-        await interaction.response.send_message(
-            "Unsupported argument passed. Please pass a channel reference, ID, or link.",
-            ephemeral=True,
-        )
-        return
-
-    if source_channel.id == message_channel.id:
-        await interaction.response.send_message(
-            "You can't bridge a channel to itself.", ephemeral=True
-        )
-        return
-
-    assert isinstance(interaction.user, discord.Member)
-    assert interaction.guild
-    source_channel_member = await globals.get_channel_member(
-        source_channel, interaction.user.id
-    )
-    if (
-        not message_channel.permissions_for(interaction.user).manage_webhooks
-        or not source_channel_member
-        or not source_channel.permissions_for(source_channel_member).manage_webhooks
-        or not message_channel.permissions_for(interaction.guild.me).manage_webhooks
-        or not source_channel.permissions_for(source_channel.guild.me).manage_webhooks
-    ):
-        await interaction.response.send_message(
-            "Please make sure both you and the bot have 'Manage Webhooks' permission in both this and source channels.",
-            ephemeral=True,
-        )
-        return
-
-    await interaction.response.defer(thinking=True, ephemeral=True)
-
-    join_threads: list[Coroutine] = []
-    if isinstance(message_channel, discord.Thread) and not message_channel.me:
-        try:
-            join_threads.append(message_channel.join())
-        except Exception:
-            pass
-    if isinstance(source_channel, discord.Thread) and not source_channel.me:
-        try:
-            join_threads.append(source_channel.join())
-        except Exception:
-            pass
-
-    create_bridge = create_bridge_and_db(source_channel, message_channel)
-
-    await interaction.followup.send(
-        "✅ Bridge created! Try sending a message from the other channel 😁",
-        ephemeral=True,
-    )
-    await asyncio.gather(*(join_threads + [create_bridge]))
 
 
 @discord.app_commands.guild_only()
@@ -440,6 +319,9 @@ async def auto_bridge_threads(
     name="demolish",
     description="Demolish all bridges between this and target channel.",
 )
+@discord.app_commands.describe(
+    target="The channel to and from whose bridges to destroy."
+)
 async def demolish(interaction: discord.Interaction, target: str):
     message_channel = interaction.channel
     if not isinstance(message_channel, (discord.TextChannel, discord.Thread)):
@@ -548,6 +430,9 @@ async def demolish(interaction: discord.Interaction, target: str):
 @globals.command_tree.command(
     name="demolish_all",
     description="Demolish all bridges to and from this channel.",
+)
+@discord.app_commands.describe(
+    channel_and_threads="Set to true to demolish bridges attached to this channel's parent and/or other threads.",
 )
 async def demolish_all(
     interaction: discord.Interaction, channel_and_threads: bool | None = None
