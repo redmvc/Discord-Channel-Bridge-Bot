@@ -881,7 +881,9 @@ async def copy_emoji_into_server(
         with SQLSession(engine) as session:
             if delete_existing_emoji_query is not None:
                 await sql_retry(lambda: session.execute(delete_existing_emoji_query))
-            await commands.map_emoji_helper(missing_emoji, emoji, session)
+            await commands.map_emoji_helper(
+                external_emoji=missing_emoji, internal_emoji=emoji, session=session
+            )
             session.commit()
     except SQLError as e:
         warn("Couldn't add emoji mapping to table.")

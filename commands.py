@@ -658,8 +658,13 @@ async def map_emoji(
         .replace(">", "")
         .replace("\\", "")
     )
+    external_emoji_name: str | None
     if ":" in external_emoji_id_str:
-        external_emoji_id_str = external_emoji_id_str.split(":")[-1]
+        emoji_data = external_emoji_id_str.split(":")
+        external_emoji_id_str = emoji_data[-1]
+        external_emoji_name = emoji_data[-2]
+    else:
+        external_emoji_name = None
 
     internal_emoji_id_str = (
         internal_emoji_id_str.replace("<:", "")
@@ -696,7 +701,11 @@ async def map_emoji(
     await interaction.response.defer(thinking=True, ephemeral=True)
 
     try:
-        if not await map_emoji_helper(external_emoji_id, internal_emoji):
+        if not await map_emoji_helper(
+            external_emoji=external_emoji_id,
+            external_emoji_name=external_emoji_name,
+            internal_emoji=internal_emoji,
+        ):
             await interaction.followup.send(
                 "❌ There was a problem creating emoji mapping.", ephemeral=True
             )
@@ -1167,7 +1176,9 @@ async def validate_auto_bridge_thread_channels(
 
 
 async def map_emoji_helper(
+    *,
     external_emoji: discord.Emoji | discord.PartialEmoji | int | None,
+    external_emoji_name: str | None = None,
     internal_emoji: discord.Emoji,
     session: SQLSession | None = None,
 ) -> bool:
@@ -1191,6 +1202,8 @@ async def map_emoji_helper(
         "external_emoji": (external_emoji, (discord.Emoji, discord.PartialEmoji, int)),
         "internal_emoji": (internal_emoji, discord.Emoji),
     }
+    if external_emoji_name:
+        types_to_validate["external_emoji_name"] = (external_emoji_name, str)
     if session:
         types_to_validate["session"] = (session, SQLSession)
     validate_types(types_to_validate)
@@ -1198,7 +1211,8 @@ async def map_emoji_helper(
     external_emoji_id: int | None
     if isinstance(external_emoji, int):
         external_emoji_id = external_emoji
-        external_emoji_name = ""
+        if not external_emoji_name:
+            external_emoji_name = ""
     else:
         external_emoji_id = external_emoji.id
         if not external_emoji_id:
