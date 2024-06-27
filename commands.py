@@ -1096,11 +1096,6 @@ async def map_emoji_helper(
 
     globals.emoji_mappings[external_emoji.id] = internal_emoji.id
 
-    if external_emoji and external_emoji.guild:
-        external_emoji_server_name = external_emoji.guild.name
-    else:
-        external_emoji_server_name = ""
-
     if not session:
         session = SQLSession(engine)
         close_after = True
@@ -1113,7 +1108,6 @@ async def map_emoji_helper(
             {
                 "external_emoji": str(external_emoji.id),
                 "external_emoji_name": external_emoji.name,
-                "external_emoji_server_name": external_emoji_server_name,
                 "internal_emoji": str(internal_emoji.id),
             },
             {
