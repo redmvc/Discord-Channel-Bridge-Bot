@@ -4,7 +4,6 @@ import asyncio
 import io
 import json
 from typing import Any, Callable, TypeVar, cast
-from unittest.case import _ClassInfo
 
 import aiohttp
 import discord
@@ -261,7 +260,7 @@ async def run_retries(
     fun: Callable[..., _T],
     num_retries: int,
     time_to_wait: float = 5,
-    exceptions_to_catch: _ClassInfo | None = None,
+    exceptions_to_catch: type | tuple[type] | None = None,
 ) -> _T:
     """Run a function and retry it every time an exception occurs up to a certain maximum number of tries. If it succeeds, return its result; otherwise, raise the error.
 
@@ -279,7 +278,7 @@ async def run_retries(
         "time_to_wait": (time_to_wait, (float, int)),
     }
     if exceptions_to_catch:
-        if isinstance(exceptions_to_catch, Exception):
+        if isinstance(exceptions_to_catch, type):
             exceptions_to_catch = (exceptions_to_catch,)
         else:
             types_to_validate["exceptions_to_catch"] = (exceptions_to_catch, tuple)
