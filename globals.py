@@ -32,9 +32,12 @@ You may add other contexts than "production" in order to have testing environmen
 settings_root: dict[str, str | int | dict[str, str | int]] = json.load(
     open("settings.json")
 )
-assert isinstance(settings_root["context"], str)
-context = settings_root["context"]
-if settings_root.get(context) and isinstance(settings_root[context], dict):
+context: str | None
+if settings_root.get("context") and isinstance(settings_root["context"], str):
+    context = settings_root["context"]
+else:
+    context = None
+if context and settings_root.get(context) and isinstance(settings_root[context], dict):
     settings = cast(dict[str, str | int], settings_root[context])
 else:
     settings = cast(dict[str, str | int], settings_root)
