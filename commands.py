@@ -1098,7 +1098,11 @@ async def map_emoji_helper(
     else:
         external_emoji_id = external_emoji.id
         if not external_emoji_id:
-            return
+            return False
+
+        full_emoji = globals.client.get_emoji(external_emoji_id)
+        if full_emoji:
+            external_emoji = full_emoji
 
         external_emoji_name = external_emoji.name
         assert isinstance(external_emoji, discord.PartialEmoji)
