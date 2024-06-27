@@ -7,7 +7,7 @@ import json
 import aiohttp
 import discord
 
-from validations import validate_types, HTTPResponseError
+from validations import HTTPResponseError, validate_types
 
 """
 The format of this variable is
