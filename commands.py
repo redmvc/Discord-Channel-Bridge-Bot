@@ -30,7 +30,21 @@ from validations import validate_types
 )
 @discord.app_commands.describe(command="The command to get detailed information about.")
 async def help(interaction: discord.Interaction, command: str | None = None):
+    if (
+        globals.emoji_server
+        and interaction.guild
+        and interaction.guild.id == globals.emoji_server.id
+    ):
+        interaction_from_emoji_server = True
+    else:
+        interaction_from_emoji_server = False
+
     if not command:
+        if interaction_from_emoji_server:
+            map_emoji_mention = ", `/map_emoji`"
+        else:
+            map_emoji_mention = ""
+
         await interaction.response.send_message(
             "This bot bridges channels and threads to each other, mirroring messages sent from one to the other. When a message is bridged:"
             + "\n- its copies will show the avatar and name of the person who wrote the original message;"
@@ -39,7 +53,7 @@ async def help(interaction: discord.Interaction, command: str | None = None):
             + "\n- whenever someone adds a reaction to one message the bot will add the same reaction (if it can) to all of its mirrors;"
             + "\n- and deleting the original message will delete its copies (but not vice-versa)."
             + "\nThreads created in a channel do not automatically get matched to other channels bridged to it; create and bridge them manually or use the `/bridge_thread` or `/auto_bridge_threads` command."
-            + "\n\nList of commands: `/bridge`, `/bridge_thread`, `/auto_bridge_threads`, `/demolish`, `/demolish_all`, `/help`.\nType `/help command` for detailed explanation of a command.",
+            + f"\n\nList of commands: `/bridge`, `/bridge_thread`, `/auto_bridge_threads`, `/demolish`, `/demolish_all`{map_emoji_mention}, `/help`.\nType `/help command` for detailed explanation of a command.",
             ephemeral=True,
         )
     else:
@@ -76,6 +90,12 @@ async def help(interaction: discord.Interaction, command: str | None = None):
                 + "\nDestroys any existing bridges involving the current channel or thread, making messages from it no longer be mirrored to other channels and making other channels' messages no longer be mirrored to it."
                 + "\n\nIf you don't include `channel_and_threads` or set it to `False`, this will _only_ demolish bridges involving the _current specific channel/thread_. If instead you set `channel_and_threads` to `True`, this will demolish _all_ bridges involving the current channel/thread, its parent channel if it's a thread, and all of its or its parent channel's threads."
                 + "\n\nNote that even if you recreate any of the bridges, the messages previously bridged will no longer be connected and so they will not share future reactions, edits, or deletions.",
+                ephemeral=True,
+            )
+        elif command == "map_emoji" and interaction_from_emoji_server:
+            await interaction.response.send_message(
+                "`/map_emoji :external_emoji: :internal_emoji:`"
+                + "\nCreates an internal mapping between an emoji from an external server which the bot doesn't have access to and an emoji stored in the bot's emoji server, so that they are considered equivalent by the bot when bridging reactions.",
                 ephemeral=True,
             )
         else:
@@ -606,6 +626,82 @@ async def demolish_all(
         )
 
 
+@discord.app_commands.default_permissions(
+    create_expressions=True, manage_expressions=True
+)
+@globals.command_tree.command(
+    name="map_emoji",
+    description="Create a mapping between emoji so that the bot considers them equivalent.",
+    guild=globals.emoji_server,
+)
+@discord.app_commands.rename(
+    external_emoji_id_str="external_emoji", internal_emoji_id_str="internal_emoji"
+)
+@discord.app_commands.describe(
+    external_emoji_id_str="The emoji from another server or its numeric ID.",
+    internal_emoji_id_str="The emoji from this server to map the external emoji to, or its ID.",
+)
+async def map_emoji(
+    interaction: discord.Interaction,
+    external_emoji_id_str: str,
+    internal_emoji_id_str: str,
+):
+    if not globals.settings.get("emoji_server_id"):
+        await interaction.response.send_message(
+            "❌ Bot doesn't have an emoji server registered."
+        )
+        return
+
+    external_emoji_id_str = (
+        external_emoji_id_str.replace("<", "")
+        .replace(">", "")
+        .replace(":", "")
+        .replace("\\", "")
+    )
+    internal_emoji_id_str = (
+        internal_emoji_id_str.replace("<", "")
+        .replace(">", "")
+        .replace(":", "")
+        .replace("\\", "")
+    )
+
+    try:
+        external_emoji_id = int(external_emoji_id_str)
+        internal_emoji_id = int(internal_emoji_id_str)
+    except Exception:
+        await interaction.response.send_message("❌ Emoji IDs not valid.")
+        return
+
+    internal_emoji = globals.client.get_emoji(internal_emoji_id)
+
+    if (
+        not internal_emoji
+        or not internal_emoji.guild
+        or not globals.emoji_server
+        or internal_emoji.guild_id != globals.emoji_server.id
+    ):
+        await interaction.response.send_message(
+            "❌ The second argument must be an emoji in the bot's registered emoji server."
+        )
+        return
+
+    await interaction.response.defer(thinking=True, ephemeral=True)
+
+    try:
+        if not await map_emoji_helper(external_emoji_id, internal_emoji):
+            await interaction.followup.send(
+                "❌ There was a problem creating emoji mapping."
+            )
+            return
+    except Exception:
+        await interaction.followup.send(
+            "❌ There was a database error trying to map the emoji."
+        )
+        return
+
+    await interaction.followup.send("✅ Emoji map created!")
+
+
 async def create_bridge_and_db(
     source: discord.TextChannel | discord.Thread | int,
     target: discord.TextChannel | discord.Thread | int,
@@ -1066,7 +1162,7 @@ async def map_emoji_helper(
     external_emoji: discord.Emoji | discord.PartialEmoji | int | None,
     internal_emoji: discord.Emoji,
     session: SQLSession | None = None,
-):
+) -> bool:
     """Create a mapping between external and internal emoji, recording it locally and saving it in the emoji_mappings table.
 
     #### Args:
@@ -1081,7 +1177,7 @@ async def map_emoji_helper(
     if not external_emoji or (
         not isinstance(external_emoji, int) and not external_emoji.id
     ):
-        return
+        return False
 
     types_to_validate: dict[str, tuple] = {
         "external_emoji": (external_emoji, (discord.Emoji, discord.PartialEmoji, int)),
@@ -1144,6 +1240,8 @@ async def map_emoji_helper(
     if close_after:
         session.commit()
         session.close()
+
+    return True
 
 
 # @globals.command_tree.context_menu(name="List Reactions")

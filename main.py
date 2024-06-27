@@ -197,7 +197,11 @@ async def on_ready():
         else:
             globals.emoji_server = emoji_server
 
-    await globals.command_tree.sync()
+    sync_command_tree = [globals.command_tree.sync()]
+    if globals.emoji_server:
+        sync_command_tree.append(globals.command_tree.sync(guild=globals.emoji_server))
+    await asyncio.gather(*sync_command_tree)
+
     print(f"{globals.client.user} is connected to the following servers:\n")
     for server in globals.client.guilds:
         print(f"{server.name}(id: {server.id})")
