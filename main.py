@@ -661,15 +661,25 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
     # Find all messages matching this one
     session = None
     try:
-        # First, check whether this message is bridged, in which case I need to find its source
+        # Create a function to add reactions to messages asynchronously and gather them all at the end
+        async_add_reactions: list[Coroutine] = []
+
+        async def add_reaction_helper(
+            bridged_channel: discord.TextChannel | discord.Thread,
+            target_message_id: int,
+            reaction_emoji: discord.Emoji | str,
+        ):
+            bridged_message = await bridged_channel.fetch_message(target_message_id)
+            await bridged_message.add_reaction(reaction_emoji)
+
         with SQLSession(engine) as session:
+            # First, check whether this message is bridged, in which case I need to find its source
             source_message_map = session.scalars(
                 SQLSelect(DBMessageMap).where(
                     DBMessageMap.target_message == str(payload.message_id),
                 )
             ).first()
             message_id_to_skip: int | None = None
-            async_add_reactions: list[Coroutine] = []
             if isinstance(source_message_map, DBMessageMap):
                 # This message was bridged, so find the original one, react to it, and then find any other bridged messages from it
                 source_channel = await globals.get_channel_from_id(
@@ -682,13 +692,11 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
 
                 source_message_id = int(source_message_map.source_message)
                 try:
-                    source_message = await source_channel.fetch_message(
-                        source_message_id
-                    )
-                    if source_message:
-                        async_add_reactions.append(
-                            source_message.add_reaction(reaction_emoji)
+                    async_add_reactions.append(
+                        add_reaction_helper(
+                            source_channel, source_message_id, reaction_emoji
                         )
+                    )
                 except discord.HTTPException as e:
                     warn(
                         "Ran into a Discord exception while trying to add a reaction across a bridge:\n"
@@ -733,19 +741,10 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                     continue
 
                 try:
-
-                    async def add_reaction(
-                        bridged_channel: discord.TextChannel | discord.Thread,
-                        target_message_id: int,
-                        reaction_emoji: discord.Emoji | str,
-                    ):
-                        bridged_message = await bridged_channel.fetch_message(
-                            target_message_id
-                        )
-                        await bridged_message.add_reaction(reaction_emoji)
-
                     async_add_reactions.append(
-                        add_reaction(bridged_channel, target_message_id, reaction_emoji)
+                        add_reaction_helper(
+                            bridged_channel, target_message_id, reaction_emoji
+                        )
                     )
                 except discord.HTTPException as e:
                     warn(
