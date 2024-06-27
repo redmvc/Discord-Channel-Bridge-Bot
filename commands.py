@@ -1089,11 +1089,6 @@ async def map_emoji_helper(
         types_to_validate["session"] = (session, SQLSession)
     validate_types(types_to_validate)
 
-    if isinstance(external_emoji, discord.PartialEmoji):
-        external_emoji = globals.client.get_emoji(external_emoji.id)
-        if not external_emoji:
-            return
-
     globals.emoji_mappings[external_emoji.id] = internal_emoji.id
 
     if not session:
