@@ -167,8 +167,10 @@ async def on_ready():
     # Finally I'll check whether I have a registered emoji server and save it if so
     emoji_server_id = globals.settings.get("emoji_server_id")
     try:
-        if emoji_server_id and not isinstance(emoji_server_id, int):
+        if emoji_server_id:
             emoji_server_id = int(emoji_server_id)
+        else:
+            emoji_server_id = None
     except Exception:
         print(
             "Emoji server ID stored in settings.json file does not resolve to a valid integer."
@@ -176,7 +178,6 @@ async def on_ready():
         emoji_server_id = None
 
     if emoji_server_id:
-        emoji_server_id = cast(int, emoji_server_id)
         emoji_server = globals.client.get_guild(emoji_server_id)
         if not emoji_server:
             try:
