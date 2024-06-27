@@ -648,7 +648,7 @@ async def map_emoji(
 ):
     if not globals.settings.get("emoji_server_id"):
         await interaction.response.send_message(
-            "❌ Bot doesn't have an emoji server registered."
+            "❌ Bot doesn't have an emoji server registered.", ephemeral=True
         )
         return
 
@@ -674,7 +674,9 @@ async def map_emoji(
         external_emoji_id = int(external_emoji_id_str)
         internal_emoji_id = int(internal_emoji_id_str)
     except Exception:
-        await interaction.response.send_message("❌ Emoji IDs not valid.")
+        await interaction.response.send_message(
+            "❌ Emoji IDs not valid.", ephemeral=True
+        )
         return
 
     internal_emoji = globals.client.get_emoji(internal_emoji_id)
@@ -686,7 +688,8 @@ async def map_emoji(
         or internal_emoji.guild_id != globals.emoji_server.id
     ):
         await interaction.response.send_message(
-            "❌ The second argument must be an emoji in the bot's registered emoji server."
+            "❌ The second argument must be an emoji in the bot's registered emoji server.",
+            ephemeral=True,
         )
         return
 
@@ -695,16 +698,16 @@ async def map_emoji(
     try:
         if not await map_emoji_helper(external_emoji_id, internal_emoji):
             await interaction.followup.send(
-                "❌ There was a problem creating emoji mapping."
+                "❌ There was a problem creating emoji mapping.", ephemeral=True
             )
             return
     except Exception:
         await interaction.followup.send(
-            "❌ There was a database error trying to map the emoji."
+            "❌ There was a database error trying to map the emoji.", ephemeral=True
         )
         return
 
-    await interaction.followup.send("✅ Emoji map created!")
+    await interaction.followup.send("✅ Emoji map created!", ephemeral=True)
 
 
 async def create_bridge_and_db(
