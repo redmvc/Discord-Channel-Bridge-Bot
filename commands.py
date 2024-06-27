@@ -1063,14 +1063,14 @@ async def validate_auto_bridge_thread_channels(
 
 
 async def map_emoji_helper(
-    external_emoji: discord.Emoji | discord.PartialEmoji | None,
+    external_emoji: discord.Emoji | discord.PartialEmoji | int | None,
     internal_emoji: discord.Emoji,
     session: SQLSession | None = None,
 ):
     """Create a mapping between external and internal emoji, recording it locally and saving it in the emoji_mappings table.
 
     #### Args:
-        - `external_emoji`: The custom emoji that is not present in any servers the bot is in.
+        - `external_emoji`: The custom emoji that is not present in any servers the bot is in, or an ID of one.
         - `internal_emoji`: An emoji the bot has in its emoji server.
         - `session`: A connection to the database. Defaults to None.
 
@@ -1078,18 +1078,32 @@ async def map_emoji_helper(
         - `UnknownDBDialectError`: Invalid database dialect registered in `settings.json` file.
         - `SQLError`: SQL statement inferred from arguments was invalid or database connection failed.
     """
-    if not external_emoji or not external_emoji.id:
+    if not external_emoji or (
+        not isinstance(external_emoji, int) and not external_emoji.id
+    ):
         return
 
     types_to_validate: dict[str, tuple] = {
-        "external_emoji": (external_emoji, (discord.Emoji, discord.PartialEmoji)),
+        "external_emoji": (external_emoji, (discord.Emoji, discord.PartialEmoji, int)),
         "internal_emoji": (internal_emoji, discord.Emoji),
     }
     if session:
         types_to_validate["session"] = (session, SQLSession)
     validate_types(types_to_validate)
 
-    globals.emoji_mappings[external_emoji.id] = internal_emoji.id
+    external_emoji_id: int | None
+    if isinstance(external_emoji, int):
+        external_emoji_id = external_emoji
+        external_emoji_name = ""
+    else:
+        external_emoji_id = external_emoji.id
+        if not external_emoji_id:
+            return
+
+        external_emoji_name = external_emoji.name
+        assert isinstance(external_emoji, discord.PartialEmoji)
+
+    globals.emoji_mappings[external_emoji_id] = internal_emoji.id
 
     if not session:
         session = SQLSession(engine)
@@ -1101,8 +1115,8 @@ async def map_emoji_helper(
         upsert_emoji = await sql_upsert(
             DBEmojiMap,
             {
-                "external_emoji": str(external_emoji.id),
-                "external_emoji_name": external_emoji.name,
+                "external_emoji": str(external_emoji_id),
+                "external_emoji_name": external_emoji_name,
                 "internal_emoji": str(internal_emoji.id),
             },
             {
