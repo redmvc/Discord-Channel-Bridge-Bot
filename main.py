@@ -9,7 +9,6 @@ import discord
 from sqlalchemy import Delete as SQLDelete
 from sqlalchemy import ScalarResult
 from sqlalchemy import Select as SQLSelect
-from sqlalchemy import and_ as sql_and
 from sqlalchemy import or_ as sql_or
 from sqlalchemy.exc import StatementError as SQLError
 from sqlalchemy.orm import Session as SQLSession
@@ -653,8 +652,8 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         return
 
     outbound_bridges = bridges.get_outbound_bridges(payload.channel_id)
-    inbound_bridges = bridges.get_inbound_bridges(payload.channel_id)
-    if not outbound_bridges and not inbound_bridges:
+    if not outbound_bridges:
+        # Only bridge reactions across outbound bridges
         return
 
     # Check whether I have access to the emoji
@@ -685,13 +684,43 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         # It's a standard emoji, it's fine
         reaction_emoji = payload.emoji.name
 
-    # Find all messages matching this one
+    # Now find the list of channels that can validly be reached via outbound chains from this channel
+    channel_ids_to_check: set[int] = {payload.channel_id}
+    channel_ids_checked: set[int] = set()
+    reachable_channel_ids: set[int] = set()
+    while len(channel_ids_to_check) > 0:
+        channel_id_to_check = channel_ids_to_check.pop()
+        if channel_id_to_check in channel_ids_checked:
+            continue
+
+        channel_ids_checked.add(channel_id_to_check)
+        checking_outbound = bridges.get_outbound_bridges(channel_id_to_check)
+        if not checking_outbound:
+            continue
+
+        newly_reachable_ids = set(checking_outbound.keys())
+        reachable_channel_ids = reachable_channel_ids.union(newly_reachable_ids)
+        channel_ids_to_check = (
+            channel_ids_to_check.union(newly_reachable_ids) - channel_ids_checked
+        )
+    reachable_channel_ids.discard(payload.channel_id)
+
+    # Find and react to all messages matching this one
     session = None
     try:
+        # Create a function to add reactions to messages asynchronously and gather them all at the end
         async_add_reactions: list[Coroutine] = []
-        # First, check whether this message is bridged, in which case I need to find its source
-        with SQLSession(engine) as session:
 
+        async def add_reaction_helper(
+            bridged_channel: discord.TextChannel | discord.Thread,
+            target_message_id: int,
+            reaction_emoji: discord.Emoji | str,
+        ):
+            bridged_message = await bridged_channel.fetch_message(target_message_id)
+            await bridged_message.add_reaction(reaction_emoji)
+
+        with SQLSession(engine) as session:
+            # First, check whether this message is bridged, in which case I need to find its source
             def get_source_message_map():
                 return session.scalars(
                     SQLSelect(DBMessageMap).where(
@@ -702,36 +731,31 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
             source_message_map: DBMessageMap | None = await sql_retry(
                 get_source_message_map
             )
-            message_id_to_skip: int | None = None
             if isinstance(source_message_map, DBMessageMap):
                 # This message was bridged, so find the original one, react to it, and then find any other bridged messages from it
                 source_channel = await globals.get_channel_from_id(
                     int(source_message_map.source_channel)
                 )
                 if not source_channel:
+                    # The source channel isn't valid or reachable anymore, so we can't find the other versions of this message
                     return
 
                 assert isinstance(source_channel, (discord.TextChannel, discord.Thread))
 
-                source_message_id = int(source_message_map.source_message)
-                try:
-                    source_message = await source_channel.fetch_message(
-                        source_message_id
-                    )
-                    if source_message:
-                        async_add_reactions.append(
-                            source_message.add_reaction(reaction_emoji)
-                        )
-                except discord.HTTPException as e:
-                    warn(
-                        "Ran into a Discord exception while trying to add a reaction across a bridge:\n"
-                        + str(e)
-                    )
-
-                message_id_to_skip = (
-                    payload.message_id
-                )  # Don't add a reaction back to this message
                 source_channel_id = source_channel.id
+                source_message_id = int(source_message_map.source_message)
+                if source_channel_id in reachable_channel_ids:
+                    try:
+                        async_add_reactions.append(
+                            add_reaction_helper(
+                                source_channel, source_message_id, reaction_emoji
+                            )
+                        )
+                    except discord.HTTPException as e:
+                        warn(
+                            "Ran into a Discord exception while trying to add a reaction across a bridge:\n"
+                            + str(e)
+                        )
             else:
                 # This message is (or might be) the source
                 source_message_id = payload.message_id
@@ -746,22 +770,16 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
             def get_bridged_messages():
                 return session.scalars(
                     SQLSelect(DBMessageMap).where(
-                        sql_and(
-                            DBMessageMap.source_message == str(source_message_id),
-                            DBMessageMap.target_message != str(message_id_to_skip),
-                        )
+                        DBMessageMap.source_message == str(source_message_id)
                     )
                 )
 
-            bridged_messages: ScalarResult[DBMessageMap] = await sql_retry(
+            bridged_messages_query_result: ScalarResult[DBMessageMap] = await sql_retry(
                 get_bridged_messages
             )
-            for message_row in bridged_messages:
-                target_message_id = int(message_row.target_message)
+            for message_row in bridged_messages_query_result:
                 target_channel_id = int(message_row.target_channel)
-
-                bridge = outbound_bridges.get(target_channel_id)
-                if not bridge:
+                if target_channel_id not in reachable_channel_ids:
                     continue
 
                 bridged_channel = await globals.get_channel_from_id(target_channel_id)
@@ -771,19 +789,12 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                     continue
 
                 try:
-
-                    async def add_reaction(
-                        bridged_channel: discord.TextChannel | discord.Thread,
-                        target_message_id: int,
-                        reaction_emoji: discord.Emoji | str,
-                    ):
-                        bridged_message = await bridged_channel.fetch_message(
-                            target_message_id
-                        )
-                        await bridged_message.add_reaction(reaction_emoji)
-
                     async_add_reactions.append(
-                        add_reaction(bridged_channel, target_message_id, reaction_emoji)
+                        add_reaction_helper(
+                            bridged_channel,
+                            int(message_row.target_message),
+                            reaction_emoji,
+                        )
                     )
                 except discord.HTTPException as e:
                     warn(
