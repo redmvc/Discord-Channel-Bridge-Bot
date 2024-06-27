@@ -17,6 +17,7 @@ from database import (
     DBBridge,
     DBMessageMap,
     engine,
+    sql_retry,
     sql_upsert,
 )
 from validations import validate_types
@@ -292,12 +293,18 @@ async def auto_bridge_threads(
     try:
         with SQLSession(engine) as session:
             if message_channel.id not in globals.auto_bridge_thread_channels:
-                session.add(DBAutoBridgeThreadChannels(channel=str(message_channel.id)))
+
+                def add_to_table():
+                    session.add(
+                        DBAutoBridgeThreadChannels(channel=str(message_channel.id))
+                    )
+
+                await sql_retry(add_to_table)
                 globals.auto_bridge_thread_channels.add(message_channel.id)
 
                 response = "✅ Threads will now be automatically created across bridges when they are created in this channel."
             else:
-                stop_auto_bridging_threads_helper(message_channel.id, session)
+                await stop_auto_bridging_threads_helper(message_channel.id, session)
 
                 response = "✅ Threads will no longer be automatically created across bridges when they are created in this channel."
 
@@ -390,8 +397,6 @@ async def demolish(interaction: discord.Interaction, target: str):
                     ),
                 )
             )
-            session.execute(delete_demolished_bridges)
-
             delete_demolished_messages = SQLDelete(DBMessageMap).where(
                 sql_or(
                     sql_and(
@@ -404,10 +409,14 @@ async def demolish(interaction: discord.Interaction, target: str):
                     ),
                 )
             )
-            session.execute(delete_demolished_messages)
 
+            def execute_queries():
+                session.execute(delete_demolished_bridges)
+                session.execute(delete_demolished_messages)
+
+            await sql_retry(execute_queries)
             await demolishing
-            validate_auto_bridge_thread_channels(
+            await validate_auto_bridge_thread_channels(
                 {message_channel.id, target_channel.id}, session
             )
             session.commit()
@@ -549,7 +558,6 @@ async def demolish_all(
                         ),
                     )
                 )
-                session.execute(delete_demolished_bridges)
 
                 delete_demolished_messages = SQLDelete(DBMessageMap).where(
                     sql_or(
@@ -560,14 +568,19 @@ async def demolish_all(
                         ),
                     )
                 )
-                session.execute(delete_demolished_messages)
+
+                def execute_queries():
+                    session.execute(delete_demolished_bridges)
+                    session.execute(delete_demolished_messages)
+
+                await sql_retry(execute_queries)
 
                 for paired_channel_id in paired_channels:
                     bridges_being_demolished.append(
                         demolish_bridges(paired_channel_id, channel_to_demolish_id)
                     )
 
-            validate_auto_bridge_thread_channels(channels_affected, session)
+            await validate_auto_bridge_thread_channels(channels_affected, session)
 
             session.commit()
     except SQLError:
@@ -628,7 +641,7 @@ async def create_bridge_and_db(
             close_after = False
 
         bridge = await create_bridge(source, target, webhook)
-        insert_bridge_row = sql_upsert(
+        insert_bridge_row = await sql_upsert(
             DBBridge,
             {
                 "source": str(globals.get_id_from_channel(source)),
@@ -637,7 +650,11 @@ async def create_bridge_and_db(
             },
             {"webhook": str(bridge.webhook.id)},
         )
-        session.execute(insert_bridge_row)
+
+        def execute_query():
+            session.execute(insert_bridge_row)
+
+        await sql_retry(execute_query)
     except SQLError as e:
         if session:
             session.close()
@@ -790,11 +807,16 @@ async def bridge_thread_helper(
                 # I don't need to store it I just need to know whether it exists
                 await thread_to_bridge.parent.fetch_message(thread_to_bridge.id)
 
-                source_starting_message = session.scalars(
-                    SQLSelect(DBMessageMap).where(
-                        DBMessageMap.target_message == str(thread_to_bridge.id)
-                    )
-                ).first()
+                def get_source_starting_message():
+                    return session.scalars(
+                        SQLSelect(DBMessageMap).where(
+                            DBMessageMap.target_message == str(thread_to_bridge.id)
+                        )
+                    ).first()
+
+                source_starting_message: DBMessageMap | None = await sql_retry(
+                    get_source_starting_message
+                )
                 if isinstance(source_starting_message, DBMessageMap):
                     # The message that's starting this thread is bridged
                     source_channel_id = int(source_starting_message.source_channel)
@@ -804,10 +826,15 @@ async def bridge_thread_helper(
                     source_channel_id = thread_to_bridge.parent.id
                     source_message_id = thread_to_bridge.id
 
-                target_starting_messages: ScalarResult[DBMessageMap] = session.scalars(
-                    SQLSelect(DBMessageMap).where(
-                        DBMessageMap.source_message == str(source_message_id)
+                def get_target_starting_messages():
+                    return session.scalars(
+                        SQLSelect(DBMessageMap).where(
+                            DBMessageMap.source_message == str(source_message_id)
+                        )
                     )
+
+                target_starting_messages: ScalarResult[DBMessageMap] = await sql_retry(
+                    get_target_starting_messages
                 )
                 for target_starting_message in target_starting_messages:
                     matching_starting_messages[
@@ -951,7 +978,7 @@ async def bridge_thread_helper(
         await interaction.followup.send(response, ephemeral=True)
 
 
-def stop_auto_bridging_threads_helper(
+async def stop_auto_bridging_threads_helper(
     channel_ids_to_remove: int | Iterable[int], session: SQLSession | None = None
 ):
     """Remove a group of channels from the auto_bridge_thread_channels table and list.
@@ -982,13 +1009,16 @@ def stop_auto_bridging_threads_helper(
     else:
         close_after = False
 
-    session.execute(
-        SQLDelete(DBAutoBridgeThreadChannels).where(
-            DBAutoBridgeThreadChannels.channel.in_(
-                [str(id) for id in channel_ids_to_remove]
+    def execute_query():
+        session.execute(
+            SQLDelete(DBAutoBridgeThreadChannels).where(
+                DBAutoBridgeThreadChannels.channel.in_(
+                    [str(id) for id in channel_ids_to_remove]
+                )
             )
         )
-    )
+
+    await sql_retry(execute_query)
 
     globals.auto_bridge_thread_channels -= channel_ids_to_remove
 
@@ -997,7 +1027,7 @@ def stop_auto_bridging_threads_helper(
         session.close()
 
 
-def validate_auto_bridge_thread_channels(
+async def validate_auto_bridge_thread_channels(
     channel_ids_to_check: int | Iterable[int], session: SQLSession | None = None
 ):
     """Check whether each one of a list of channels are in auto_bridge_thread_channels and, if so, whether they should be and, if not, remove them from there.
@@ -1028,7 +1058,7 @@ def validate_auto_bridge_thread_channels(
     if len(channel_ids_to_remove) == 0:
         return
 
-    stop_auto_bridging_threads_helper(channel_ids_to_remove, session)
+    await stop_auto_bridging_threads_helper(channel_ids_to_remove, session)
 
 
 # @globals.command_tree.context_menu(name="List Reactions")
