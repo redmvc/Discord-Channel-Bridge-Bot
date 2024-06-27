@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, Callable, cast
 
 from sqlalchemy import Select as SQLSelect
 from sqlalchemy import String, UniqueConstraint
@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session as SQLSession
 from sqlalchemy.orm import mapped_column
 from sqlalchemy.sql._typing import _DMLTableArgument
 
-from globals import settings
+from globals import _T, run_retries, settings
 from validations import validate_types
 
 
@@ -104,7 +104,7 @@ class DBEmojiMap(DBBase):
     internal_emoji: Mapped[str] = mapped_column(String(32), nullable=False)
 
 
-def sql_upsert(
+async def sql_upsert(
     table: _DMLTableArgument,
     insert_values: dict[str, Any],
     update_values: dict[str, Any],
@@ -170,7 +170,15 @@ def sql_upsert(
                     getattr(table, idx) == insert_values[idx] for idx in indices
                 ]
                 upsert: UpdateBase
-                if session.execute(SQLSelect(table).where(*index_values)).first():
+
+                def select_existing():
+                    return (
+                        cast(SQLSession, session)
+                        .execute(SQLSelect(table).where(*index_values))
+                        .first()
+                    )
+
+                if await sql_retry(select_existing):
                     # Values with those keys do exist, so I update
                     upsert = SQLUpdate(table).where(*index_values).values(update_values)
                 else:
@@ -181,6 +189,24 @@ def sql_upsert(
             if session:
                 session.close()
             raise e
+
+
+async def sql_retry(
+    fun: Callable[..., _T],
+    num_retries: int = 3,
+    time_to_wait: float = 5,
+) -> _T:
+    """Run an SQL function and retry it every time an SQLError occurs up to a certain maximum number of tries. If it succeeds, return its result; otherwise, raise the error.
+
+    #### Args:
+        - `fun`: The function to run.
+        - `num_retries`: The number of times to try the function again.
+        - `time_to_wait`: How long to wait between retries.
+
+    #### Returns:
+        - `_T`: The result of calling `fun()`.
+    """
+    return await run_retries(fun, num_retries, time_to_wait, SQLError)
 
 
 # Create the engine connecting to the database
