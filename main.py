@@ -23,7 +23,6 @@ from database import (
     DBMessageMap,
     engine,
     sql_retry,
-    sql_upsert,
 )
 from validations import validate_types
 
@@ -168,8 +167,10 @@ async def on_ready():
     # Finally I'll check whether I have a registered emoji server and save it if so
     emoji_server_id = globals.settings.get("emoji_server_id")
     try:
-        if emoji_server_id and not isinstance(emoji_server_id, int):
+        if emoji_server_id:
             emoji_server_id = int(emoji_server_id)
+        else:
+            emoji_server_id = None
     except Exception:
         print(
             "Emoji server ID stored in settings.json file does not resolve to a valid integer."
@@ -177,7 +178,6 @@ async def on_ready():
         emoji_server_id = None
 
     if emoji_server_id:
-        emoji_server_id = cast(int, emoji_server_id)
         emoji_server = globals.client.get_guild(emoji_server_id)
         if not emoji_server:
             try:
@@ -197,7 +197,11 @@ async def on_ready():
         else:
             globals.emoji_server = emoji_server
 
-    await globals.command_tree.sync()
+    sync_command_tree = [globals.command_tree.sync()]
+    if globals.emoji_server:
+        sync_command_tree.append(globals.command_tree.sync(guild=globals.emoji_server))
+    await asyncio.gather(*sync_command_tree)
+
     print(f"{globals.client.user} is connected to the following servers:\n")
     for server in globals.client.guilds:
         print(f"{server.name}(id: {server.id})")
@@ -872,43 +876,16 @@ async def copy_emoji_into_server(
             print("Emoji server permissions not set correctly.")
             raise e
 
-    if emoji:
-        # Copied the emoji, going to update my table
-        if missing_emoji.id:
-            globals.emoji_mappings[missing_emoji.id] = emoji.id
-
-            missing_full_emoji = globals.client.get_emoji(missing_emoji.id)
-            if missing_full_emoji and missing_full_emoji.guild:
-                emoji_server_name = missing_full_emoji.guild.name
-            else:
-                emoji_server_name = ""
-
-        try:
-            with SQLSession(engine) as session:
-                if delete_existing_emoji_query is not None:
-                    session.execute(delete_existing_emoji_query)
-
-                sql_upsert_emoji = await sql_upsert(
-                    DBEmojiMap,
-                    {
-                        "external_emoji": str(missing_emoji.id),
-                        "external_emoji_name": missing_emoji.name,
-                        "external_emoji_server_name": emoji_server_name,
-                        "internal_emoji": str(emoji.id),
-                    },
-                    {
-                        "internal_emoji": str(emoji.id),
-                    },
-                )
-
-                def upsert_emoji():
-                    session.execute(sql_upsert_emoji)
-
-                await sql_retry(upsert_emoji)
-                session.commit()
-        except SQLError as e:
-            warn("Couldn't add emoji mapping to table.")
-            print(e)
+    # Copied the emoji, going to update my table
+    try:
+        with SQLSession(engine) as session:
+            if delete_existing_emoji_query is not None:
+                await sql_retry(lambda: session.execute(delete_existing_emoji_query))
+            await commands.map_emoji_helper(missing_emoji, emoji, session)
+            session.commit()
+    except SQLError as e:
+        warn("Couldn't add emoji mapping to table.")
+        print(e)
 
     return emoji
 
