@@ -703,6 +703,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         channel_ids_to_check = (
             channel_ids_to_check.union(newly_reachable_ids) - channel_ids_checked
         )
+    reachable_channel_ids.discard(payload.channel_id)
 
     # Find and react to all messages matching this one
     session = None
