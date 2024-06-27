@@ -15,8 +15,10 @@ from bridge import Bridge, bridges
 from database import (
     DBAutoBridgeThreadChannels,
     DBBridge,
+    DBEmojiMap,
     DBMessageMap,
     engine,
+    sql_retry,
     sql_upsert,
 )
 from validations import validate_types
@@ -28,7 +30,21 @@ from validations import validate_types
 )
 @discord.app_commands.describe(command="The command to get detailed information about.")
 async def help(interaction: discord.Interaction, command: str | None = None):
+    if (
+        globals.emoji_server
+        and interaction.guild
+        and interaction.guild.id == globals.emoji_server.id
+    ):
+        interaction_from_emoji_server = True
+    else:
+        interaction_from_emoji_server = False
+
     if not command:
+        if interaction_from_emoji_server:
+            map_emoji_mention = ", `/map_emoji`"
+        else:
+            map_emoji_mention = ""
+
         await interaction.response.send_message(
             "This bot bridges channels and threads to each other, mirroring messages sent from one to the other. When a message is bridged:"
             + "\n- its copies will show the avatar and name of the person who wrote the original message;"
@@ -37,7 +53,7 @@ async def help(interaction: discord.Interaction, command: str | None = None):
             + "\n- whenever someone adds a reaction to one message the bot will add the same reaction (if it can) to all of its mirrors;"
             + "\n- and deleting the original message will delete its copies (but not vice-versa)."
             + "\nThreads created in a channel do not automatically get matched to other channels bridged to it; create and bridge them manually or use the `/bridge_thread` or `/auto_bridge_threads` command."
-            + "\n\nList of commands: `/bridge`, `/bridge_thread`, `/auto_bridge_threads`, `/demolish`, `/demolish_all`, `/help`.\nType `/help command` for detailed explanation of a command.",
+            + f"\n\nList of commands: `/bridge`, `/bridge_thread`, `/auto_bridge_threads`, `/demolish`, `/demolish_all`{map_emoji_mention}, `/help`.\nType `/help command` for detailed explanation of a command.",
             ephemeral=True,
         )
     else:
@@ -74,6 +90,12 @@ async def help(interaction: discord.Interaction, command: str | None = None):
                 + "\nDestroys any existing bridges involving the current channel or thread, making messages from it no longer be mirrored to other channels and making other channels' messages no longer be mirrored to it."
                 + "\n\nIf you don't include `channel_and_threads` or set it to `False`, this will _only_ demolish bridges involving the _current specific channel/thread_. If instead you set `channel_and_threads` to `True`, this will demolish _all_ bridges involving the current channel/thread, its parent channel if it's a thread, and all of its or its parent channel's threads."
                 + "\n\nNote that even if you recreate any of the bridges, the messages previously bridged will no longer be connected and so they will not share future reactions, edits, or deletions.",
+                ephemeral=True,
+            )
+        elif command == "map_emoji" and interaction_from_emoji_server:
+            await interaction.response.send_message(
+                "`/map_emoji :external_emoji: :internal_emoji:`"
+                + "\nCreates an internal mapping between an emoji from an external server which the bot doesn't have access to and an emoji stored in the bot's emoji server, so that they are considered equivalent by the bot when bridging reactions.",
                 ephemeral=True,
             )
         else:
@@ -292,12 +314,18 @@ async def auto_bridge_threads(
     try:
         with SQLSession(engine) as session:
             if message_channel.id not in globals.auto_bridge_thread_channels:
-                session.add(DBAutoBridgeThreadChannels(channel=str(message_channel.id)))
+
+                def add_to_table():
+                    session.add(
+                        DBAutoBridgeThreadChannels(channel=str(message_channel.id))
+                    )
+
+                await sql_retry(add_to_table)
                 globals.auto_bridge_thread_channels.add(message_channel.id)
 
                 response = "✅ Threads will now be automatically created across bridges when they are created in this channel."
             else:
-                stop_auto_bridging_threads_helper(message_channel.id, session)
+                await stop_auto_bridging_threads_helper(message_channel.id, session)
 
                 response = "✅ Threads will no longer be automatically created across bridges when they are created in this channel."
 
@@ -390,8 +418,6 @@ async def demolish(interaction: discord.Interaction, target: str):
                     ),
                 )
             )
-            session.execute(delete_demolished_bridges)
-
             delete_demolished_messages = SQLDelete(DBMessageMap).where(
                 sql_or(
                     sql_and(
@@ -404,10 +430,14 @@ async def demolish(interaction: discord.Interaction, target: str):
                     ),
                 )
             )
-            session.execute(delete_demolished_messages)
 
+            def execute_queries():
+                session.execute(delete_demolished_bridges)
+                session.execute(delete_demolished_messages)
+
+            await sql_retry(execute_queries)
             await demolishing
-            validate_auto_bridge_thread_channels(
+            await validate_auto_bridge_thread_channels(
                 {message_channel.id, target_channel.id}, session
             )
             session.commit()
@@ -549,7 +579,6 @@ async def demolish_all(
                         ),
                     )
                 )
-                session.execute(delete_demolished_bridges)
 
                 delete_demolished_messages = SQLDelete(DBMessageMap).where(
                     sql_or(
@@ -560,14 +589,19 @@ async def demolish_all(
                         ),
                     )
                 )
-                session.execute(delete_demolished_messages)
+
+                def execute_queries():
+                    session.execute(delete_demolished_bridges)
+                    session.execute(delete_demolished_messages)
+
+                await sql_retry(execute_queries)
 
                 for paired_channel_id in paired_channels:
                     bridges_being_demolished.append(
                         demolish_bridges(paired_channel_id, channel_to_demolish_id)
                     )
 
-            validate_auto_bridge_thread_channels(channels_affected, session)
+            await validate_auto_bridge_thread_channels(channels_affected, session)
 
             session.commit()
     except SQLError:
@@ -590,6 +624,87 @@ async def demolish_all(
             "⭕ Inbound bridges demolished, but some outbound bridges may not have been, as some permissions were missing.",
             ephemeral=True,
         )
+
+
+@discord.app_commands.default_permissions(
+    create_expressions=True, manage_expressions=True
+)
+@globals.command_tree.command(
+    name="map_emoji",
+    description="Create a mapping between emoji so that the bot considers them equivalent.",
+    guild=globals.emoji_server,
+)
+@discord.app_commands.rename(
+    external_emoji_id_str="external_emoji", internal_emoji_id_str="internal_emoji"
+)
+@discord.app_commands.describe(
+    external_emoji_id_str="The emoji from another server or its numeric ID.",
+    internal_emoji_id_str="The emoji from this server to map the external emoji to, or its ID.",
+)
+async def map_emoji(
+    interaction: discord.Interaction,
+    external_emoji_id_str: str,
+    internal_emoji_id_str: str,
+):
+    if not globals.settings.get("emoji_server_id"):
+        await interaction.response.send_message(
+            "❌ Bot doesn't have an emoji server registered."
+        )
+        return
+
+    external_emoji_id_str = (
+        external_emoji_id_str.replace("<:", "")
+        .replace("<", "")
+        .replace(">", "")
+        .replace("\\", "")
+    )
+    if ":" in external_emoji_id_str:
+        external_emoji_id_str = external_emoji_id_str.split(":")[-1]
+
+    internal_emoji_id_str = (
+        internal_emoji_id_str.replace("<:", "")
+        .replace("<", "")
+        .replace(">", "")
+        .replace("\\", "")
+    )
+    if ":" in internal_emoji_id_str:
+        internal_emoji_id_str = internal_emoji_id_str.split(":")[-1]
+
+    try:
+        external_emoji_id = int(external_emoji_id_str)
+        internal_emoji_id = int(internal_emoji_id_str)
+    except Exception:
+        await interaction.response.send_message("❌ Emoji IDs not valid.")
+        return
+
+    internal_emoji = globals.client.get_emoji(internal_emoji_id)
+
+    if (
+        not internal_emoji
+        or not internal_emoji.guild
+        or not globals.emoji_server
+        or internal_emoji.guild_id != globals.emoji_server.id
+    ):
+        await interaction.response.send_message(
+            "❌ The second argument must be an emoji in the bot's registered emoji server."
+        )
+        return
+
+    await interaction.response.defer(thinking=True, ephemeral=True)
+
+    try:
+        if not await map_emoji_helper(external_emoji_id, internal_emoji):
+            await interaction.followup.send(
+                "❌ There was a problem creating emoji mapping."
+            )
+            return
+    except Exception:
+        await interaction.followup.send(
+            "❌ There was a database error trying to map the emoji."
+        )
+        return
+
+    await interaction.followup.send("✅ Emoji map created!")
 
 
 async def create_bridge_and_db(
@@ -628,7 +743,7 @@ async def create_bridge_and_db(
             close_after = False
 
         bridge = await create_bridge(source, target, webhook)
-        insert_bridge_row = sql_upsert(
+        insert_bridge_row = await sql_upsert(
             DBBridge,
             {
                 "source": str(globals.get_id_from_channel(source)),
@@ -637,7 +752,11 @@ async def create_bridge_and_db(
             },
             {"webhook": str(bridge.webhook.id)},
         )
-        session.execute(insert_bridge_row)
+
+        def execute_query():
+            session.execute(insert_bridge_row)
+
+        await sql_retry(execute_query)
     except SQLError as e:
         if session:
             session.close()
@@ -790,11 +909,16 @@ async def bridge_thread_helper(
                 # I don't need to store it I just need to know whether it exists
                 await thread_to_bridge.parent.fetch_message(thread_to_bridge.id)
 
-                source_starting_message = session.scalars(
-                    SQLSelect(DBMessageMap).where(
-                        DBMessageMap.target_message == str(thread_to_bridge.id)
-                    )
-                ).first()
+                def get_source_starting_message():
+                    return session.scalars(
+                        SQLSelect(DBMessageMap).where(
+                            DBMessageMap.target_message == str(thread_to_bridge.id)
+                        )
+                    ).first()
+
+                source_starting_message: DBMessageMap | None = await sql_retry(
+                    get_source_starting_message
+                )
                 if isinstance(source_starting_message, DBMessageMap):
                     # The message that's starting this thread is bridged
                     source_channel_id = int(source_starting_message.source_channel)
@@ -804,10 +928,15 @@ async def bridge_thread_helper(
                     source_channel_id = thread_to_bridge.parent.id
                     source_message_id = thread_to_bridge.id
 
-                target_starting_messages: ScalarResult[DBMessageMap] = session.scalars(
-                    SQLSelect(DBMessageMap).where(
-                        DBMessageMap.source_message == str(source_message_id)
+                def get_target_starting_messages():
+                    return session.scalars(
+                        SQLSelect(DBMessageMap).where(
+                            DBMessageMap.source_message == str(source_message_id)
+                        )
                     )
+
+                target_starting_messages: ScalarResult[DBMessageMap] = await sql_retry(
+                    get_target_starting_messages
                 )
                 for target_starting_message in target_starting_messages:
                     matching_starting_messages[
@@ -951,7 +1080,7 @@ async def bridge_thread_helper(
         await interaction.followup.send(response, ephemeral=True)
 
 
-def stop_auto_bridging_threads_helper(
+async def stop_auto_bridging_threads_helper(
     channel_ids_to_remove: int | Iterable[int], session: SQLSession | None = None
 ):
     """Remove a group of channels from the auto_bridge_thread_channels table and list.
@@ -982,13 +1111,16 @@ def stop_auto_bridging_threads_helper(
     else:
         close_after = False
 
-    session.execute(
-        SQLDelete(DBAutoBridgeThreadChannels).where(
-            DBAutoBridgeThreadChannels.channel.in_(
-                [str(id) for id in channel_ids_to_remove]
+    def execute_query():
+        session.execute(
+            SQLDelete(DBAutoBridgeThreadChannels).where(
+                DBAutoBridgeThreadChannels.channel.in_(
+                    [str(id) for id in channel_ids_to_remove]
+                )
             )
         )
-    )
+
+    await sql_retry(execute_query)
 
     globals.auto_bridge_thread_channels -= channel_ids_to_remove
 
@@ -997,7 +1129,7 @@ def stop_auto_bridging_threads_helper(
         session.close()
 
 
-def validate_auto_bridge_thread_channels(
+async def validate_auto_bridge_thread_channels(
     channel_ids_to_check: int | Iterable[int], session: SQLSession | None = None
 ):
     """Check whether each one of a list of channels are in auto_bridge_thread_channels and, if so, whether they should be and, if not, remove them from there.
@@ -1028,7 +1160,93 @@ def validate_auto_bridge_thread_channels(
     if len(channel_ids_to_remove) == 0:
         return
 
-    stop_auto_bridging_threads_helper(channel_ids_to_remove, session)
+    await stop_auto_bridging_threads_helper(channel_ids_to_remove, session)
+
+
+async def map_emoji_helper(
+    external_emoji: discord.Emoji | discord.PartialEmoji | int | None,
+    internal_emoji: discord.Emoji,
+    session: SQLSession | None = None,
+) -> bool:
+    """Create a mapping between external and internal emoji, recording it locally and saving it in the emoji_mappings table.
+
+    #### Args:
+        - `external_emoji`: The custom emoji that is not present in any servers the bot is in, or an ID of one.
+        - `internal_emoji`: An emoji the bot has in its emoji server.
+        - `session`: A connection to the database. Defaults to None.
+
+    #### Raises:
+        - `UnknownDBDialectError`: Invalid database dialect registered in `settings.json` file.
+        - `SQLError`: SQL statement inferred from arguments was invalid or database connection failed.
+    """
+    if not external_emoji or (
+        not isinstance(external_emoji, int) and not external_emoji.id
+    ):
+        return False
+
+    types_to_validate: dict[str, tuple] = {
+        "external_emoji": (external_emoji, (discord.Emoji, discord.PartialEmoji, int)),
+        "internal_emoji": (internal_emoji, discord.Emoji),
+    }
+    if session:
+        types_to_validate["session"] = (session, SQLSession)
+    validate_types(types_to_validate)
+
+    external_emoji_id: int | None
+    if isinstance(external_emoji, int):
+        external_emoji_id = external_emoji
+        external_emoji_name = ""
+    else:
+        external_emoji_id = external_emoji.id
+        if not external_emoji_id:
+            return False
+
+        full_emoji = globals.client.get_emoji(external_emoji_id)
+        if full_emoji:
+            external_emoji = full_emoji
+
+        external_emoji_name = external_emoji.name
+        assert isinstance(external_emoji, discord.PartialEmoji)
+
+    globals.emoji_mappings[external_emoji_id] = internal_emoji.id
+
+    if isinstance(external_emoji, discord.Emoji) and external_emoji.guild:
+        external_emoji_server_name = external_emoji.guild.name
+    else:
+        external_emoji_server_name = ""
+
+    if not session:
+        session = SQLSession(engine)
+        close_after = True
+    else:
+        close_after = False
+
+    try:
+        upsert_emoji = await sql_upsert(
+            DBEmojiMap,
+            {
+                "external_emoji": str(external_emoji_id),
+                "external_emoji_name": external_emoji_name,
+                "external_emoji_server_name": external_emoji_server_name,
+                "internal_emoji": str(internal_emoji.id),
+            },
+            {
+                "internal_emoji": str(internal_emoji.id),
+            },
+        )
+
+        await sql_retry(lambda: session.execute(upsert_emoji))
+    except SQLError as e:
+        if session:
+            session.close()
+
+        raise e
+
+    if close_after:
+        session.commit()
+        session.close()
+
+    return True
 
 
 # @globals.command_tree.context_menu(name="List Reactions")

@@ -3,27 +3,44 @@ from __future__ import annotations
 import asyncio
 import io
 import json
+from typing import Any, Callable, TypeVar, cast
 
 import aiohttp
 import discord
 
-from validations import validate_types, HTTPResponseError
+from validations import HTTPResponseError, validate_types
 
 """
 The format of this variable is
 {
-    "app_token": "the app token for the Discord bot",
-    "db_dialect": "database dialect",
-    "db_driver": "database driver",
-    "db_host": "database host",
-    "db_port": database port,
-    "db_user": "database username",
-    "db_pwd": "database password",
-    "db_name": "database name",
-    "emoji_server_id": "id of the server for storing emoji"
+    "context": "production",
+    "production": {
+        "app_token": "the app token for the Discord bot",
+        "db_dialect": "database dialect",
+        "db_driver": "database driver",
+        "db_host": "database host",
+        "db_port": database port,
+        "db_user": "database username",
+        "db_pwd": "database password",
+        "db_name": "database name",
+        "emoji_server_id": "id of the server for storing emoji"
+    }
 }
+
+You may add other contexts than "production" in order to have testing environments.
 """
-settings: dict[str, str | int] = json.load(open("settings.json"))
+settings_root: dict[str, str | int | dict[str, str | int]] = json.load(
+    open("settings.json")
+)
+context: str | None
+if settings_root.get("context") and isinstance(settings_root["context"], str):
+    context = settings_root["context"]
+else:
+    context = None
+if context and settings_root.get(context) and isinstance(settings_root[context], dict):
+    settings = cast(dict[str, str | int], settings_root[context])
+else:
+    settings = cast(dict[str, str | int], settings_root)
 
 # Variables for connection to the Discord client
 intents = discord.Intents()
@@ -49,6 +66,9 @@ emoji_server: discord.Guild | None = None
 
 # Dictionary mapping external emoji to internal emoji
 emoji_mappings: dict[int, int] = {}
+
+# Type wildcard
+_T = TypeVar("_T", bound=Any)
 
 
 async def mention_to_channel(
@@ -237,3 +257,45 @@ async def wait_until_ready() -> bool:
         print("Taking forever to get ready.")
         return False
     return True
+
+
+async def run_retries(
+    fun: Callable[..., _T],
+    num_retries: int,
+    time_to_wait: float = 5,
+    exceptions_to_catch: type | tuple[type] | None = None,
+) -> _T:
+    """Run a function and retry it every time an exception occurs up to a certain maximum number of tries. If it succeeds, return its result; otherwise, raise the error.
+
+    #### Args:
+        - `fun`: The function to run.
+        - `num_retries`: The number of times to try the function again.
+        - `time_to_wait`: How long to wait between retries.
+        - `exceptions_to_catch`: An exception type or a list of exception types to catch. Defaults to None, in which case all types will be caught.
+
+    #### Returns:
+        - `_T`: The result of calling `fun()`.
+    """
+    types_to_validate: dict[str, tuple] = {  # TODO validate callable?
+        "num_retries": (num_retries, int),
+        "time_to_wait": (time_to_wait, (float, int)),
+    }
+    if exceptions_to_catch:
+        if isinstance(exceptions_to_catch, type):
+            exceptions_to_catch = (exceptions_to_catch,)
+        else:
+            types_to_validate["exceptions_to_catch"] = (exceptions_to_catch, tuple)
+    validate_types(types_to_validate)
+
+    for retry in range(num_retries):
+        try:
+            return fun()
+        except Exception as e:
+            if retry < num_retries - 1 and (
+                not exceptions_to_catch or isinstance(e, exceptions_to_catch)
+            ):
+                await asyncio.sleep(time_to_wait)
+            else:
+                raise e
+
+    raise Exception("Couldn't run the function in number of retries.")

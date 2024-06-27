@@ -16,6 +16,7 @@ To add this bot to your server, visit [this link](https://discord.com/oauth2/aut
     - Another option is running the command `/auto_bridge_threads` from a channel; this will cause thread creation in that channel to be mirrored (though you'll need to run that channel on each side of each bridge for mirrors to work in all directions). Running this command again will revert to the default behaviour.
 - You can run the command `/demolish target` to demolish all bridges between the current and target channels/threads.
   - You can run the command `/demolish_all` to demolish all bridges to and from the current channel/thread (and, optionally, its threads or its parent channel's threads).
+- If the bot has a server where it stores emoji which you have access to, you can run the command `/map_emoji :external_emoji: :internal_emoji:` from that server to create an internal equivalence between emoji for the bot to bridge.
 - `/help` will give you a list of commands. `/help command_name` will explain the usage of the specific command passed as argument.
   - You can pass this command in DM to the bot, too.
 <!-- - Right clicking a message and going to Apps > List Reactions will show you a list of all reactions on all sides of the bridge. -->
@@ -32,17 +33,21 @@ It's very straightforward to run your own copy of this bot. You'll need access t
 4. Create a `settings.json` file in the same folder as your `main.py` file with the following entries, filling them out with the appropriate values for your own application and server:
    ```json
    {
-       "app_token": "the token you got in step 2",
-       "db_dialect": "mysql, postgresql, or sqlite, depending on which dialect your database uses",
-       "db_driver": "pymysql, psycopg2, or pysqlite, respectively depending on the above",
-       "db_host": "",
-       "db_port": 0,
-       "db_user": "",
-       "db_pwd": "",
-       "db_name": ""
+      "context": "production",
+      "production": {
+         "app_token": "the token you got in step 2",
+         "db_dialect": "mysql, postgresql, or sqlite, depending on which dialect your database uses",
+         "db_driver": "pymysql, psycopg2, or pysqlite, respectively depending on the above",
+         "db_host": "",
+         "db_port": 0,
+         "db_user": "",
+         "db_pwd": "",
+         "db_name": ""
+      }
    }
    ```
-   - Optionally, you can also add an `"emoji_server_id"` entry to the JSON. If this ID points to a valid Discord server to which the bot has `Create Expressions` and `Manage Expressions` permissions, that server will be used to add any custom reactions it runs into but doesn't have access to while trying to bridge reactions.
+   - Optionally, you can also add an `"emoji_server_id"` entry to that list. If this ID points to a valid Discord server to which the bot has `Create Expressions` and `Manage Expressions` permissions, that server will be used to add any custom reactions it runs into but doesn't have access to while trying to bridge reactions.
+   - You may add other contexts than `"production"`, such as `"testing"`, for other situations.
 5. Edit your `requirements.txt` file to include the appropriate SQL library depending on your SQL dialect, then run `pip install -r requirements.txt` on your command line from the main folder.
 6. Run `main.py`. This will automatically create the necessary tables in your database if they're not already there, and all commands will be working out of the box.
 
