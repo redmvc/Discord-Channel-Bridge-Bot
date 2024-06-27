@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import io
 import json
+from typing import cast
 
 import aiohttp
 import discord
@@ -12,18 +13,31 @@ from validations import validate_types, HTTPResponseError
 """
 The format of this variable is
 {
-    "app_token": "the app token for the Discord bot",
-    "db_dialect": "database dialect",
-    "db_driver": "database driver",
-    "db_host": "database host",
-    "db_port": database port,
-    "db_user": "database username",
-    "db_pwd": "database password",
-    "db_name": "database name",
-    "emoji_server_id": "id of the server for storing emoji"
+    "context": "production",
+    "production": {
+        "app_token": "the app token for the Discord bot",
+        "db_dialect": "database dialect",
+        "db_driver": "database driver",
+        "db_host": "database host",
+        "db_port": database port,
+        "db_user": "database username",
+        "db_pwd": "database password",
+        "db_name": "database name",
+        "emoji_server_id": "id of the server for storing emoji"
+    }
 }
+
+You may add other contexts than "production" in order to have testing environments.
 """
-settings: dict[str, str | int] = json.load(open("settings.json"))
+settings_root: dict[str, str | int | dict[str, str | int]] = json.load(
+    open("settings.json")
+)
+assert isinstance(settings_root["context"], str)
+context = settings_root["context"]
+if settings_root.get(context) and isinstance(settings_root[context], dict):
+    settings = cast(dict[str, str | int], settings_root[context])
+else:
+    settings = cast(dict[str, str | int], settings_root)
 
 # Variables for connection to the Discord client
 intents = discord.Intents()

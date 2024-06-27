@@ -480,13 +480,13 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
 
     # Find all messages matching this one
     try:
+        async_message_edits = []
         with SQLSession(engine) as session:
             bridged_messages: ScalarResult[DBMessageMap] = session.scalars(
                 SQLSelect(DBMessageMap).where(
                     DBMessageMap.source_message == payload.message_id
                 )
             )
-            async_message_edits = []
             for message_row in bridged_messages:
                 target_channel_id = int(message_row.target_channel)
                 bridge = outbound_bridges.get(target_channel_id)
@@ -548,13 +548,13 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
     # Find all messages matching this one
     session = None
     try:
+        async_message_deletes = []
         with SQLSession(engine) as session:
             bridged_messages: ScalarResult[DBMessageMap] = session.scalars(
                 SQLSelect(DBMessageMap).where(
                     DBMessageMap.source_message == payload.message_id
                 )
             )
-            async_message_deletes = []
             for message_row in bridged_messages:
                 target_channel_id = int(message_row.target_channel)
                 bridge = outbound_bridges.get(target_channel_id)
