@@ -653,17 +653,22 @@ async def map_emoji(
         return
 
     external_emoji_id_str = (
-        external_emoji_id_str.replace("<", "")
+        external_emoji_id_str.replace("<:", "")
+        .replace("<", "")
         .replace(">", "")
-        .replace(":", "")
         .replace("\\", "")
     )
+    if ":" in external_emoji_id_str:
+        external_emoji_id_str = external_emoji_id_str.split(":")[-1]
+
     internal_emoji_id_str = (
-        internal_emoji_id_str.replace("<", "")
+        internal_emoji_id_str.replace("<:", "")
+        .replace("<", "")
         .replace(">", "")
-        .replace(":", "")
         .replace("\\", "")
     )
+    if ":" in internal_emoji_id_str:
+        internal_emoji_id_str = internal_emoji_id_str.split(":")[-1]
 
     try:
         external_emoji_id = int(external_emoji_id_str)
