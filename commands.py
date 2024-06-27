@@ -715,23 +715,24 @@ async def map_emoji(
         )
     except Exception:
         await interaction.followup.send(
-            "❌ There was a database error trying to map the emoji.", ephemeral=True
+            f"❌ There was a database error trying to map emoji to {str(internal_emoji)}.",
+            ephemeral=True,
         )
         return
 
     if not max(map_emojis):
         await interaction.followup.send(
-            "❌ There was a problem creating emoji mappings.",
+            f"❌ There was a problem creating emoji mappings to {str(internal_emoji)}.",
             ephemeral=True,
         )
     elif not min(map_emojis):
         await interaction.followup.send(
-            "⭕ There was a problem creating some of the emoji mappings.",
+            f"⭕ There was a problem creating some of the emoji mappings to {str(internal_emoji)}.",
             ephemeral=True,
         )
     else:
         await interaction.followup.send(
-            "✅ All emoji mappings created!",
+            f"✅ All emoji mappings to {str(internal_emoji)} created!",
             ephemeral=True,
         )
 
