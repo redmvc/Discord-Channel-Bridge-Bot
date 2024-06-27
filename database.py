@@ -1,4 +1,4 @@
-from typing import Any, Callable
+from typing import Any, Callable, cast
 
 from sqlalchemy import Select as SQLSelect
 from sqlalchemy import String, UniqueConstraint
@@ -104,7 +104,7 @@ class DBEmojiMap(DBBase):
     internal_emoji: Mapped[str] = mapped_column(String(32), nullable=False)
 
 
-def sql_upsert(
+async def sql_upsert(
     table: _DMLTableArgument,
     insert_values: dict[str, Any],
     update_values: dict[str, Any],
@@ -170,7 +170,15 @@ def sql_upsert(
                     getattr(table, idx) == insert_values[idx] for idx in indices
                 ]
                 upsert: UpdateBase
-                if session.execute(SQLSelect(table).where(*index_values)).first():
+
+                def select_existing():
+                    return (
+                        cast(SQLSession, session)
+                        .execute(SQLSelect(table).where(*index_values))
+                        .first()
+                    )
+
+                if await sql_retry(select_existing):
                     # Values with those keys do exist, so I update
                     upsert = SQLUpdate(table).where(*index_values).values(update_values)
                 else:

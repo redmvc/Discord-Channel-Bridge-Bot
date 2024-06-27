@@ -23,6 +23,7 @@ from database import (
     DBEmojiMap,
     DBMessageMap,
     engine,
+    sql_retry,
     sql_upsert,
 )
 from validations import validate_types
@@ -271,11 +272,16 @@ async def bridge_message_helper(message: discord.Message):
                 )
 
                 # First, check whether the message replied to was itself bridged from a different channel
-                local_replied_to_message_map: DBMessageMap | None = session.scalars(
-                    SQLSelect(DBMessageMap).where(
-                        DBMessageMap.target_message == str(replied_to_id)
-                    )
-                ).first()
+                def get_local_replied_to():
+                    return session.scalars(
+                        SQLSelect(DBMessageMap).where(
+                            DBMessageMap.target_message == str(replied_to_id)
+                        )
+                    ).first()
+
+                local_replied_to_message_map: DBMessageMap | None = await sql_retry(
+                    get_local_replied_to
+                )
                 if isinstance(local_replied_to_message_map, DBMessageMap):
                     # So the message replied to was bridged from elsewhere
                     source_replied_to_id = int(
@@ -290,11 +296,14 @@ async def bridge_message_helper(message: discord.Message):
                     reply_source_channel_id = message.channel.id
 
                 # Now find all other bridged versions of the message we're replying to
-                select_bridged_reply_to: SQLSelect = SQLSelect(DBMessageMap).where(
-                    DBMessageMap.source_message == str(source_replied_to_id)
-                )
-                query_result: ScalarResult[DBMessageMap] = session.scalars(
-                    select_bridged_reply_to
+                def get_bridged_reply_tos():
+                    select_bridged_reply_to: SQLSelect = SQLSelect(DBMessageMap).where(
+                        DBMessageMap.source_message == str(source_replied_to_id)
+                    )
+                    return session.scalars(select_bridged_reply_to)
+
+                query_result: ScalarResult[DBMessageMap] = await sql_retry(
+                    get_bridged_reply_tos
                 )
                 for message_map in query_result:
                     bridged_reply_to[int(message_map.target_channel)] = int(
@@ -432,18 +441,21 @@ async def bridge_message_helper(message: discord.Message):
             )
             source_message_id_str = str(message.id)
             source_channel_id_str = str(message.channel.id)
-            session.add_all(
-                [
-                    DBMessageMap(
-                        source_message=source_message_id_str,
-                        source_channel=source_channel_id_str,
-                        target_message=message.id,
-                        target_channel=message.channel.id,
-                    )
-                    for message in bridged_messages
-                ]
-            )
 
+            def insert_into_message_map():
+                session.add_all(
+                    [
+                        DBMessageMap(
+                            source_message=source_message_id_str,
+                            source_channel=source_channel_id_str,
+                            target_message=message.id,
+                            target_channel=message.channel.id,
+                        )
+                        for message in bridged_messages
+                    ]
+                )
+
+            await sql_retry(insert_into_message_map)
             session.commit()
     except SQLError as e:
         if session:
@@ -483,11 +495,18 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
     try:
         async_message_edits = []
         with SQLSession(engine) as session:
-            bridged_messages: ScalarResult[DBMessageMap] = session.scalars(
-                SQLSelect(DBMessageMap).where(
-                    DBMessageMap.source_message == payload.message_id
+
+            def get_bridged_messages():
+                return session.scalars(
+                    SQLSelect(DBMessageMap).where(
+                        DBMessageMap.source_message == payload.message_id
+                    )
                 )
+
+            bridged_messages: ScalarResult[DBMessageMap] = await sql_retry(
+                get_bridged_messages
             )
+
             for message_row in bridged_messages:
                 target_channel_id = int(message_row.target_channel)
                 bridge = outbound_bridges.get(target_channel_id)
@@ -551,10 +570,16 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
     try:
         async_message_deletes = []
         with SQLSession(engine) as session:
-            bridged_messages: ScalarResult[DBMessageMap] = session.scalars(
-                SQLSelect(DBMessageMap).where(
-                    DBMessageMap.source_message == payload.message_id
+
+            def get_bridged_messages():
+                return session.scalars(
+                    SQLSelect(DBMessageMap).where(
+                        DBMessageMap.source_message == payload.message_id
+                    )
                 )
+
+            bridged_messages: ScalarResult[DBMessageMap] = await sql_retry(
+                get_bridged_messages
             )
             for message_row in bridged_messages:
                 target_channel_id = int(message_row.target_channel)
@@ -589,15 +614,17 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
 
             # If the message was bridged, delete its row
             # If it was a source of bridged messages, delete all rows of its bridged versions
-            session.execute(
-                SQLDelete(DBMessageMap).where(
-                    sql_or(
-                        DBMessageMap.source_message == str(payload.message_id),
-                        DBMessageMap.target_message == str(payload.message_id),
+            def delete_bridged_messages():
+                session.execute(
+                    SQLDelete(DBMessageMap).where(
+                        sql_or(
+                            DBMessageMap.source_message == str(payload.message_id),
+                            DBMessageMap.target_message == str(payload.message_id),
+                        )
                     )
                 )
-            )
 
+            await sql_retry(delete_bridged_messages)
             session.commit()
     except SQLError as e:
         if session:
@@ -664,11 +691,17 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         async_add_reactions: list[Coroutine] = []
         # First, check whether this message is bridged, in which case I need to find its source
         with SQLSession(engine) as session:
-            source_message_map = session.scalars(
-                SQLSelect(DBMessageMap).where(
-                    DBMessageMap.target_message == str(payload.message_id),
-                )
-            ).first()
+
+            def get_source_message_map():
+                return session.scalars(
+                    SQLSelect(DBMessageMap).where(
+                        DBMessageMap.target_message == str(payload.message_id),
+                    )
+                ).first()
+
+            source_message_map: DBMessageMap | None = await sql_retry(
+                get_source_message_map
+            )
             message_id_to_skip: int | None = None
             if isinstance(source_message_map, DBMessageMap):
                 # This message was bridged, so find the original one, react to it, and then find any other bridged messages from it
@@ -710,13 +743,18 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                     await async_add_reactions[0]
                 return
 
-            bridged_messages: ScalarResult[DBMessageMap] = session.scalars(
-                SQLSelect(DBMessageMap).where(
-                    sql_and(
-                        DBMessageMap.source_message == str(source_message_id),
-                        DBMessageMap.target_message != str(message_id_to_skip),
+            def get_bridged_messages():
+                return session.scalars(
+                    SQLSelect(DBMessageMap).where(
+                        sql_and(
+                            DBMessageMap.source_message == str(source_message_id),
+                            DBMessageMap.target_message != str(message_id_to_skip),
+                        )
                     )
                 )
+
+            bridged_messages: ScalarResult[DBMessageMap] = await sql_retry(
+                get_bridged_messages
             )
             for message_row in bridged_messages:
                 target_message_id = int(message_row.target_message)
@@ -839,7 +877,7 @@ async def copy_emoji_into_server(
                 if delete_existing_emoji_query is not None:
                     session.execute(delete_existing_emoji_query)
 
-                upsert_emoji = sql_upsert(
+                sql_upsert_emoji = await sql_upsert(
                     DBEmojiMap,
                     {
                         "external_emoji": str(missing_emoji.id),
@@ -852,7 +890,10 @@ async def copy_emoji_into_server(
                     },
                 )
 
-                session.execute(upsert_emoji)
+                def upsert_emoji():
+                    session.execute(sql_upsert_emoji)
+
+                await sql_retry(upsert_emoji)
                 session.commit()
         except SQLError as e:
             warn("Couldn't add emoji mapping to table.")
