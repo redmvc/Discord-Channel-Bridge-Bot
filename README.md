@@ -16,7 +16,7 @@ To add this bot to your server, visit [this link](https://discord.com/oauth2/aut
     - Another option is running the command `/auto_bridge_threads` from a channel; this will cause thread creation in that channel to be mirrored (though you'll need to run that channel on each side of each bridge for mirrors to work in all directions). Running this command again will revert to the default behaviour.
 - You can run the command `/demolish target` to demolish all bridges between the current and target channels/threads.
   - You can run the command `/demolish_all` to demolish all bridges to and from the current channel/thread (and, optionally, its threads or its parent channel's threads).
-- If the bot has a server where it stores emoji which you have access to, you can run the command `/map_emoji :external_emoji: :internal_emoji:` from that server to create an internal equivalence between emoji for the bot to bridge.
+- If the bot has a server where it stores emoji which you have access to, you can run the command `/map_emoji :internal_emoji: :external_emoji: [:external_emoji_2: [:external_emoji_3: ...]]` from that server to create an internal equivalence between emoji for the bot to bridge.
 - `/help` will give you a list of commands. `/help command_name` will explain the usage of the specific command passed as argument.
   - You can pass this command in DM to the bot, too.
 <!-- - Right clicking a message and going to Apps > List Reactions will show you a list of all reactions on all sides of the bridge. -->

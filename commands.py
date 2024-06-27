@@ -94,8 +94,8 @@ async def help(interaction: discord.Interaction, command: str | None = None):
             )
         elif command == "map_emoji" and interaction_from_emoji_server:
             await interaction.response.send_message(
-                "`/map_emoji :external_emoji: :internal_emoji:`"
-                + "\nCreates an internal mapping between an emoji from an external server which the bot doesn't have access to and an emoji stored in the bot's emoji server, so that they are considered equivalent by the bot when bridging reactions.",
+                "`/map_emoji :internal_emoji: :external_emoji: [:external_emoji_2: [:external_emoji_3: ...]]`"
+                + "\nCreates an internal mapping between an emoji from an external server which the bot doesn't have access to and an emoji stored in the bot's emoji server, so that they are considered equivalent by the bot when bridging reactions. You can also pass multiple external emoji separated by spaces to map all of them to the same internal one.",
                 ephemeral=True,
             )
         else:
@@ -635,16 +635,16 @@ async def demolish_all(
     guild=globals.emoji_server,
 )
 @discord.app_commands.rename(
-    external_emoji_id_str="external_emoji", internal_emoji_id_str="internal_emoji"
+    internal_emoji_id_str="internal_emoji",
 )
 @discord.app_commands.describe(
-    external_emoji_id_str="The emoji from another server or its numeric ID.",
     internal_emoji_id_str="The emoji from this server to map the external emoji to, or its ID.",
+    external_emojis="The emoji/emojis from another server or its ID/their IDs.",
 )
 async def map_emoji(
     interaction: discord.Interaction,
-    external_emoji_id_str: str,
     internal_emoji_id_str: str,
+    external_emojis: str,
 ):
     if not globals.settings.get("emoji_server_id"):
         await interaction.response.send_message(
@@ -652,19 +652,21 @@ async def map_emoji(
         )
         return
 
-    external_emoji_id_str = (
-        external_emoji_id_str.replace("<:", "")
-        .replace("<", "")
-        .replace(">", "")
-        .replace("\\", "")
-    )
-    external_emoji_name: str | None
-    if ":" in external_emoji_id_str:
-        emoji_data = external_emoji_id_str.split(":")
-        external_emoji_id_str = emoji_data[-1]
-        external_emoji_name = emoji_data[-2]
-    else:
-        external_emoji_name = None
+    external_emoji_ids_str = []
+    external_emoji_names = []
+    for external_emoji in external_emojis.split():
+        external_emoji_id_str = (
+            external_emoji.replace("<:", "")
+            .replace("<", "")
+            .replace(">", "")
+            .replace("\\", "")
+        )
+        if ":" in external_emoji_id_str:
+            emoji_data = external_emoji_id_str.split(":")
+            external_emoji_ids_str.append(emoji_data[-1])
+            external_emoji_names.append(emoji_data[-2])
+        else:
+            external_emoji_names.append("")
 
     internal_emoji_id_str = (
         internal_emoji_id_str.replace("<:", "")
@@ -676,7 +678,7 @@ async def map_emoji(
         internal_emoji_id_str = internal_emoji_id_str.split(":")[-1]
 
     try:
-        external_emoji_id = int(external_emoji_id_str)
+        external_emoji_ids = [int(id) for id in external_emoji_ids_str]
         internal_emoji_id = int(internal_emoji_id_str)
     except Exception:
         await interaction.response.send_message(
@@ -693,7 +695,7 @@ async def map_emoji(
         or internal_emoji.guild_id != globals.emoji_server.id
     ):
         await interaction.response.send_message(
-            "❌ The second argument must be an emoji in the bot's registered emoji server.",
+            "❌ The first argument must be an emoji in the bot's registered emoji server.",
             ephemeral=True,
         )
         return
@@ -701,22 +703,37 @@ async def map_emoji(
     await interaction.response.defer(thinking=True, ephemeral=True)
 
     try:
-        if not await map_emoji_helper(
-            external_emoji=external_emoji_id,
-            external_emoji_name=external_emoji_name,
-            internal_emoji=internal_emoji,
-        ):
-            await interaction.followup.send(
-                "❌ There was a problem creating emoji mapping.", ephemeral=True
-            )
-            return
+        map_emojis = await asyncio.gather(
+            *[
+                map_emoji_helper(
+                    external_emoji=id,
+                    external_emoji_name=name,
+                    internal_emoji=internal_emoji,
+                )
+                for id, name in zip(external_emoji_ids, external_emoji_names)
+            ]
+        )
     except Exception:
         await interaction.followup.send(
             "❌ There was a database error trying to map the emoji.", ephemeral=True
         )
         return
 
-    await interaction.followup.send("✅ Emoji map created!", ephemeral=True)
+    if not max(map_emojis):
+        await interaction.followup.send(
+            "❌ There was a problem creating emoji mappings.",
+            ephemeral=True,
+        )
+    elif not min(map_emojis):
+        await interaction.followup.send(
+            "⭕ There was a problem creating some of the emoji mappings.",
+            ephemeral=True,
+        )
+    else:
+        await interaction.followup.send(
+            "✅ All emoji mappings created!",
+            ephemeral=True,
+        )
 
 
 async def create_bridge_and_db(
