@@ -14,9 +14,9 @@ To add this bot to your server, visit [this link](https://discord.com/oauth2/aut
   - It will not mirror thread creation; if you want threads in bridged channels to be mirrored, you need to run the bridge command from within them.
     - Alternatively, you can run the command `/bridge_thread` from within a new thread and it will try to create threads in all channels bridged to the current one following the same bridge rules present in the parent channel.
     - Another option is running the command `/auto_bridge_threads` from a channel; this will cause thread creation in that channel to be mirrored (though you'll need to run that channel on each side of each bridge for mirrors to work in all directions). Running this command again will revert to the default behaviour.
+  - When bridging a reaction emoji, if it doesn't have access to the emoji being bridged, it will attempt to copy that emoji into an emoji server and then react with the copied emoji.
 - You can run the command `/demolish target` to demolish all bridges between the current and target channels/threads.
   - You can run the command `/demolish_all` to demolish all bridges to and from the current channel/thread (and, optionally, its threads or its parent channel's threads).
-- If the bot has a server where it stores emoji which you have access to, you can run the command `/map_emoji :internal_emoji: :external_emoji: [:external_emoji_2: [:external_emoji_3: ...]]` from that server to create an internal equivalence between emoji for the bot to bridge.
 - `/help` will give you a list of commands. `/help command_name` will explain the usage of the specific command passed as argument.
   - You can pass this command in DM to the bot, too.
 <!-- - Right clicking a message and going to Apps > List Reactions will show you a list of all reactions on all sides of the bridge. -->
@@ -50,6 +50,8 @@ It's very straightforward to run your own copy of this bot. You'll need access t
    - You may add other contexts than `"production"`, such as `"testing"`, for other situations.
 5. Edit your `requirements.txt` file to include the appropriate SQL library depending on your SQL dialect, then run `pip install -r requirements.txt` on your command line from the main folder.
 6. Run `main.py`. This will automatically create the necessary tables in your database if they're not already there, and all commands will be working out of the box.
+
+If you set up a server for the bot to store emoji, you can run the command `/map_emoji :internal_emoji: :external_emoji: [:external_emoji_2: [:external_emoji_3: ...]]` from that server to create an internal equivalence between emoji for the bot to bridge.
 
 ### Help, issues, and bugs
 If you have any issues with this bot, feel free to create an issue on the Issue Tracker or DM `redmagnos` on Discord.
