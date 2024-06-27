@@ -13,6 +13,7 @@ from validations import validate_types, HTTPResponseError
 """
 The format of this variable is
 {
+    "context": "production",
     "production": {
         "app_token": "the app token for the Discord bot",
         "db_dialect": "database dialect",
@@ -28,10 +29,11 @@ The format of this variable is
 
 You may add other contexts than "production" in order to have testing environments.
 """
-context = "production"
 settings_root: dict[str, str | int | dict[str, str | int]] = json.load(
     open("settings.json")
 )
+assert isinstance(settings_root["context"], str)
+context = settings_root["context"]
 if settings_root.get(context) and isinstance(settings_root[context], dict):
     settings = cast(dict[str, str | int], settings_root[context])
 else:
