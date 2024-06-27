@@ -50,6 +50,9 @@ emoji_server: discord.Guild | None = None
 # Dictionary mapping external emoji to internal emoji
 emoji_mappings: dict[int, int] = {}
 
+# Type wildcard
+_T = TypeVar("_T", bound=Any)
+
 
 async def mention_to_channel(
     link_or_mention: str,
