@@ -165,10 +165,10 @@ async def on_ready():
         )
 
     # Finally I'll check whether I have a registered emoji server and save it if so
-    emoji_server_id = globals.settings.get("emoji_server_id")
+    emoji_server_id_str = globals.settings.get("emoji_server_id")
     try:
-        if emoji_server_id:
-            emoji_server_id = int(emoji_server_id)
+        if emoji_server_id_str:
+            emoji_server_id = int(emoji_server_id_str)
         else:
             emoji_server_id = None
     except Exception:
@@ -228,8 +228,11 @@ async def on_message(message: discord.Message):
         # Only bridge contentful messages
         return
 
-    if message.webhook_id:
-        # Don't bridge messages from webhooks
+    if message.application_id and (
+        not (whitelisted_apps := globals.settings.get("whitelisted_apps"))
+        or message.application_id not in [int(app_id) for app_id in whitelisted_apps]
+    ):
+        # Don't bridge messages from non-whitelisted applications
         return
 
     if not await globals.wait_until_ready():
