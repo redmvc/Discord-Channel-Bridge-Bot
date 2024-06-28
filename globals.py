@@ -47,6 +47,8 @@ class Settings(TypedDict):
         The database name.
     emoji_server_id : NotRequired[SupportsInt | str]
         The ID of a Discord server for storing custom emoji. The bot must have `Create Expressions` and `Manage Expressions` permissions in the server.
+    whitelisted_apps : NotRequired[list[SupportsInt | str]]
+        A list of IDs of applications whose outputs are bridged.
     """
 
     app_token: str
@@ -58,6 +60,7 @@ class Settings(TypedDict):
     db_pwd: str
     db_name: str
     emoji_server_id: NotRequired[SupportsInt | str]
+    whitelisted_apps: NotRequired[list[SupportsInt | str]]
 
 
 settings_root: dict[str, str | Settings] = json.load(open("settings.json"))
