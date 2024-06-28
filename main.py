@@ -165,10 +165,10 @@ async def on_ready():
         )
 
     # Finally I'll check whether I have a registered emoji server and save it if so
-    emoji_server_id = globals.settings.get("emoji_server_id")
+    emoji_server_id_str = globals.settings.get("emoji_server_id")
     try:
-        if emoji_server_id:
-            emoji_server_id = int(emoji_server_id)
+        if emoji_server_id_str:
+            emoji_server_id = int(emoji_server_id_str)
         else:
             emoji_server_id = None
     except Exception:

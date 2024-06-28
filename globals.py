@@ -3,44 +3,66 @@ from __future__ import annotations
 import asyncio
 import io
 import json
-from typing import Any, Callable, TypeVar, cast
+from typing import Any, Callable, Literal, SupportsInt, TypedDict, TypeVar, cast
 
 import aiohttp
 import discord
+from typing_extensions import NotRequired
 
 from validations import HTTPResponseError, validate_types
 
-"""
-The format of this variable is
-{
-    "context": "production",
-    "production": {
-        "app_token": "the app token for the Discord bot",
-        "db_dialect": "database dialect",
-        "db_driver": "database driver",
-        "db_host": "database host",
-        "db_port": database port,
-        "db_user": "database username",
-        "db_pwd": "database password",
-        "db_name": "database name",
-        "emoji_server_id": "id of the server for storing emoji"
-    }
-}
 
-You may add other contexts than "production" in order to have testing environments.
-"""
-settings_root: dict[str, str | int | dict[str, str | int]] = json.load(
-    open("settings.json")
-)
-context: str | None
-if settings_root.get("context") and isinstance(settings_root["context"], str):
-    context = settings_root["context"]
-else:
-    context = None
-if context and settings_root.get(context) and isinstance(settings_root[context], dict):
-    settings = cast(dict[str, str | int], settings_root[context])
-else:
-    settings = cast(dict[str, str | int], settings_root)
+class Settings(TypedDict):
+    """
+    An Typed Dictionary with the bot's settings. The `settings.json` file must contain a `"context"` entry whose value is another key in the file with the attributes below. For example:
+
+    ```json
+    {
+        "context": "production",
+        "production": {
+            "app_token": "...",
+            "db_dialect": "...",
+            ...
+        }
+    }
+    ```
+
+    Attributes
+    ----------
+    app_token : str
+        The token used by the Discord developers API.
+    db_dialect : Literal['mysql'] | Literal['postgresql'] | Literal['sqlite']
+        The database dialect.
+    db_driver : Literal['pymysql'] | Literal['psycopg2'] | Literal['pysqlite']
+        The database driver.
+    db_host : str
+        The server host.
+    db_port : int
+        The server port.
+    db_user : str
+        The root username.
+    db_pwd : str
+        The root password.
+    db_name : str
+        The database name.
+    emoji_server_id : NotRequired[SupportsInt | str]
+        The ID of a Discord server for storing custom emoji. The bot must have `Create Expressions` and `Manage Expressions` permissions in the server.
+    """
+
+    app_token: str
+    db_dialect: Literal["mysql", "postgresql", "sqlite"]
+    db_driver: Literal["pymysql", "psycopg2", "pysqlite"]
+    db_host: str
+    db_port: int
+    db_user: str
+    db_pwd: str
+    db_name: str
+    emoji_server_id: NotRequired[SupportsInt | str]
+
+
+settings_root: dict[str, str | Settings] = json.load(open("settings.json"))
+context: str = cast(str, settings_root["context"])
+settings: Settings = cast(Settings, settings_root[context])
 
 # Variables for connection to the Discord client
 intents = discord.Intents()
