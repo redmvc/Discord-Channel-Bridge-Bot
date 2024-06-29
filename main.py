@@ -692,25 +692,9 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         reaction_emoji = payload.emoji.name
 
     # Now find the list of channels that can validly be reached via outbound chains from this channel
-    channel_ids_to_check: set[int] = {payload.channel_id}
-    channel_ids_checked: set[int] = set()
-    reachable_channel_ids: set[int] = set()
-    while len(channel_ids_to_check) > 0:
-        channel_id_to_check = channel_ids_to_check.pop()
-        if channel_id_to_check in channel_ids_checked:
-            continue
-
-        channel_ids_checked.add(channel_id_to_check)
-        checking_outbound = bridges.get_outbound_bridges(channel_id_to_check)
-        if not checking_outbound:
-            continue
-
-        newly_reachable_ids = set(checking_outbound.keys())
-        reachable_channel_ids = reachable_channel_ids.union(newly_reachable_ids)
-        channel_ids_to_check = (
-            channel_ids_to_check.union(newly_reachable_ids) - channel_ids_checked
-        )
-    reachable_channel_ids.discard(payload.channel_id)
+    reachable_channel_ids = bridges.get_reachable_channel_ids(
+        payload.channel_id, "outbound"
+    )
 
     # Find and react to all messages matching this one
     session = None

@@ -1300,25 +1300,7 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
     await interaction.response.defer(thinking=True, ephemeral=True)
 
     # Now find the list of channels that can validly reach this one via inbound chains
-    channel_ids_to_check: set[int] = {channel.id}
-    channel_ids_checked: set[int] = set()
-    reachable_channel_ids: set[int] = set()
-    while len(channel_ids_to_check) > 0:
-        channel_id_to_check = channel_ids_to_check.pop()
-        if channel_id_to_check in channel_ids_checked:
-            continue
-
-        channel_ids_checked.add(channel_id_to_check)
-        checking_inbound = bridges.get_inbound_bridges(channel_id_to_check)
-        if not checking_inbound:
-            continue
-
-        newly_reachable_ids = set(checking_inbound.keys())
-        reachable_channel_ids = reachable_channel_ids.union(newly_reachable_ids)
-        channel_ids_to_check = (
-            channel_ids_to_check.union(newly_reachable_ids) - channel_ids_checked
-        )
-    reachable_channel_ids.discard(channel.id)
+    reachable_channel_ids = bridges.get_reachable_channel_ids(channel.id, "inbound")
 
     # This variable is where I'll gather the list of users per reaction
     # The key of each entry is a reaction emoji ID
