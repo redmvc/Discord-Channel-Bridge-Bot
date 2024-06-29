@@ -61,20 +61,23 @@ async def help(interaction: discord.Interaction, command: str | None = None):
         if command == "bridge":
             await interaction.response.send_message(
                 "`/bridge target [direction]`"
-                + "\nCreates a bridge between the current channel/thread and target channel/thread. `target` must be a link to another channel or thread, its ID, or a mention to it."
-                + "\nIf `direction` isn't included, the bridge is two-way; if it's set to `inbound` it will only send messages from the target channel to the current channel; if it's set to `outbound` it will only send messages from the current channel to the target channel.",
+                + "\nCreates a bridge between the current channel/thread and target channel/thread, creating a mirror of a message sent to one channel in the other. `target` must be a link to another channel or thread, its ID, or a mention to it."
+                + "\nIf `direction` isn't included, the bridge is two-way; if it's set to `inbound` it will only send messages from the target channel to the current channel; if it's set to `outbound` it will only send messages from the current channel to the target channel."
+                + "\n\nNote that message mirroring goes down outbound bridge chains: if channel A has an outbound bridge to channel B and channel B has an outbound bridge to channel C, messages sent in channel A will be mirrored in both channels B and C. _However_, this does not automatically create a bridge between A and C: if e.g. the bridge between A and B is demolished, messages from A will no longer be sent to C.",
                 ephemeral=True,
             )
         elif command == "bridge_thread":
             await interaction.response.send_message(
                 "`/bridge_thread`"
-                + "\nWhen this command is called from within a thread that is in a channel that is bridged to other channels, the bot will attempt to create new threads in all such channels and bridge them to the original one. If the original channel is bridged to threads or if you don't have create thread permissions in the other channels, this command may not run to completion.",
+                + "\nWhen this command is called from within a thread that is in a channel that is bridged to other channels, the bot will attempt to create new threads in all such channels and bridge them to the original one. If the original channel is bridged to threads or if you don't have create thread permissions in the other channels, this command may not run to completion."
+                + "\n\nNote that this command will not create bridges down bridge chains—that is, if channel A is bridged to channel B and channel B is bridged to channel C, but A is not bridged to C, executing this command in channel A will not create a thread in channel C.",
                 ephemeral=True,
             )
         elif command == "auto_bridge_threads":
             await interaction.response.send_message(
                 "`/auto_bridge_threads`"
-                + "\nWhen this command is called from within a channel that is bridged to other channels, the bot will enable or disable automatic thread bridging, so that any threads created in this channel will also be created across all bridges involving it. You will need to run this command from within each channel you wish to enable automatic thread creation from.",
+                + "\nWhen this command is called from within a channel that is bridged to other channels, the bot will enable or disable automatic thread bridging, so that any threads created in this channel will also be created across all bridges involving it. You will need to run this command from within each channel you wish to enable automatic thread creation from."
+                + "\n\nNote that this command will not create bridges down bridge chains—that is, if channel A is bridged to channel B and channel B is bridged to channel C, but A is not bridged to C, threads automatically created in channel A will not have a mirror thread in channel C.",
                 ephemeral=True,
             )
         elif command == "demolish":
@@ -899,27 +902,21 @@ async def bridge_thread_helper(
 
     outbound_bridges = bridges.get_outbound_bridges(thread_to_bridge.parent.id)
     inbound_bridges = bridges.get_inbound_bridges(thread_to_bridge.parent.id)
-    if not outbound_bridges and not inbound_bridges:
+    if not outbound_bridges:
         if interaction:
             await interaction.response.send_message(
-                "The parent channel isn't bridged to any other channels.",
+                "The parent channel doesn't have outbound bridges to any other channels.",
                 ephemeral=True,
             )
         return
 
     # I need to check that the current channel is bridged to at least one other channel (as opposed to only threads)
     at_least_one_channel = False
-    for bridge_list in (outbound_bridges, inbound_bridges):
-        if not bridge_list:
-            continue
-
-        for target_id, bridge in bridge_list.items():
-            if target_id == bridge.webhook.channel_id:
-                at_least_one_channel = True
-                break
-
-        if at_least_one_channel:
+    for target_id, bridge in outbound_bridges.items():
+        if target_id == bridge.webhook.channel_id:
+            at_least_one_channel = True
             break
+
     if not at_least_one_channel:
         if interaction:
             await interaction.response.send_message(
@@ -988,90 +985,79 @@ async def bridge_thread_helper(
             except Exception:
                 pass
 
-            for idx in range(2):
-                if idx == 0:
-                    list_of_bridges = outbound_bridges
-                else:
-                    list_of_bridges = inbound_bridges
-                if not list_of_bridges:
+            for channel_id in outbound_bridges.keys():
+                channel = await globals.get_channel_from_id(channel_id)
+                if not isinstance(channel, discord.TextChannel):
+                    # I can't create a thread inside a thread
+                    if channel:
+                        bridged_threads.append(channel.id)
                     continue
 
-                for channel_id in list_of_bridges.keys():
-                    channel = await globals.get_channel_from_id(channel_id)
-                    if not isinstance(channel, discord.TextChannel):
-                        # I can't create a thread inside a thread
-                        if channel:
-                            bridged_threads.append(channel.id)
-                        continue
+                channel_member = await globals.get_channel_member(channel, user_id)
+                if (
+                    not channel_member
+                    or not channel.permissions_for(channel_member).manage_webhooks
+                    or not channel.permissions_for(channel_member).create_public_threads
+                    or not channel.permissions_for(channel.guild.me).manage_webhooks
+                    or not channel.permissions_for(
+                        channel.guild.me
+                    ).create_public_threads
+                ):
+                    # User doesn't have permission to act there
+                    failed_channels.append(channel.id)
+                    continue
 
-                    channel_member = await globals.get_channel_member(channel, user_id)
-                    if (
-                        not channel_member
-                        or not channel.permissions_for(channel_member).manage_webhooks
-                        or not channel.permissions_for(
-                            channel_member
-                        ).create_public_threads
-                        or not channel.permissions_for(channel.guild.me).manage_webhooks
-                        or not channel.permissions_for(
-                            channel.guild.me
-                        ).create_public_threads
-                    ):
-                        # User doesn't have permission to act there
-                        failed_channels.append(channel.id)
-                        continue
+                new_thread = threads_created.get(channel_id)
+                thread_already_existed = new_thread is not None
+                if not new_thread and matching_starting_messages.get(channel_id):
+                    # I found a matching starting message, so I'll try to create the thread starting there
+                    matching_starting_message = await channel.fetch_message(
+                        matching_starting_messages[channel_id]
+                    )
 
-                    new_thread = threads_created.get(channel_id)
-                    thread_already_existed = new_thread is not None
-                    if not new_thread and matching_starting_messages.get(channel_id):
-                        # I found a matching starting message, so I'll try to create the thread starting there
-                        matching_starting_message = await channel.fetch_message(
-                            matching_starting_messages[channel_id]
-                        )
-
-                        if not matching_starting_message.thread:
-                            # That message doesn't already have a thread, so I can create it
-                            new_thread = await matching_starting_message.create_thread(
-                                name=thread_to_bridge.name,
-                                reason=f"Bridged from {thread_to_bridge.guild.name}#{thread_to_bridge.parent.name}#{thread_to_bridge.name}",
-                            )
-
-                    if not new_thread:
-                        # Haven't created a thread yet, try to create it from the channel
-                        new_thread = await channel.create_thread(
+                    if not matching_starting_message.thread:
+                        # That message doesn't already have a thread, so I can create it
+                        new_thread = await matching_starting_message.create_thread(
                             name=thread_to_bridge.name,
                             reason=f"Bridged from {thread_to_bridge.guild.name}#{thread_to_bridge.parent.name}#{thread_to_bridge.name}",
-                            type=discord.ChannelType.public_thread,
                         )
 
-                    if not new_thread:
-                        # Failed to create a thread somehow
-                        failed_channels.append(channel.id)
-                        continue
+                if not new_thread:
+                    # Haven't created a thread yet, try to create it from the channel
+                    new_thread = await channel.create_thread(
+                        name=thread_to_bridge.name,
+                        reason=f"Bridged from {thread_to_bridge.guild.name}#{thread_to_bridge.parent.name}#{thread_to_bridge.name}",
+                        type=discord.ChannelType.public_thread,
+                    )
 
-                    if not thread_already_existed:
+                if not new_thread:
+                    # Failed to create a thread somehow
+                    failed_channels.append(channel.id)
+                    continue
+
+                if not thread_already_existed:
+                    try:
+                        add_user_to_threads.append(new_thread.join())
+                    except Exception:
+                        pass
+
+                    if channel_member:
                         try:
-                            add_user_to_threads.append(new_thread.join())
+                            add_user_to_threads.append(
+                                new_thread.add_user(channel_member)
+                            )
                         except Exception:
                             pass
 
-                        if channel_member:
-                            try:
-                                add_user_to_threads.append(
-                                    new_thread.add_user(channel_member)
-                                )
-                            except Exception:
-                                pass
-
-                    threads_created[channel_id] = new_thread
-                    if idx == 0:
-                        create_bridges.append(
-                            create_bridge_and_db(thread_to_bridge, new_thread, session)
-                        )
-                    else:
-                        create_bridges.append(
-                            create_bridge_and_db(new_thread, thread_to_bridge, session)
-                        )
-                    succeeded_at_least_once = True
+                threads_created[channel_id] = new_thread
+                create_bridges.append(
+                    create_bridge_and_db(thread_to_bridge, new_thread, session)
+                )
+                if inbound_bridges and inbound_bridges[channel_id]:
+                    create_bridges.append(
+                        create_bridge_and_db(new_thread, thread_to_bridge, session)
+                    )
+                succeeded_at_least_once = True
             await asyncio.gather(*(create_bridges + add_user_to_threads))
 
             session.commit()
@@ -1300,25 +1286,7 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
     await interaction.response.defer(thinking=True, ephemeral=True)
 
     # Now find the list of channels that can validly reach this one via inbound chains
-    channel_ids_to_check: set[int] = {channel.id}
-    channel_ids_checked: set[int] = set()
-    reachable_channel_ids: set[int] = set()
-    while len(channel_ids_to_check) > 0:
-        channel_id_to_check = channel_ids_to_check.pop()
-        if channel_id_to_check in channel_ids_checked:
-            continue
-
-        channel_ids_checked.add(channel_id_to_check)
-        checking_inbound = bridges.get_inbound_bridges(channel_id_to_check)
-        if not checking_inbound:
-            continue
-
-        newly_reachable_ids = set(checking_inbound.keys())
-        reachable_channel_ids = reachable_channel_ids.union(newly_reachable_ids)
-        channel_ids_to_check = (
-            channel_ids_to_check.union(newly_reachable_ids) - channel_ids_checked
-        )
-    reachable_channel_ids.discard(channel.id)
+    reachable_channel_ids = bridges.get_reachable_channels(channel.id, "inbound")
 
     # This variable is where I'll gather the list of users per reaction
     # The key of each entry is a reaction emoji ID
