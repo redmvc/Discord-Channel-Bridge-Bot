@@ -259,6 +259,13 @@ async def bridge_message_helper(message: discord.Message):
     if not outbound_bridges:
         return
 
+    # Get all channels reachable from this one via an unbroken sequence of outbound bridges as well as their webhooks
+    reachable_channels = bridges.get_reachable_channels(
+        message.channel.id,
+        "outbound",
+        include_webhooks=True,
+    )
+
     session = None
     try:
         with SQLSession(engine) as session:
@@ -318,8 +325,7 @@ async def bridge_message_helper(message: discord.Message):
 
             # Send a message out to each target webhook
             async_bridged_messages = []
-            for target_id, bridge in outbound_bridges.items():
-                webhook = bridge.webhook
+            for target_id, webhook in reachable_channels.items():
                 if not webhook:
                     continue
 
@@ -327,7 +333,8 @@ async def bridge_message_helper(message: discord.Message):
                 if not isinstance(webhook_channel, discord.TextChannel):
                     continue
 
-                target_channel = await bridge.target_channel
+                target_channel = await globals.get_channel_from_id(target_id)
+                assert isinstance(target_channel, discord.TextChannel | discord.Thread)
 
                 thread_splat: ThreadSplat = {}
                 if target_id != webhook_channel.id:
@@ -692,7 +699,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         reaction_emoji = payload.emoji.name
 
     # Now find the list of channels that can validly be reached via outbound chains from this channel
-    reachable_channel_ids = bridges.get_reachable_channel_ids(
+    reachable_channel_ids = bridges.get_reachable_channels(
         payload.channel_id, "outbound"
     )
 

@@ -1300,7 +1300,7 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
     await interaction.response.defer(thinking=True, ephemeral=True)
 
     # Now find the list of channels that can validly reach this one via inbound chains
-    reachable_channel_ids = bridges.get_reachable_channel_ids(channel.id, "inbound")
+    reachable_channel_ids = bridges.get_reachable_channels(channel.id, "inbound")
 
     # This variable is where I'll gather the list of users per reaction
     # The key of each entry is a reaction emoji ID
