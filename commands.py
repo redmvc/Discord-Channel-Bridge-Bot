@@ -61,20 +61,23 @@ async def help(interaction: discord.Interaction, command: str | None = None):
         if command == "bridge":
             await interaction.response.send_message(
                 "`/bridge target [direction]`"
-                + "\nCreates a bridge between the current channel/thread and target channel/thread. `target` must be a link to another channel or thread, its ID, or a mention to it."
-                + "\nIf `direction` isn't included, the bridge is two-way; if it's set to `inbound` it will only send messages from the target channel to the current channel; if it's set to `outbound` it will only send messages from the current channel to the target channel.",
+                + "\nCreates a bridge between the current channel/thread and target channel/thread, creating a mirror of a message sent to one channel in the other. `target` must be a link to another channel or thread, its ID, or a mention to it."
+                + "\nIf `direction` isn't included, the bridge is two-way; if it's set to `inbound` it will only send messages from the target channel to the current channel; if it's set to `outbound` it will only send messages from the current channel to the target channel."
+                + "\n\nNote that message mirroring goes down outbound bridge chains: if channel A has an outbound bridge to channel B and channel B has an outbound bridge to channel C, messages sent in channel A will be mirrored in both channels B and C. _However_, this does not automatically create a bridge between A and C: if e.g. the bridge between A and B is demolished, messages from A will no longer be sent to C.",
                 ephemeral=True,
             )
         elif command == "bridge_thread":
             await interaction.response.send_message(
                 "`/bridge_thread`"
-                + "\nWhen this command is called from within a thread that is in a channel that is bridged to other channels, the bot will attempt to create new threads in all such channels and bridge them to the original one. If the original channel is bridged to threads or if you don't have create thread permissions in the other channels, this command may not run to completion.",
+                + "\nWhen this command is called from within a thread that is in a channel that is bridged to other channels, the bot will attempt to create new threads in all such channels and bridge them to the original one. If the original channel is bridged to threads or if you don't have create thread permissions in the other channels, this command may not run to completion."
+                + "\n\nNote that this command will not create bridges down bridge chains—that is, if channel A is bridged to channel B and channel B is bridged to channel C, but A is not bridged to C, executing this command in channel A will not create a thread in channel C.",
                 ephemeral=True,
             )
         elif command == "auto_bridge_threads":
             await interaction.response.send_message(
                 "`/auto_bridge_threads`"
-                + "\nWhen this command is called from within a channel that is bridged to other channels, the bot will enable or disable automatic thread bridging, so that any threads created in this channel will also be created across all bridges involving it. You will need to run this command from within each channel you wish to enable automatic thread creation from.",
+                + "\nWhen this command is called from within a channel that is bridged to other channels, the bot will enable or disable automatic thread bridging, so that any threads created in this channel will also be created across all bridges involving it. You will need to run this command from within each channel you wish to enable automatic thread creation from."
+                + "\n\nNote that this command will not create bridges down bridge chains—that is, if channel A is bridged to channel B and channel B is bridged to channel C, but A is not bridged to C, threads automatically created in channel A will not have a mirror thread in channel C.",
                 ephemeral=True,
             )
         elif command == "demolish":
