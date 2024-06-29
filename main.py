@@ -610,9 +610,15 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
     if not await globals.wait_until_ready():
         return
 
-    outbound_bridges = bridges.get_outbound_bridges(payload.channel_id)
-    if not outbound_bridges:
+    if not bridges.get_outbound_bridges(payload.channel_id):
         return
+
+    # Get all channels reachable from this one via an unbroken sequence of outbound bridges as well as their webhooks
+    reachable_channels = bridges.get_reachable_channels(
+        payload.channel_id,
+        "outbound",
+        include_webhooks=True,
+    )
 
     # Find all messages matching this one
     session = None
@@ -632,8 +638,7 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
             )
             for message_row in bridged_messages:
                 target_channel_id = int(message_row.target_channel)
-                bridge = outbound_bridges.get(target_channel_id)
-                if not bridge:
+                if target_channel_id not in reachable_channels:
                     continue
 
                 bridged_channel = await globals.get_channel_from_id(target_channel_id)
@@ -649,11 +654,37 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
                     thread_splat = {"thread": bridged_channel}
 
                 try:
-                    async_message_deletes.append(
-                        bridge.webhook.delete_message(
+
+                    async def delete_message(
+                        message_row: DBMessageMap,
+                        target_channel_id: int,
+                        thread_splat: ThreadSplat,
+                    ):
+                        if not message_row.webhook:
+                            return
+
+                        # The webhook returned by the call to get_reachable_channels() may not be the same as the one used to post the message
+                        message_webhook_id = int(message_row.webhook)
+                        if (
+                            message_webhook_id
+                            == reachable_channels[target_channel_id].id
+                        ):
+                            webhook = reachable_channels[target_channel_id]
+                        else:
+                            try:
+                                webhook = await globals.client.fetch_webhook(
+                                    message_webhook_id
+                                )
+                            except Exception:
+                                return
+
+                        await webhook.delete_message(
                             int(message_row.target_message),
                             **thread_splat,
                         )
+
+                    async_message_deletes.append(
+                        delete_message(message_row, target_channel_id, thread_splat)
                     )
                 except discord.HTTPException as e:
                     warn(
