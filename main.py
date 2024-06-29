@@ -463,6 +463,7 @@ async def bridge_message_helper(message: discord.Message):
                             source_channel=source_channel_id_str,
                             target_message=message.id,
                             target_channel=message.channel.id,
+                            webhook=message.webhook_id,
                         )
                         for message in bridged_messages
                     ]
