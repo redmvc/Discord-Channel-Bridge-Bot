@@ -106,6 +106,27 @@ class DBEmojiMap(DBBase):
     internal_emoji: Mapped[str] = mapped_column(String(32), nullable=False)
 
 
+class DBAppWhitelist(DBBase):
+    """
+    An SQLAlchemy ORM class representing a database table storing IDs for applications/bots that are whitelisted for bridging messages in a given channel.
+
+    #### Columns
+    - `channel (VARCHAR(32))`: The ID of a source channel.
+    - `application (VARCHAR(32))`: The ID of the application whose messages should be allowed through from that channel.
+
+    #### Constraints
+    - `unique_channel_app (UNIQUE(channel, application))`: A combination of channel and application IDs has to be unique.
+    """
+
+    __tablename__ = "app_whitelist"
+    __table_args__ = (
+        UniqueConstraint("channel", "application", name="unique_channel_app"),
+    )
+
+    channel: Mapped[str] = mapped_column(String(32), nullable=False)
+    application: Mapped[str] = mapped_column(String(32), nullable=False)
+
+
 async def sql_upsert(
     table: _DMLTableArgument,
     insert_values: dict[str, Any],
