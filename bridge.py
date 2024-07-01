@@ -1,4 +1,4 @@
-from typing import cast
+from typing import Callable, Literal, cast, overload
 
 import discord
 
@@ -364,6 +364,112 @@ class Bridges:
         validate_types({"target": (target, (discord.TextChannel, discord.Thread, int))})
 
         return self._inbound_bridges.get(globals.get_id_from_channel(target))
+
+    @overload
+    def get_reachable_channels(
+        self,
+        starting_channel: discord.TextChannel | discord.Thread | int,
+        direction: Literal["outbound", "inbound"],
+        *,
+        include_webhooks: Literal[True],
+        include_starting: bool = False,
+    ) -> dict[int, discord.Webhook]:
+        ...
+
+    @overload
+    def get_reachable_channels(
+        self,
+        starting_channel: discord.TextChannel | discord.Thread | int,
+        direction: Literal["outbound", "inbound"],
+        *,
+        include_webhooks: Literal[False] | None = None,
+        include_starting: bool = False,
+    ) -> set[int]:
+        ...
+
+    def get_reachable_channels(
+        self,
+        starting_channel: discord.TextChannel | discord.Thread | int,
+        direction: Literal["outbound", "inbound"],
+        *,
+        include_webhooks: bool | None = False,
+        include_starting: bool = False,
+    ) -> set[int] | dict[int, discord.Webhook]:
+        """If `include_webhooks` is `False` (default), return a set with all channel IDs reachable from a given source channel down an unbroken series of outbound or inbound bridges; if it's `True`, return a dictionary with those channels as keys and one webhook attached to each of those channels as values.
+
+        #### Args:
+            - `starting_channel`: The channel other channels must be reachable from.
+            - `direction`: Whether to go down outbound or inbound bridges.
+            - `include_webhooks`: Whether to include a list of webhooks attached to the reachable channels in the output. Will only include one webhook per channel. Defaults to False.
+            - `include_starting`: Whether to include the starting channel ID in the list. Defaults to False.
+
+        #### Raises:
+            - `ValueError`: The `direction` variable has a value other than `"outbound"` and `"inbound"`.
+        """
+        types_to_validate: dict[str, tuple] = {
+            "starting_channel": (
+                starting_channel,
+                (discord.TextChannel, discord.Thread, int),
+            ),
+            "direction": (direction, str),
+            "include_starting": (include_starting, bool),
+        }
+        if include_webhooks is not None:
+            types_to_validate["include_webhooks"] = (include_webhooks, bool)
+        validate_types(types_to_validate)
+
+        if direction not in {"outbound", "inbound"}:
+            raise ValueError(
+                'direction argument to get_reachable_channels() must be either "outbound" or "inbound".'
+            )
+
+        get_bridges: Callable[
+            [discord.TextChannel | discord.Thread | int], dict[int, Bridge] | None
+        ]
+        if direction == "outbound":
+            get_bridges = self.get_outbound_bridges
+        else:
+            get_bridges = self.get_inbound_bridges
+
+        starting_channel_id = globals.get_id_from_channel(starting_channel)
+        channel_ids_to_check: set[int] = {starting_channel_id}
+        channel_ids_checked: set[int] = set()
+
+        reachable_channel_ids: set[int] | dict[int, discord.Webhook]
+        if include_webhooks:
+            reachable_channel_ids = {}
+        else:
+            reachable_channel_ids = set()
+
+        while len(channel_ids_to_check) > 0:
+            channel_id_to_check = channel_ids_to_check.pop()
+            if channel_id_to_check in channel_ids_checked:
+                continue
+
+            channel_ids_checked.add(channel_id_to_check)
+            bridges_to_check = get_bridges(channel_id_to_check)
+            if not bridges_to_check:
+                continue
+
+            newly_reachable_ids = set(bridges_to_check.keys())
+            if isinstance(reachable_channel_ids, dict):
+                reachable_channel_ids = {
+                    channel_id: bridge.webhook
+                    for channel_id, bridge in bridges_to_check.items()
+                } | reachable_channel_ids
+            else:
+                reachable_channel_ids = reachable_channel_ids.union(newly_reachable_ids)
+            channel_ids_to_check = (
+                channel_ids_to_check.union(newly_reachable_ids) - channel_ids_checked
+            )
+
+        if not include_starting:
+            if isinstance(reachable_channel_ids, dict):
+                reachable_channel_ids.pop(starting_channel_id, None)
+            else:
+                reachable_channel_ids.discard(starting_channel_id)
+
+        return reachable_channel_ids
 
 
 bridges = Bridges()

@@ -229,10 +229,11 @@ async def on_message(message: discord.Message):
         return
 
     if message.application_id and (
-        not (whitelisted_apps := globals.settings.get("whitelisted_apps"))
+        message.application_id == globals.client.application_id
+        or not (whitelisted_apps := globals.settings.get("whitelisted_apps"))
         or message.application_id not in [int(app_id) for app_id in whitelisted_apps]
     ):
-        # Don't bridge messages from non-whitelisted applications
+        # Don't bridge messages from non-whitelisted applications or from self
         return
 
     if not await globals.wait_until_ready():
@@ -258,6 +259,13 @@ async def bridge_message_helper(message: discord.Message):
     outbound_bridges = bridges.get_outbound_bridges(message.channel.id)
     if not outbound_bridges:
         return
+
+    # Get all channels reachable from this one via an unbroken sequence of outbound bridges as well as their webhooks
+    reachable_channels = bridges.get_reachable_channels(
+        message.channel.id,
+        "outbound",
+        include_webhooks=True,
+    )
 
     session = None
     try:
@@ -318,8 +326,7 @@ async def bridge_message_helper(message: discord.Message):
 
             # Send a message out to each target webhook
             async_bridged_messages = []
-            for target_id, bridge in outbound_bridges.items():
-                webhook = bridge.webhook
+            for target_id, webhook in reachable_channels.items():
                 if not webhook:
                     continue
 
@@ -327,7 +334,8 @@ async def bridge_message_helper(message: discord.Message):
                 if not isinstance(webhook_channel, discord.TextChannel):
                     continue
 
-                target_channel = await bridge.target_channel
+                target_channel = await globals.get_channel_from_id(target_id)
+                assert isinstance(target_channel, discord.TextChannel | discord.Thread)
 
                 thread_splat: ThreadSplat = {}
                 if target_id != webhook_channel.id:
@@ -456,6 +464,7 @@ async def bridge_message_helper(message: discord.Message):
                             source_channel=source_channel_id_str,
                             target_message=message.id,
                             target_channel=message.channel.id,
+                            webhook=message.webhook_id,
                         )
                         for message in bridged_messages
                     ]
@@ -493,9 +502,15 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
     if not await globals.wait_until_ready():
         return
 
-    outbound_bridges = bridges.get_outbound_bridges(payload.channel_id)
-    if not outbound_bridges:
+    if not bridges.get_outbound_bridges(payload.channel_id):
         return
+
+    # Get all channels reachable from this one via an unbroken sequence of outbound bridges as well as their webhooks
+    reachable_channels = bridges.get_reachable_channels(
+        payload.channel_id,
+        "outbound",
+        include_webhooks=True,
+    )
 
     # Find all messages matching this one
     try:
@@ -515,8 +530,7 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
 
             for message_row in bridged_messages:
                 target_channel_id = int(message_row.target_channel)
-                bridge = outbound_bridges.get(target_channel_id)
-                if not bridge:
+                if target_channel_id not in reachable_channels:
                     continue
 
                 bridged_channel = await globals.get_channel_from_id(target_channel_id)
@@ -532,11 +546,41 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
                     thread_splat = {"thread": bridged_channel}
 
                 try:
-                    async_message_edits.append(
-                        bridge.webhook.edit_message(
+
+                    async def edit_message(
+                        message_row: DBMessageMap,
+                        target_channel_id: int,
+                        thread_splat: ThreadSplat,
+                    ):
+                        if not message_row.webhook:
+                            return
+
+                        # The webhook returned by the call to get_reachable_channels() may not be the same as the one used to post the message
+                        message_webhook_id = int(message_row.webhook)
+                        if (
+                            message_webhook_id
+                            == reachable_channels[target_channel_id].id
+                        ):
+                            webhook = reachable_channels[target_channel_id]
+                        else:
+                            try:
+                                webhook = await globals.client.fetch_webhook(
+                                    message_webhook_id
+                                )
+                            except Exception:
+                                return
+
+                        await webhook.edit_message(
                             message_id=int(message_row.target_message),
                             content=updated_message_content,
                             **thread_splat,
+                        )
+
+                    async_message_edits.append(
+                        edit_message(
+                            message_row,
+                            target_channel_id,
+                            thread_splat,
                         )
                     )
                 except discord.HTTPException as e:
@@ -567,9 +611,15 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
     if not await globals.wait_until_ready():
         return
 
-    outbound_bridges = bridges.get_outbound_bridges(payload.channel_id)
-    if not outbound_bridges:
+    if not bridges.get_outbound_bridges(payload.channel_id):
         return
+
+    # Get all channels reachable from this one via an unbroken sequence of outbound bridges as well as their webhooks
+    reachable_channels = bridges.get_reachable_channels(
+        payload.channel_id,
+        "outbound",
+        include_webhooks=True,
+    )
 
     # Find all messages matching this one
     session = None
@@ -589,8 +639,7 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
             )
             for message_row in bridged_messages:
                 target_channel_id = int(message_row.target_channel)
-                bridge = outbound_bridges.get(target_channel_id)
-                if not bridge:
+                if target_channel_id not in reachable_channels:
                     continue
 
                 bridged_channel = await globals.get_channel_from_id(target_channel_id)
@@ -606,11 +655,37 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
                     thread_splat = {"thread": bridged_channel}
 
                 try:
-                    async_message_deletes.append(
-                        bridge.webhook.delete_message(
+
+                    async def delete_message(
+                        message_row: DBMessageMap,
+                        target_channel_id: int,
+                        thread_splat: ThreadSplat,
+                    ):
+                        if not message_row.webhook:
+                            return
+
+                        # The webhook returned by the call to get_reachable_channels() may not be the same as the one used to post the message
+                        message_webhook_id = int(message_row.webhook)
+                        if (
+                            message_webhook_id
+                            == reachable_channels[target_channel_id].id
+                        ):
+                            webhook = reachable_channels[target_channel_id]
+                        else:
+                            try:
+                                webhook = await globals.client.fetch_webhook(
+                                    message_webhook_id
+                                )
+                            except Exception:
+                                return
+
+                        await webhook.delete_message(
                             int(message_row.target_message),
                             **thread_splat,
                         )
+
+                    async_message_deletes.append(
+                        delete_message(message_row, target_channel_id, thread_splat)
                     )
                 except discord.HTTPException as e:
                     warn(
@@ -658,8 +733,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         # Don't bridge my own reaction
         return
 
-    outbound_bridges = bridges.get_outbound_bridges(payload.channel_id)
-    if not outbound_bridges:
+    if not bridges.get_outbound_bridges(payload.channel_id):
         # Only bridge reactions across outbound bridges
         return
 
@@ -692,25 +766,9 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         reaction_emoji = payload.emoji.name
 
     # Now find the list of channels that can validly be reached via outbound chains from this channel
-    channel_ids_to_check: set[int] = {payload.channel_id}
-    channel_ids_checked: set[int] = set()
-    reachable_channel_ids: set[int] = set()
-    while len(channel_ids_to_check) > 0:
-        channel_id_to_check = channel_ids_to_check.pop()
-        if channel_id_to_check in channel_ids_checked:
-            continue
-
-        channel_ids_checked.add(channel_id_to_check)
-        checking_outbound = bridges.get_outbound_bridges(channel_id_to_check)
-        if not checking_outbound:
-            continue
-
-        newly_reachable_ids = set(checking_outbound.keys())
-        reachable_channel_ids = reachable_channel_ids.union(newly_reachable_ids)
-        channel_ids_to_check = (
-            channel_ids_to_check.union(newly_reachable_ids) - channel_ids_checked
-        )
-    reachable_channel_ids.discard(payload.channel_id)
+    reachable_channel_ids = bridges.get_reachable_channels(
+        payload.channel_id, "outbound"
+    )
 
     # Find and react to all messages matching this one
     session = None
@@ -768,8 +826,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                 source_message_id = payload.message_id
                 source_channel_id = payload.channel_id
 
-            outbound_bridges = bridges.get_outbound_bridges(source_channel_id)
-            if not outbound_bridges:
+            if not bridges.get_outbound_bridges(source_channel_id):
                 if len(async_add_reactions) > 0:
                     await async_add_reactions[0]
                 return
