@@ -17,6 +17,7 @@ import commands
 import globals
 from bridge import bridges
 from database import (
+    DBAppWhitelist,
     DBAutoBridgeThreadChannels,
     DBBridge,
     DBEmojiMap,
@@ -123,7 +124,7 @@ async def on_ready():
             )
             session.execute(delete_invalid_webhooks)
 
-        # Next I try to identify mapped emoji
+        # Try to identify mapped emoji
         select_mapped_emoji: SQLSelect = SQLSelect(DBEmojiMap)
         mapped_emoji_query_result: ScalarResult[DBEmojiMap] = session.scalars(
             select_mapped_emoji
@@ -148,9 +149,48 @@ async def on_ready():
             )
             session.execute(delete_missing_internal_emoji)
 
+        # Try to find all apps whitelisted per channel
+        select_whitelisted_apps: SQLSelect = SQLSelect(DBAppWhitelist)
+        whitelisted_apps_query_result: ScalarResult[DBAppWhitelist] = session.scalars(
+            select_whitelisted_apps
+        )
+        accessible_channels = set()
+        inaccessible_channels = set()
+        for whitelisted_app in whitelisted_apps_query_result:
+            channel_id = int(whitelisted_app.channel)
+            if channel_id in inaccessible_channels:
+                continue
+
+            if channel_id not in accessible_channels:
+                channel = globals.client.get_channel(channel_id)
+                if not channel:
+                    try:
+                        channel = await globals.client.fetch_channel(channel_id)
+                    except Exception:
+                        channel = None
+
+                if channel:
+                    accessible_channels.add(channel_id)
+                else:
+                    inaccessible_channels.add(channel_id)
+                    continue
+
+            if not globals.per_channel_whitelist.get(channel_id):
+                globals.per_channel_whitelist[channel_id] = []
+
+            globals.per_channel_whitelist[channel_id].append(
+                int(whitelisted_app.application)
+            )
+
+        if len(inaccessible_channels) > 0:
+            delete_inaccessible_channels = SQLDelete(DBAppWhitelist).where(
+                DBAppWhitelist.channel.in_(list(inaccessible_channels))
+            )
+            session.execute(delete_inaccessible_channels)
+
         session.commit()
 
-        # And next I identify all automatically-thread-bridging channels
+        # Identify all automatically-thread-bridging channels
         select_auto_bridge_thread_channels: SQLSelect = SQLSelect(
             DBAutoBridgeThreadChannels
         )

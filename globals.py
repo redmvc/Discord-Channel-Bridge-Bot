@@ -92,6 +92,9 @@ emoji_server: discord.Guild | None = None
 # Dictionary mapping external emoji to internal emoji
 emoji_mappings: dict[int, int] = {}
 
+# Dictionary listing all apps whitelisted per channel
+per_channel_whitelist: dict[int, list[int]] = {}
+
 # Type wildcard
 _T = TypeVar("_T", bound=Any)
 
