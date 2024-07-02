@@ -189,6 +189,7 @@ async def sql_upsert(
             return upsert
         except SQLError as e:
             if session:
+                session.rollback()
                 session.close()
             raise e
 

@@ -474,6 +474,7 @@ async def bridge_message_helper(message: discord.Message):
             session.commit()
     except SQLError as e:
         if session:
+            session.rollback()
             session.close()
 
         warn("Ran into an SQL error while trying to bridge a message:\n" + str(e))
@@ -709,6 +710,7 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
             session.commit()
     except SQLError as e:
         if session:
+            session.rollback()
             session.close()
 
         warn("Ran into an SQL error while trying to delete a message:\n" + str(e))
@@ -867,6 +869,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                     )
     except SQLError as e:
         if session:
+            session.rollback()
             session.close()
 
         warn(
