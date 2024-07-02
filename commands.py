@@ -205,6 +205,7 @@ async def bridge(
             ephemeral=True,
         )
         if session:
+            session.rollback()
             session.close()
         return
 
@@ -353,6 +354,7 @@ async def auto_bridge_threads(
             ephemeral=True,
         )
         if session:
+            session.rollback()
             session.close()
         return
 
@@ -466,6 +468,7 @@ async def demolish(interaction: discord.Interaction, target: str):
             ephemeral=True,
         )
         if session:
+            session.rollback()
             session.close()
         return
 
@@ -631,6 +634,7 @@ async def demolish_all(
             ephemeral=True,
         )
         if session:
+            session.rollback()
             session.close()
         return
 
@@ -810,11 +814,13 @@ async def create_bridge_and_db(
         await sql_retry(execute_query)
     except SQLError as e:
         if session:
+            session.rollback()
             session.close()
 
         raise e
     except Exception as e:
         if session:
+            session.rollback()
             session.close()
         if bridge:
             await bridges.demolish_bridge(source, target)
@@ -1087,6 +1093,7 @@ async def bridge_thread_helper(
                 ephemeral=True,
             )
         if session:
+            session.rollback()
             session.close()
         return
 
@@ -1278,6 +1285,7 @@ async def map_emoji_helper(
         await sql_retry(lambda: session.execute(upsert_emoji))
     except SQLError as e:
         if session:
+            session.rollback()
             session.close()
 
         raise e
