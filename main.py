@@ -176,9 +176,9 @@ async def on_ready():
                     continue
 
             if not globals.per_channel_whitelist.get(channel_id):
-                globals.per_channel_whitelist[channel_id] = []
+                globals.per_channel_whitelist[channel_id] = set()
 
-            globals.per_channel_whitelist[channel_id].append(
+            globals.per_channel_whitelist[channel_id].add(
                 int(whitelisted_app.application)
             )
 

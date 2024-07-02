@@ -93,7 +93,7 @@ emoji_server: discord.Guild | None = None
 emoji_mappings: dict[int, int] = {}
 
 # Dictionary listing all apps whitelisted per channel
-per_channel_whitelist: dict[int, list[int]] = {}
+per_channel_whitelist: dict[int, set[int]] = {}
 
 # Type wildcard
 _T = TypeVar("_T", bound=Any)
