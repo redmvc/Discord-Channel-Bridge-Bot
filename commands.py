@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session as SQLSession
 import globals
 from bridge import Bridge, bridges
 from database import (
+    DBAppWhitelist,
     DBAutoBridgeThreadChannels,
     DBBridge,
     DBEmojiMap,
@@ -54,7 +55,7 @@ async def help(interaction: discord.Interaction, command: str | None = None):
             + "\n- whenever someone adds a reaction to one message the bot will add the same reaction (if it can) to all of its mirrors;"
             + "\n- and deleting the original message will delete its copies (but not vice-versa)."
             + "\nThreads created in a channel do not automatically get matched to other channels bridged to it; create and bridge them manually or use the `/bridge_thread` or `/auto_bridge_threads` command."
-            + f"\n\nList of commands: `/bridge`, `/bridge_thread`, `/auto_bridge_threads`, `/demolish`, `/demolish_all`{map_emoji_mention}, `/help`.\nType `/help command` for detailed explanation of a command.",
+            + f"\n\nList of commands: `/bridge`, `/bridge_thread`, `/auto_bridge_threads`, `/demolish`, `/demolish_all`, `/whitelist`{map_emoji_mention}, `/help`.\nType `/help command` for detailed explanation of a command.",
             ephemeral=True,
         )
     else:
@@ -94,6 +95,13 @@ async def help(interaction: discord.Interaction, command: str | None = None):
                 + "\nDestroys any existing bridges involving the current channel or thread, making messages from it no longer be mirrored to other channels and making other channels' messages no longer be mirrored to it."
                 + "\n\nIf you don't include `channel_and_threads` or set it to `False`, this will _only_ demolish bridges involving the _current specific channel/thread_. If instead you set `channel_and_threads` to `True`, this will demolish _all_ bridges involving the current channel/thread, its parent channel if it's a thread, and all of its or its parent channel's threads."
                 + "\n\nNote that even if you recreate any of the bridges, the messages previously bridged will no longer be connected and so they will not share future reactions, edits, or deletions.",
+                ephemeral=True,
+            )
+        elif command == "whitelist":
+            await interaction.response.send_message(
+                "`/whitelist @bot [@bot_2 [@bot_3 ...]]`"
+                + "\nAllows or disallows bridging messages sent by one or more bots to the current channel. Only works through outbound bridges: you can whitelist a bot so that messages sent by it in the current channel are bridged to other channels, but that will not make messages by that bot be bridged to the current channel if the bot is not whitelisted in the source channel."
+                + "\n\nNote that this command is a toggle, so running it again will remove a bot from the blacklist. It also goes on a per-bot basis, so if you run `/whitelist @bot` then `/whitelist @bot @bot_2` then `@bot` will not be whitelisted but `@bot_2` will.",
                 ephemeral=True,
             )
         elif command == "map_emoji" and interaction_from_emoji_server:
@@ -691,6 +699,157 @@ async def demolish_all(
         )
 
 
+@discord.app_commands.default_permissions(manage_webhooks=True)
+@discord.app_commands.guild_only()
+@globals.command_tree.command(
+    name="whitelist",
+    description="Add or remove bots or applications to or from a whitelist for the current channel.",
+)
+@discord.app_commands.describe(
+    apps="Mentions or IDs of the app or apps to add to or remove from the whitelist."
+)
+async def whitelist(interaction: discord.Interaction, apps: str):
+    channel = interaction.channel
+    if not channel or not isinstance(channel, (discord.TextChannel, discord.Thread)):
+        await interaction.response.send_message(
+            "❌ Please run this command from a Text Channel or Thread.",
+            ephemeral=True,
+        )
+        return
+
+    if not channel.permissions_for(channel.guild.me).manage_webhooks:
+        await interaction.response.send_message(
+            "❌ I don't have Manage Webhooks permissions in this channel.",
+            ephemeral=True,
+        )
+        return
+
+    try:
+        apps_to_toggle = set(
+            [
+                int(app_id)
+                for app_id in apps.replace("<", "")
+                .replace("@", "")
+                .replace(">", "")
+                .split()
+            ]
+        )
+    except ValueError:
+        await interaction.response.send_message("❌ App IDs not valid.", ephemeral=True)
+        return
+
+    channel_whitelist = globals.per_channel_whitelist.get(channel.id)
+    if not channel_whitelist:
+        channel_whitelist = cast(set[int], set())
+
+    outbound_bridges = bridges.get_outbound_bridges(channel)
+    if not outbound_bridges and not any(
+        [app_id in channel_whitelist for app_id in apps_to_toggle]
+    ):
+        # None of the App IDs passed was already in the whitelist and there isn't an outbound bridge
+        await interaction.response.send_message(
+            "❌ This channel does not have any outbound bridges.",
+            ephemeral=True,
+        )
+        return
+
+    await interaction.response.defer(thinking=True, ephemeral=True)
+
+    apps_to_add: set[int] = set()
+    apps_to_remove: set[int] = set()
+    for app_id in apps_to_toggle:
+        if app_id in channel_whitelist:
+            apps_to_remove.add(app_id)
+        else:
+            member = await globals.get_channel_member(channel, app_id)
+            if not member:
+                await interaction.followup.send(
+                    "❌ At least one app passed is not a member of the current channel.",
+                    ephemeral=True,
+                )
+                return
+            else:
+                apps_to_add.add(app_id)
+
+    session = None
+    response = []
+    try:
+        channel_id_str = str(channel.id)
+        with SQLSession(engine) as session:
+            run_queries = []
+            if len(apps_to_add) > 0:
+
+                def whitelist_apps():
+                    session.add_all(
+                        [
+                            DBAppWhitelist(
+                                channel=channel_id_str,
+                                application=str(app_id),
+                            )
+                            for app_id in apps_to_add
+                        ]
+                    )
+
+                run_queries.append(sql_retry(whitelist_apps))
+
+                apps_to_add_str = ", ".join([f"<@{app_id}>" for app_id in apps_to_add])
+                response.append(
+                    f"✅ Added the following app(s) to this channel's whitelist: {apps_to_add_str}."
+                )
+
+            if len(apps_to_remove) > 0:
+
+                def un_whitelist_apps():
+                    remove_apps = SQLDelete(DBAppWhitelist).where(
+                        DBAppWhitelist.channel == channel_id_str,
+                        DBAppWhitelist.application.in_(
+                            [str(app_id) for app_id in apps_to_remove]
+                        ),
+                    )
+                    session.execute(remove_apps)
+
+                run_queries.append(sql_retry(un_whitelist_apps))
+
+                apps_to_remove_str = ", ".join(
+                    [f"<@{app_id}>" for app_id in apps_to_remove]
+                )
+                response.append(
+                    f"✅ Removed the following app(s) from this channel's whitelist: {apps_to_remove_str}."
+                )
+
+            await asyncio.gather(*run_queries)
+            session.commit()
+
+            if not globals.per_channel_whitelist.get(channel.id):
+                globals.per_channel_whitelist[channel.id] = set()
+            globals.per_channel_whitelist[channel.id] = (
+                globals.per_channel_whitelist[channel.id].union(apps_to_add)
+                - apps_to_remove
+            )
+            if len(globals.per_channel_whitelist[channel.id]) == 0:
+                del globals.per_channel_whitelist[channel.id]
+    except Exception as e:
+        if session:
+            session.rollback()
+            session.close()
+
+        if isinstance(e, SQLError):
+            await interaction.followup.send(
+                "❌ There was a problem accessing the database.",
+                ephemeral=True,
+            )
+        else:
+            await interaction.followup.send(
+                "❌ An unknown error occurred.",
+                ephemeral=True,
+            )
+            warn("An error occurred while running command whitelist():\n" + str(e))
+
+        return
+
+    await interaction.followup.send("\n".join(response), ephemeral=True)
+
+
 @discord.app_commands.default_permissions(
     create_expressions=True, manage_expressions=True
 )
@@ -1139,7 +1298,10 @@ async def bridge_thread_helper(
                     "❌ An unknown error occurred.",
                     ephemeral=True,
                 )
-            warn("An error occurred while running command bridge():\n" + str(e))
+            warn(
+                "An error occurred while running command bridge_thread_helper():\n"
+                + str(e)
+            )
 
         return
 
