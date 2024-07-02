@@ -111,10 +111,12 @@ async def help(interaction: discord.Interaction, command: str | None = None):
             )
         else:
             await interaction.response.send_message(
-                "Unrecognised command. Type `/help` for the full list.", ephemeral=True
+                "❌ Unrecognised command. Type `/help` for the full list.",
+                ephemeral=True,
             )
 
 
+@discord.app_commands.default_permissions(manage_webhooks=True)
 @discord.app_commands.guild_only()
 @globals.command_tree.command(
     name="bridge",
@@ -138,7 +140,8 @@ async def bridge(
     message_channel = interaction.channel
     if not isinstance(message_channel, (discord.TextChannel, discord.Thread)):
         await interaction.response.send_message(
-            "Please run this command from a text channel or a thread.", ephemeral=True
+            "❌ Please run this command from a text channel or a thread.",
+            ephemeral=True,
         )
         return
 
@@ -146,14 +149,14 @@ async def bridge(
     if not isinstance(target_channel, (discord.TextChannel, discord.Thread)):
         # The argument passed needs to be a channel or thread
         await interaction.response.send_message(
-            "Unsupported argument passed. Please pass a channel reference, ID, or link.",
+            "❌ Unsupported argument passed. Please pass a channel reference, ID, or link.",
             ephemeral=True,
         )
         return
 
     if target_channel.id == message_channel.id:
         await interaction.response.send_message(
-            "You can't bridge a channel to itself.", ephemeral=True
+            "❌ You can't bridge a channel to itself.", ephemeral=True
         )
         return
 
@@ -170,7 +173,7 @@ async def bridge(
         or not target_channel.permissions_for(target_channel.guild.me).manage_webhooks
     ):
         await interaction.response.send_message(
-            "Please make sure both you and the bot have 'Manage Webhooks' permission in both this and target channels.",
+            "❌ Please make sure both you and the bot have 'Manage Webhooks' permission in both this and target channels.",
             ephemeral=True,
         )
         return
@@ -227,6 +230,9 @@ async def bridge(
     await asyncio.gather(*join_threads)
 
 
+@discord.app_commands.default_permissions(
+    manage_webhooks=True, create_public_threads=True
+)
 @discord.app_commands.guild_only()
 @globals.command_tree.command(
     name="bridge_thread",
@@ -236,13 +242,15 @@ async def bridge_thread(interaction: discord.Interaction):
     message_thread = interaction.channel
     if not isinstance(message_thread, discord.Thread):
         await interaction.response.send_message(
-            "Please run this command from a thread.", ephemeral=True
+            "❌ Please run this command from a thread.",
+            ephemeral=True,
         )
         return
 
     if not isinstance(message_thread.parent, discord.TextChannel):
         await interaction.response.send_message(
-            "Please run this command from a thread off a text channel.", ephemeral=True
+            "❌ Please run this command from a thread off a text channel.",
+            ephemeral=True,
         )
         return
 
@@ -257,7 +265,7 @@ async def bridge_thread(interaction: discord.Interaction):
         ).create_public_threads
     ):
         await interaction.response.send_message(
-            "Please make sure both you and the bot have Manage Webhooks and Create Public Threads permissions in both this and target channels.",
+            "❌ Please make sure both you and the bot have Manage Webhooks and Create Public Threads permissions in both this and target channels.",
             ephemeral=True,
         )
         return
@@ -265,6 +273,9 @@ async def bridge_thread(interaction: discord.Interaction):
     await bridge_thread_helper(message_thread, interaction.user.id, interaction)
 
 
+@discord.app_commands.default_permissions(
+    manage_webhooks=True, create_public_threads=True
+)
 @discord.app_commands.guild_only()
 @globals.command_tree.command(
     name="auto_bridge_threads",
@@ -276,7 +287,8 @@ async def auto_bridge_threads(
     message_channel = interaction.channel
     if not isinstance(message_channel, discord.TextChannel):
         await interaction.response.send_message(
-            "Please run this command from a text channel.", ephemeral=True
+            "❌ Please run this command from a text channel.",
+            ephemeral=True,
         )
         return
 
@@ -287,7 +299,7 @@ async def auto_bridge_threads(
         or not message_channel.permissions_for(interaction.guild.me).manage_webhooks
     ):
         await interaction.response.send_message(
-            "Please make sure both you and the bot have Manage Webhooks and Create Public Threads permissions in both this and target channels.",
+            "❌ Please make sure both you and the bot have Manage Webhooks and Create Public Threads permissions in both this and target channels.",
             ephemeral=True,
         )
         return
@@ -296,7 +308,8 @@ async def auto_bridge_threads(
     inbound_bridges = bridges.get_inbound_bridges(message_channel.id)
     if not outbound_bridges and not inbound_bridges:
         await interaction.response.send_message(
-            "This channel isn't bridged to any other channels.", ephemeral=True
+            "❌ This channel isn't bridged to any other channels.",
+            ephemeral=True,
         )
         return
 
@@ -315,7 +328,8 @@ async def auto_bridge_threads(
             break
     if not at_least_one_channel:
         await interaction.response.send_message(
-            "This channel is only bridged to threads.", ephemeral=True
+            "❌ This channel is only bridged to threads.",
+            ephemeral=True,
         )
         return
 
@@ -353,6 +367,7 @@ async def auto_bridge_threads(
     await interaction.followup.send(response, ephemeral=True)
 
 
+@discord.app_commands.default_permissions(manage_webhooks=True)
 @discord.app_commands.guild_only()
 @globals.command_tree.command(
     name="demolish",
@@ -365,7 +380,8 @@ async def demolish(interaction: discord.Interaction, target: str):
     message_channel = interaction.channel
     if not isinstance(message_channel, (discord.TextChannel, discord.Thread)):
         await interaction.response.send_message(
-            "Please run this command from a text channel or a thread.", ephemeral=True
+            "❌ Please run this command from a text channel or a thread.",
+            ephemeral=True,
         )
         return
 
@@ -373,7 +389,7 @@ async def demolish(interaction: discord.Interaction, target: str):
     if not isinstance(target_channel, (discord.TextChannel, discord.Thread)):
         # The argument passed needs to be a channel or thread
         await interaction.response.send_message(
-            "Unsupported argument passed. Please pass a channel reference, ID, or link.",
+            "❌ Unsupported argument passed. Please pass a channel reference, ID, or link.",
             ephemeral=True,
         )
         return
@@ -391,7 +407,7 @@ async def demolish(interaction: discord.Interaction, target: str):
         or not target_channel.permissions_for(target_channel.guild.me).manage_webhooks
     ):
         await interaction.response.send_message(
-            "Please make sure both you and the bot have 'Manage Webhooks' permission in both this and target channels.",
+            "❌ Please make sure both you and the bot have 'Manage Webhooks' permission in both this and target channels.",
             ephemeral=True,
         )
         return
@@ -402,7 +418,7 @@ async def demolish(interaction: discord.Interaction, target: str):
         not outbound_bridges or not outbound_bridges.get(target_channel.id)
     ):
         await interaction.response.send_message(
-            "There are no bridges between current and target channels.",
+            "❌ There are no bridges between current and target channels.",
             ephemeral=True,
         )
         return
@@ -467,6 +483,7 @@ async def demolish(interaction: discord.Interaction, target: str):
     )
 
 
+@discord.app_commands.default_permissions(manage_webhooks=True)
 @discord.app_commands.guild_only()
 @globals.command_tree.command(
     name="demolish_all",
@@ -481,7 +498,8 @@ async def demolish_all(
     message_channel = interaction.channel
     if not isinstance(message_channel, (discord.TextChannel, discord.Thread)):
         await interaction.response.send_message(
-            "Please run this command from a text channel or a thread.", ephemeral=True
+            "❌ Please run this command from a text channel or a thread.",
+            ephemeral=True,
         )
         return
 
@@ -492,7 +510,7 @@ async def demolish_all(
         or not message_channel.permissions_for(interaction.guild.me).manage_webhooks
     ):
         await interaction.response.send_message(
-            "Please make sure both you and the bot have 'Manage Webhooks' permission in both this and target channels.",
+            "❌ Please make sure both you and the bot have 'Manage Webhooks' permission in both this and target channels.",
             ephemeral=True,
         )
         return
@@ -503,7 +521,7 @@ async def demolish_all(
             thread_parent_channel = message_channel.parent
             if not isinstance(thread_parent_channel, discord.TextChannel):
                 await interaction.response.send_message(
-                    "Please run this command from a text channel or a thread off one.",
+                    "❌ Please run this command from a text channel or a thread off one.",
                     ephemeral=True,
                 )
                 return
@@ -530,7 +548,7 @@ async def demolish_all(
     )
     if not found_bridges:
         await interaction.response.send_message(
-            "There are no bridges associated with the current channel or thread(s).",
+            "❌ There are no bridges associated with the current channel or thread(s).",
             ephemeral=True,
         )
         return
@@ -1051,7 +1069,7 @@ async def bridge_thread_helper(
     if not outbound_bridges:
         if interaction:
             await interaction.response.send_message(
-                "The parent channel doesn't have outbound bridges to any other channels.",
+                "❌ The parent channel doesn't have outbound bridges to any other channels.",
                 ephemeral=True,
             )
         return
@@ -1066,7 +1084,8 @@ async def bridge_thread_helper(
     if not at_least_one_channel:
         if interaction:
             await interaction.response.send_message(
-                "The parent channel is only bridged to threads.", ephemeral=True
+                "❌ The parent channel is only bridged to threads.",
+                ephemeral=True,
             )
         return
 
@@ -1425,7 +1444,8 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
     channel = message.channel
     if not isinstance(channel, (discord.TextChannel, discord.Thread)):
         await interaction.response.send_message(
-            "Please run this command from a text channel or a thread.", ephemeral=True
+            "❌ Please run this command from a text channel or a thread.",
+            ephemeral=True,
         )
         return
 
@@ -1563,7 +1583,8 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
 
     if len(all_reactions) == 0:
         await interaction.followup.send(
-            "This message doesn't have any reactions.", ephemeral=True
+            "❌ This message doesn't have any reactions.",
+            ephemeral=True,
         )
         return
 
