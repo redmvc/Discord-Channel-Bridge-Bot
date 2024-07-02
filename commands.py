@@ -1,4 +1,5 @@
 import asyncio
+from logging import warn
 from typing import Any, AsyncIterator, Coroutine, Iterable, cast
 
 import discord
@@ -199,14 +200,23 @@ async def bridge(
 
             await asyncio.gather(*create_bridges)
             session.commit()
-    except SQLError:
-        await interaction.followup.send(
-            "❌ There was an issue with the connection to the database; bridge creation failed.",
-            ephemeral=True,
-        )
+    except Exception as e:
         if session:
             session.rollback()
             session.close()
+
+        if isinstance(e, SQLError):
+            await interaction.followup.send(
+                "❌ There was an issue with the connection to the database; bridge creation failed.",
+                ephemeral=True,
+            )
+        else:
+            await interaction.followup.send(
+                "❌ An unknown error occurred.",
+                ephemeral=True,
+            )
+            warn("An error occurred while running command bridge():\n" + str(e))
+
         return
 
     if not direction:
@@ -348,14 +358,26 @@ async def auto_bridge_threads(
                 response = "✅ Threads will no longer be automatically created across bridges when they are created in this channel."
 
             session.commit()
-    except SQLError:
-        await interaction.followup.send(
-            "❌ There was an issue with the connection to the database; setting or unsetting automatic thread creation across bridges failed.",
-            ephemeral=True,
-        )
+    except Exception as e:
         if session:
             session.rollback()
             session.close()
+
+        if isinstance(e, SQLError):
+            await interaction.followup.send(
+                "❌ There was an issue with the connection to the database; setting or unsetting automatic thread creation across bridges failed.",
+                ephemeral=True,
+            )
+        else:
+            await interaction.followup.send(
+                "❌ An unknown error occurred.",
+                ephemeral=True,
+            )
+            warn(
+                "An error occurred while running command auto_bridge_threads():\n"
+                + str(e)
+            )
+
         return
 
     await interaction.followup.send(response, ephemeral=True)
@@ -462,14 +484,23 @@ async def demolish(interaction: discord.Interaction, target: str):
                 {message_channel.id, target_channel.id}, session
             )
             session.commit()
-    except SQLError:
-        await interaction.followup.send(
-            "❌ There was an issue with the connection to the database; thread and bridge creation failed.",
-            ephemeral=True,
-        )
+    except Exception as e:
         if session:
             session.rollback()
             session.close()
+
+        if isinstance(e, SQLError):
+            await interaction.followup.send(
+                "❌ There was an issue with the connection to the database; thread and bridge creation failed.",
+                ephemeral=True,
+            )
+        else:
+            await interaction.followup.send(
+                "❌ An unknown error occurred.",
+                ephemeral=True,
+            )
+            warn("An error occurred while running command demolish():\n" + str(e))
+
         return
 
     await interaction.followup.send(
@@ -628,14 +659,23 @@ async def demolish_all(
             await validate_auto_bridge_thread_channels(channels_affected, session)
 
             session.commit()
-    except SQLError:
-        await interaction.followup.send(
-            "❌ There was an issue with the connection to the database; bridge demolition failed.",
-            ephemeral=True,
-        )
+    except Exception as e:
         if session:
             session.rollback()
             session.close()
+
+        if isinstance(e, SQLError):
+            await interaction.followup.send(
+                "❌ There was an issue with the connection to the database; bridge demolition failed.",
+                ephemeral=True,
+            )
+        else:
+            await interaction.followup.send(
+                "❌ An unknown error occurred.",
+                ephemeral=True,
+            )
+            warn("An error occurred while running command demolish_all():\n" + str(e))
+
         return
 
     await asyncio.gather(*bridges_being_demolished)
@@ -1086,15 +1126,25 @@ async def bridge_thread_helper(
             await asyncio.gather(*(create_bridges + add_user_to_threads))
 
             session.commit()
-    except SQLError:
-        if interaction:
-            await interaction.followup.send(
-                "❌ There was an issue with the connection to the database; thread and bridge creation failed.",
-                ephemeral=True,
-            )
+    except Exception as e:
         if session:
             session.rollback()
             session.close()
+
+        if isinstance(e, SQLError):
+            if interaction:
+                await interaction.followup.send(
+                    "❌ There was an issue with the connection to the database; thread and bridge creation failed.",
+                    ephemeral=True,
+                )
+        else:
+            if interaction:
+                await interaction.followup.send(
+                    "❌ An unknown error occurred.",
+                    ephemeral=True,
+                )
+            warn("An error occurred while running command bridge():\n" + str(e))
+
         return
 
     if interaction:
