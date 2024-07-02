@@ -820,10 +820,14 @@ async def whitelist(interaction: discord.Interaction, apps: str):
             await asyncio.gather(*run_queries)
             session.commit()
 
+            if not globals.per_channel_whitelist.get(channel.id):
+                globals.per_channel_whitelist[channel.id] = set()
             globals.per_channel_whitelist[channel.id] = (
                 globals.per_channel_whitelist[channel.id].union(apps_to_add)
                 - apps_to_remove
             )
+            if len(globals.per_channel_whitelist[channel.id]) == 0:
+                del globals.per_channel_whitelist[channel.id]
     except Exception as e:
         if session:
             session.rollback()
