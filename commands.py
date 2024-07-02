@@ -108,6 +108,7 @@ async def help(interaction: discord.Interaction, command: str | None = None):
             )
 
 
+@discord.app_commands.default_permissions(manage_webhooks=True)
 @discord.app_commands.guild_only()
 @globals.command_tree.command(
     name="bridge",
@@ -221,6 +222,9 @@ async def bridge(
     await asyncio.gather(*join_threads)
 
 
+@discord.app_commands.default_permissions(
+    manage_webhooks=True, create_public_threads=True
+)
 @discord.app_commands.guild_only()
 @globals.command_tree.command(
     name="bridge_thread",
@@ -261,6 +265,9 @@ async def bridge_thread(interaction: discord.Interaction):
     await bridge_thread_helper(message_thread, interaction.user.id, interaction)
 
 
+@discord.app_commands.default_permissions(
+    manage_webhooks=True, create_public_threads=True
+)
 @discord.app_commands.guild_only()
 @globals.command_tree.command(
     name="auto_bridge_threads",
@@ -352,6 +359,7 @@ async def auto_bridge_threads(
     await interaction.followup.send(response, ephemeral=True)
 
 
+@discord.app_commands.default_permissions(manage_webhooks=True)
 @discord.app_commands.guild_only()
 @globals.command_tree.command(
     name="demolish",
@@ -467,6 +475,7 @@ async def demolish(interaction: discord.Interaction, target: str):
     )
 
 
+@discord.app_commands.default_permissions(manage_webhooks=True)
 @discord.app_commands.guild_only()
 @globals.command_tree.command(
     name="demolish_all",
