@@ -1333,7 +1333,7 @@ async def map_emoji_helper(
         )
 
         await sql_retry(lambda: session.execute(upsert_emoji))
-    except SQLError as e:
+    except Exception as e:
         if session:
             session.rollback()
             session.close()
