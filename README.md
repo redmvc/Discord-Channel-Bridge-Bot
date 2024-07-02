@@ -19,12 +19,12 @@ To add this bot to your server, visit [this link](https://discord.com/oauth2/aut
   - When bridging a reaction emoji, if it doesn't have access to the emoji being bridged, it will attempt to copy that emoji into an emoji server and then react with the copied emoji.
 - You can run the command `/demolish target` to demolish all bridges between the current and target channels/threads.
   - You can run the command `/demolish_all` to demolish all bridges to and from the current channel/thread (and, optionally, its threads or its parent channel's threads).
-- `/help` will give you a list of commands. `/help command_name` will explain the usage of the specific command passed as argument.
-  - You can pass this command in DM to the bot, too.
-- Right clicking a message and going to Apps > List Reactions will show you a list of all reactions to that message as well as the users who added each reaction for all versions of that message visible from the current channel.
 - Messages sent from most other bots or webhooks are not bridged; the only current global exception is [Tupperbox](https://tupperbox.app/). However, it is possible to add local exceptions—that is, bots whose messages will be bridged from a given specific channel—by running the command `/whitelist @bot [@bot_2 [@bot_3 ...]]`.
   - This command only works in channels with outbound bridges coming from them, and only bots that are in the channel can be added this way.
   - Sequential bridges will work: if `#A` -> `#B` -> `#C` and a bot is whitelisted in `#A`, its messages there will be bridged to `#B` and `#C`. However, if that bot sends a message in `#B` and it is not whitelisted there, the message will not be bridged to `#C`.
+- `/help` will give you a list of commands. `/help command_name` will explain the usage of the specific command passed as argument.
+  - You can pass this command in DM to the bot, too.
+- Right clicking a message and going to Apps > List Reactions will show you a list of all reactions to that message as well as the users who added each reaction for all versions of that message visible from the current channel.
 
 ### Running your own copy
 It's very straightforward to run your own copy of this bot. You'll need access to an SQL database running MySQL, PostgreSQL, or SQLite, and a Discord developer account.
