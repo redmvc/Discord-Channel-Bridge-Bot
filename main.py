@@ -270,8 +270,21 @@ async def on_message(message: discord.Message):
 
     if message.application_id and (
         message.application_id == globals.client.application_id
-        or not (whitelisted_apps := globals.settings.get("whitelisted_apps"))
-        or message.application_id not in [int(app_id) for app_id in whitelisted_apps]
+        or (
+            (
+                not (
+                    local_whitelist := globals.per_channel_whitelist.get(
+                        message.channel.id
+                    )
+                )
+                or message.application_id not in local_whitelist
+            )
+            and (
+                not (global_whitelist := globals.settings.get("whitelisted_apps"))
+                or message.application_id
+                not in [int(app_id) for app_id in global_whitelist]
+            )
+        )
     ):
         # Don't bridge messages from non-whitelisted applications or from self
         return
