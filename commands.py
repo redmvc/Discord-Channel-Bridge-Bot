@@ -852,18 +852,14 @@ async def create_bridge_and_db(
             session.execute(insert_bridge_row)
 
         await sql_retry(execute_query)
-    except SQLError as e:
-        if session:
-            session.rollback()
-            session.close()
-
-        raise e
     except Exception as e:
         if session:
             session.rollback()
             session.close()
-        if bridge:
+
+        if isinstance(e, SQLError) and bridge:
             await bridges.demolish_bridge(source, target)
+
         raise e
 
     if close_after:
