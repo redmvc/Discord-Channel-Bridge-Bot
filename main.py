@@ -250,12 +250,6 @@ async def on_ready():
     globals.is_ready = True
 
 
-# These variables are used by the on_raw_typing event below
-users_typing_across_bridge: dict[int, list[int]] = {}
-per_server_user_names: dict[int, dict[int, str]] = {}
-original_bot_server_nick: dict[int, str | None] = {}
-
-
 @globals.client.event
 async def on_raw_typing(payload: discord.RawTypingEvent):
     """Make the bot start typing across bridges when a user on the source end of a bridge does so.
@@ -265,101 +259,23 @@ async def on_raw_typing(payload: discord.RawTypingEvent):
     #### Args:
         - `payload`: The raw event payload data.
     """
-    global users_typing_across_bridge, per_server_user_names, original_bot_server_nick
-
     if not globals.is_ready:
         return
 
-    source_user = payload.user
-    if not source_user:
-        return
-    source_user_id = source_user.id
-
-    if not globals.client.user or globals.client.user.id == source_user_id:
+    if not globals.client.user or globals.client.user.id == payload.user_id:
         return
 
     outbound_bridges = bridges.get_outbound_bridges(payload.channel_id)
     if not outbound_bridges:
         return
 
-    async def bridge_typing_indicator(bridge: Bridge):
+    async def type_through_bridge(bridge: Bridge):
         target_channel = await bridge.target_channel
-        target_server = target_channel.guild
-        if target_channel.permissions_for(target_server.me).change_nickname:
-            # If I can change my nickname, change it to that of the person typing or "multiple people"
-            target_server_id = target_server.id
-            if not original_bot_server_nick.get(target_server_id):
-                # Store my original nickname to revert to it later
-                original_bot_server_nick[target_server_id] = target_server.me.nick
-
-            # Keep track of the list of user IDs that are typing
-            if not users_typing_across_bridge.get(target_server_id):
-                users_typing_across_bridge[target_server_id] = []
-            users_typing_across_bridge[target_server_id].append(source_user_id)
-
-            # Now set my own nickname
-            async def set_nickname():
-                try:
-                    if len(users_typing_across_bridge[target_server_id]) == 0:
-                        # There are no users typing
-                        if users_typing_across_bridge.get(target_server_id):
-                            del users_typing_across_bridge[target_server_id]
-
-                        if per_server_user_names.get(target_server_id):
-                            del per_server_user_names[target_server_id]
-
-                        new_nick = original_bot_server_nick[target_server_id]
-                        del original_bot_server_nick[target_server_id]
-                    else:
-                        # I'll get the display name of the user even if there are multiple users typing
-                        if not per_server_user_names.get(target_server_id):
-                            per_server_user_names[target_server_id] = {}
-
-                        typing_user_id = users_typing_across_bridge[target_server_id][0]
-                        if not per_server_user_names[target_server_id].get(
-                            typing_user_id
-                        ):
-                            bridged_member = await globals.get_channel_member(
-                                target_channel, typing_user_id
-                            )
-                            if bridged_member:
-                                bridged_member_name = bridged_member.display_name
-                            else:
-                                bridged_member_name = source_user.display_name
-
-                            per_server_user_names[target_server_id][
-                                typing_user_id
-                            ] = bridged_member_name
-
-                        if len(set(users_typing_across_bridge[target_server_id])) == 1:
-                            # There is only one user typing
-                            new_nick = f"{per_server_user_names[target_server_id][typing_user_id]} (bridged)"
-                        else:
-                            new_nick = "Multiple people (bridged)"
-                except (ValueError, KeyError):
-                    new_nick = None
-
-                await target_server.me.edit(nick=new_nick)
-
-            await set_nickname()
-
-            # Type for ten seconds then check if I should name myself back
-            async with target_channel.typing():
-                await asyncio.sleep(10)
-
-                try:
-                    users_typing_across_bridge[target_server_id].remove(source_user_id)
-                except (ValueError, KeyError):
-                    pass
-
-            await set_nickname()
-        else:
-            # I can't change my nick in this server so I'll just set the typing indicator
-            await target_channel.typing()
+        await target_channel.typing()
 
     channels_typing: list[Coroutine] = []
     for _, bridge in outbound_bridges.items():
-        channels_typing.append(bridge_typing_indicator(bridge))
+        channels_typing.append(type_through_bridge(bridge))
 
     await asyncio.gather(*channels_typing)
 
