@@ -950,7 +950,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
             target_message_id: int,
             reaction_emoji: discord.Emoji | str,
         ):
-            bridged_message = await bridged_channel.fetch_message(target_message_id)
+            bridged_message = bridged_channel.get_partial_message(target_message_id)
             await bridged_message.add_reaction(reaction_emoji)
 
         with SQLSession(engine) as session:
