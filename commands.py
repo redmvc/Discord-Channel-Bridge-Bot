@@ -1,6 +1,6 @@
 import asyncio
 from logging import warn
-from typing import Any, AsyncIterator, Coroutine, Iterable, cast
+from typing import Any, AsyncIterator, Coroutine, Iterable, Literal, cast
 
 import discord
 from sqlalchemy import Delete as SQLDelete
@@ -31,7 +31,21 @@ from validations import validate_types
     description="Return a list of commands or detailed information about a command.",
 )
 @discord.app_commands.describe(command="The command to get detailed information about.")
-async def help(interaction: discord.Interaction, command: str | None = None):
+async def help(
+    interaction: discord.Interaction,
+    command: (
+        Literal[
+            "bridge",
+            "bridge_thread",
+            "auto_bridge_threads",
+            "demolish",
+            "demolish_all",
+            "whitelist",
+            "map_emoji",
+        ]
+        | None
+    ) = None,
+):
     if (
         globals.emoji_server
         and interaction.guild
@@ -59,11 +73,11 @@ async def help(interaction: discord.Interaction, command: str | None = None):
             ephemeral=True,
         )
     else:
-        command = command.lower()
         if command == "bridge":
             await interaction.response.send_message(
                 "`/bridge target [direction]`"
-                + "\nCreates a bridge between the current channel/thread and target channel/thread, creating a mirror of a message sent to one channel in the other. `target` must be a link to another channel or thread, its ID, or a mention to it."
+                + "\nNecessary permissions to run command: Manage Webhooks."
+                + "\n\nCreates a bridge between the current channel/thread and target channel/thread, creating a mirror of a message sent to one channel in the other. `target` must be a link to another channel or thread, its ID, or a #mention of it."
                 + "\nIf `direction` isn't included, the bridge is two-way; if it's set to `inbound` it will only send messages from the target channel to the current channel; if it's set to `outbound` it will only send messages from the current channel to the target channel."
                 + "\n\nNote that message mirroring goes down outbound bridge chains: if channel A has an outbound bridge to channel B and channel B has an outbound bridge to channel C, messages sent in channel A will be mirrored in both channels B and C. _However_, this does not automatically create a bridge between A and C: if e.g. the bridge between A and B is demolished, messages from A will no longer be sent to C.",
                 ephemeral=True,
@@ -71,28 +85,32 @@ async def help(interaction: discord.Interaction, command: str | None = None):
         elif command == "bridge_thread":
             await interaction.response.send_message(
                 "`/bridge_thread`"
-                + "\nWhen this command is called from within a thread that is in a channel that is bridged to other channels, the bot will attempt to create new threads in all such channels and bridge them to the original one. If the original channel is bridged to threads or if you don't have create thread permissions in the other channels, this command may not run to completion."
+                + "\nNecessary permissions to run command: Manage Webhooks, Create Public Threads."
+                + "\n\nWhen this command is called from within a thread that is in a channel that is bridged to other channels, the bot will attempt to create new threads in all such channels and bridge them to the original one. If the original channel is bridged to threads or if you don't have create thread permissions in the other channels, this command may not run to completion."
                 + "\n\nNote that this command will not create bridges down bridge chains—that is, if channel A is bridged to channel B and channel B is bridged to channel C, but A is not bridged to C, executing this command in channel A will not create a thread in channel C.",
                 ephemeral=True,
             )
         elif command == "auto_bridge_threads":
             await interaction.response.send_message(
                 "`/auto_bridge_threads`"
-                + "\nWhen this command is called from within a channel that is bridged to other channels, the bot will enable or disable automatic thread bridging, so that any threads created in this channel will also be created across all bridges involving it. You will need to run this command from within each channel you wish to enable automatic thread creation from."
+                + "\nNecessary permissions to run command: Manage Webhooks, Create Public Threads."
+                + "\n\nWhen this command is called from within a channel that is bridged to other channels, the bot will enable or disable automatic thread bridging, so that any threads created in this channel will also be created across all bridges involving it. You will need to run this command from within each channel you wish to enable automatic thread creation from."
                 + "\n\nNote that this command will not create bridges down bridge chains—that is, if channel A is bridged to channel B and channel B is bridged to channel C, but A is not bridged to C, threads automatically created in channel A will not have a mirror thread in channel C.",
                 ephemeral=True,
             )
         elif command == "demolish":
             await interaction.response.send_message(
                 "`/demolish target`"
-                + "\nDestroys any existing bridges between the current and target channels/threads, making messages from either channel no longer be mirrored to the other. `target` must be a link to another channel or thread, its ID, or a mention to it."
+                + "\nNecessary permissions to run command: Manage Webhooks."
+                + "\n\nDestroys any existing bridges between the current and target channels/threads, making messages from either channel no longer be mirrored to the other. `target` must be a link to another channel or thread, its ID, or a #mention of it."
                 + "\n\nNote that even if you recreate any of the bridges, the messages previously bridged will no longer be connected and so they will not share future reactions, edits, or deletions. Note also that this will only destroy bridges to and from the _current specific channel/thread_, not from any threads that spin off it or its parent.",
                 ephemeral=True,
             )
         elif command == "demolish_all":
             await interaction.response.send_message(
                 "`/demolish_all [channel_and_threads]`"
-                + "\nDestroys any existing bridges involving the current channel or thread, making messages from it no longer be mirrored to other channels and making other channels' messages no longer be mirrored to it."
+                + "\nNecessary permissions to run command: Manage Webhooks."
+                + "\n\nDestroys any existing bridges involving the current channel or thread, making messages from it no longer be mirrored to other channels and making other channels' messages no longer be mirrored to it."
                 + "\n\nIf you don't include `channel_and_threads` or set it to `False`, this will _only_ demolish bridges involving the _current specific channel/thread_. If instead you set `channel_and_threads` to `True`, this will demolish _all_ bridges involving the current channel/thread, its parent channel if it's a thread, and all of its or its parent channel's threads."
                 + "\n\nNote that even if you recreate any of the bridges, the messages previously bridged will no longer be connected and so they will not share future reactions, edits, or deletions.",
                 ephemeral=True,
@@ -100,14 +118,16 @@ async def help(interaction: discord.Interaction, command: str | None = None):
         elif command == "whitelist":
             await interaction.response.send_message(
                 "`/whitelist @bot [@bot_2 [@bot_3 ...]]`"
-                + "\nAllows or disallows bridging messages sent by one or more bots to the current channel. Only works through outbound bridges: you can whitelist a bot so that messages sent by it in the current channel are bridged to other channels, but that will not make messages by that bot be bridged to the current channel if the bot is not whitelisted in the source channel."
+                + "\nNecessary permissions to run command: Manage Webhooks."
+                + "\n\nAllows or disallows bridging messages sent by one or more bots to the current channel. Only works through outbound bridges: you can whitelist a bot so that messages sent by it in the current channel are bridged to other channels, but that will not make messages by that bot be bridged to the current channel if the bot is not whitelisted in the source channel."
                 + "\n\nNote that this command is a toggle, so running it again will remove a bot from the blacklist. It also goes on a per-bot basis, so if you run `/whitelist @bot` then `/whitelist @bot @bot_2` then `@bot` will not be whitelisted but `@bot_2` will.",
                 ephemeral=True,
             )
         elif command == "map_emoji" and interaction_from_emoji_server:
             await interaction.response.send_message(
                 "`/map_emoji :internal_emoji: :external_emoji: [:external_emoji_2: [:external_emoji_3: ...]]`"
-                + "\nCreates an internal mapping between an emoji from an external server which the bot doesn't have access to and an emoji stored in the bot's emoji server, so that they are considered equivalent by the bot when bridging reactions. You can also pass multiple external emoji separated by spaces to map all of them to the same internal one.",
+                + "\nNecessary permissions to run command: Create Expressions, Manage Expressions."
+                + "\n\nCreates an internal mapping between an emoji from an external server which the bot doesn't have access to and an emoji stored in the bot's emoji server, so that they are considered equivalent by the bot when bridging reactions. You can also pass multiple external emoji separated by spaces to map all of them to the same internal one.",
                 ephemeral=True,
             )
         else:
@@ -127,16 +147,10 @@ async def help(interaction: discord.Interaction, command: str | None = None):
     target="The channel to and/or from which to bridge.",
     direction="Whether to create an outbound or inbound bridge. Leave blank to create both.",
 )
-@discord.app_commands.choices(
-    direction=[
-        discord.app_commands.Choice(name="outbound", value="outbound"),
-        discord.app_commands.Choice(name="inbound", value="inbound"),
-    ]
-)
 async def bridge(
     interaction: discord.Interaction,
     target: str,
-    direction: str | None = None,
+    direction: Literal["outbound", "inbound"] | None = None,
 ):
     message_channel = interaction.channel
     if not isinstance(message_channel, (discord.TextChannel, discord.Thread)):
