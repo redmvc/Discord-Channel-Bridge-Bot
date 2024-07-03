@@ -31,7 +31,21 @@ from validations import validate_types
     description="Return a list of commands or detailed information about a command.",
 )
 @discord.app_commands.describe(command="The command to get detailed information about.")
-async def help(interaction: discord.Interaction, command: str | None = None):
+async def help(
+    interaction: discord.Interaction,
+    command: (
+        Literal[
+            "bridge",
+            "bridge_thread",
+            "auto_bridge_threads",
+            "demolish",
+            "demolish_all",
+            "whitelist",
+            "map_emoji",
+        ]
+        | None
+    ) = None,
+):
     if (
         globals.emoji_server
         and interaction.guild
@@ -59,7 +73,6 @@ async def help(interaction: discord.Interaction, command: str | None = None):
             ephemeral=True,
         )
     else:
-        command = command.lower()
         if command == "bridge":
             await interaction.response.send_message(
                 "`/bridge target [direction]`"
