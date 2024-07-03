@@ -1,6 +1,6 @@
 import asyncio
 from logging import warn
-from typing import Any, AsyncIterator, Coroutine, Iterable, cast
+from typing import Any, AsyncIterator, Coroutine, Iterable, Literal, cast
 
 import discord
 from sqlalchemy import Delete as SQLDelete
@@ -134,16 +134,10 @@ async def help(interaction: discord.Interaction, command: str | None = None):
     target="The channel to and/or from which to bridge.",
     direction="Whether to create an outbound or inbound bridge. Leave blank to create both.",
 )
-@discord.app_commands.choices(
-    direction=[
-        discord.app_commands.Choice(name="outbound", value="outbound"),
-        discord.app_commands.Choice(name="inbound", value="inbound"),
-    ]
-)
 async def bridge(
     interaction: discord.Interaction,
     target: str,
-    direction: str | None = None,
+    direction: Literal["outbound", "inbound"] | None = None,
 ):
     message_channel = interaction.channel
     if not isinstance(message_channel, (discord.TextChannel, discord.Thread)):
