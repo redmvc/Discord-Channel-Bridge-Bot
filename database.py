@@ -39,9 +39,7 @@ class DBBridge(DBBase):
     """
 
     __tablename__ = "bridges"
-    __table_args__ = (
-        UniqueConstraint("source", "target", name="unique_source_target"),
-    )
+    __table_args__ = UniqueConstraint("source", "target", name="unique_source_target")
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     source: Mapped[str] = mapped_column(String(32), nullable=False)
