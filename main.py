@@ -261,7 +261,7 @@ async def on_raw_typing(payload: discord.RawTypingEvent):
     if not globals.is_ready:
         return
 
-    if globals.client.user == payload.user:
+    if not globals.client.user or globals.client.user.id == payload.user_id:
         return
 
     outbound_bridges = bridges.get_outbound_bridges(payload.channel_id)
