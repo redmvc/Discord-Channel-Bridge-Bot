@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session as SQLSession
 
 import commands
 import globals
-from bridge import bridges
+from bridge import Bridge, bridges
 from database import (
     DBAppWhitelist,
     DBAutoBridgeThreadChannels,
@@ -247,6 +247,36 @@ async def on_ready():
         print(f"{server.name}(id: {server.id})")
 
     globals.is_ready = True
+
+
+@globals.client.event
+async def on_raw_typing(payload: discord.RawTypingEvent):
+    """Make the bot start typing across bridges when a user on the source end of a bridge does so.
+
+    This function is called when someone begins typing a message. Unlike on_typing() this is called regardless of the channel and user being in the internal cache. Requires Intents.typing to be enabled.
+
+    #### Args:
+        - `payload`: The raw event payload data.
+    """
+    if not globals.is_ready:
+        return
+
+    if globals.client.user == payload.user:
+        return
+
+    outbound_bridges = bridges.get_outbound_bridges(payload.channel_id)
+    if not outbound_bridges:
+        return
+
+    async def type_through_bridge(bridge: Bridge):
+        target_channel = await bridge.target_channel
+        await target_channel.typing()
+
+    channels_typing: list[Coroutine] = []
+    for _, bridge in outbound_bridges.items():
+        channels_typing.append(type_through_bridge(bridge))
+
+    await asyncio.gather(*channels_typing)
 
 
 @globals.client.event
