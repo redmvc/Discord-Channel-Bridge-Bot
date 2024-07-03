@@ -64,7 +64,7 @@ async def help(interaction: discord.Interaction, command: str | None = None):
             await interaction.response.send_message(
                 "`/bridge target [direction]`"
                 + "\nNecessary permissions to run command: Manage Webhooks."
-                + "\n\nCreates a bridge between the current channel/thread and target channel/thread, creating a mirror of a message sent to one channel in the other. `target` must be a link to another channel or thread, its ID, or a mention to it."
+                + "\n\nCreates a bridge between the current channel/thread and target channel/thread, creating a mirror of a message sent to one channel in the other. `target` must be a link to another channel or thread, its ID, or a #mention of it."
                 + "\nIf `direction` isn't included, the bridge is two-way; if it's set to `inbound` it will only send messages from the target channel to the current channel; if it's set to `outbound` it will only send messages from the current channel to the target channel."
                 + "\n\nNote that message mirroring goes down outbound bridge chains: if channel A has an outbound bridge to channel B and channel B has an outbound bridge to channel C, messages sent in channel A will be mirrored in both channels B and C. _However_, this does not automatically create a bridge between A and C: if e.g. the bridge between A and B is demolished, messages from A will no longer be sent to C.",
                 ephemeral=True,
@@ -89,7 +89,7 @@ async def help(interaction: discord.Interaction, command: str | None = None):
             await interaction.response.send_message(
                 "`/demolish target`"
                 + "\nNecessary permissions to run command: Manage Webhooks."
-                + "\n\nDestroys any existing bridges between the current and target channels/threads, making messages from either channel no longer be mirrored to the other. `target` must be a link to another channel or thread, its ID, or a mention to it."
+                + "\n\nDestroys any existing bridges between the current and target channels/threads, making messages from either channel no longer be mirrored to the other. `target` must be a link to another channel or thread, its ID, or a #mention of it."
                 + "\n\nNote that even if you recreate any of the bridges, the messages previously bridged will no longer be connected and so they will not share future reactions, edits, or deletions. Note also that this will only destroy bridges to and from the _current specific channel/thread_, not from any threads that spin off it or its parent.",
                 ephemeral=True,
             )
