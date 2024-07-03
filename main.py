@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import random
-from typing import Coroutine, TypedDict, cast
+from typing import Any, Coroutine, TypedDict, cast
 from warnings import warn
 
 import discord
@@ -22,6 +22,7 @@ from database import (
     DBBridge,
     DBEmojiMap,
     DBMessageMap,
+    DBReactionMap,
     engine,
     sql_retry,
 )
@@ -910,14 +911,15 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
     reaction_emoji: discord.Emoji | discord.PartialEmoji | str | None
     if payload.emoji.is_custom_emoji():
         # Custom emoji, I need to check whether it exists and is available to me
-        if not payload.emoji.id:
+        emoji_id = payload.emoji.id
+        if not emoji_id:
             return
 
-        reaction_emoji = globals.client.get_emoji(payload.emoji.id)
+        reaction_emoji = globals.client.get_emoji(emoji_id)
         if not reaction_emoji or not reaction_emoji.available:
             reaction_emoji = None
             # Couldn't find the reactji, will try to see if I've got it mapped locally
-            mapped_emoji_id = globals.emoji_mappings.get(payload.emoji.id)
+            mapped_emoji_id = globals.emoji_mappings.get(emoji_id)
             if mapped_emoji_id:
                 # I already have this Emoji mapped locally
                 reaction_emoji = globals.client.get_emoji(mapped_emoji_id)
@@ -930,9 +932,12 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                     return
             except Exception:
                 return
+
+        emoji_id_str = str(emoji_id)
     else:
         # It's a standard emoji, it's fine
         reaction_emoji = payload.emoji.name
+        emoji_id_str = reaction_emoji
 
     # Now find the list of channels that can validly be reached via outbound chains from this channel
     reachable_channel_ids = bridges.get_reachable_channels(
@@ -943,7 +948,9 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
     session = None
     try:
         # Create a function to add reactions to messages asynchronously and gather them all at the end
-        async_add_reactions: list[Coroutine] = []
+        source_message_id_str = str(payload.message_id)
+        source_channel_id_str = str(payload.channel_id)
+        async_add_reactions: list[Coroutine[Any, Any, DBReactionMap]] = []
 
         async def add_reaction_helper(
             bridged_channel: discord.TextChannel | discord.Thread,
@@ -953,12 +960,45 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
             bridged_message = bridged_channel.get_partial_message(target_message_id)
             await bridged_message.add_reaction(reaction_emoji)
 
+            # I'll return a reaction map to insert into the reaction map table
+            return DBReactionMap(
+                emoji=emoji_id_str,
+                source_message=source_message_id_str,
+                source_channel=source_channel_id_str,
+                target_message=str(target_message_id),
+                target_channel=str(bridged_channel.id),
+            )
+
         with SQLSession(engine) as session:
+            # Let me check whether I've already reacted to bridged messages in some of these channels
+            def get_already_bridged_reactions():
+                return session.scalars(
+                    SQLSelect(DBReactionMap).where(
+                        DBReactionMap.source_message == source_message_id_str,
+                        DBReactionMap.emoji == emoji_id_str,
+                    )
+                )
+
+            already_bridged_reactions: ScalarResult[DBReactionMap] = await sql_retry(
+                get_already_bridged_reactions
+            )
+            already_bridged_reaction_channels = {
+                int(bridged_reaction.target_channel)
+                for bridged_reaction in already_bridged_reactions
+            }
+
+            reachable_channel_ids = (
+                reachable_channel_ids - already_bridged_reaction_channels
+            )
+            if len(reachable_channel_ids) == 0:
+                # I've already bridged this reaction to all reachable channels
+                return
+
             # First, check whether this message is bridged, in which case I need to find its source
             def get_source_message_map():
                 return session.scalars(
                     SQLSelect(DBMessageMap).where(
-                        DBMessageMap.target_message == str(payload.message_id),
+                        DBMessageMap.target_message == source_message_id_str,
                     )
                 ).first()
 
@@ -997,7 +1037,13 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
 
             if not bridges.get_outbound_bridges(source_channel_id):
                 if len(async_add_reactions) > 0:
-                    await async_add_reactions[0]
+                    reaction_added = await async_add_reactions[0]
+
+                    def insert_into_reactions_map():
+                        session.add(reaction_added)
+                        session.commit()
+
+                    await sql_retry(insert_into_reactions_map)
                 return
 
             def get_bridged_messages():
@@ -1034,6 +1080,14 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                         "Ran into a Discord exception while trying to add a reaction across a bridge:\n"
                         + str(e)
                     )
+
+        reactions_added = await asyncio.gather(*async_add_reactions)
+
+        def insert_into_reactions_map():
+            session.add_all(reactions_added)
+            session.commit()
+
+        await sql_retry(insert_into_reactions_map)
     except SQLError as e:
         if session:
             session.rollback()
@@ -1043,8 +1097,6 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
             "Ran into an SQL error while trying to add a reaction to a message:\n"
             + str(e)
         )
-
-    await asyncio.gather(*async_add_reactions)
 
 
 async def copy_emoji_into_server(
