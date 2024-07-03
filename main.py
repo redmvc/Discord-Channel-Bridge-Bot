@@ -274,7 +274,7 @@ async def on_raw_typing(payload: discord.RawTypingEvent):
         return
     source_user_id = source_user.id
 
-    if globals.client.user and globals.client.user.id == source_user_id:
+    if not globals.client.user or globals.client.user.id == source_user_id:
         return
 
     outbound_bridges = bridges.get_outbound_bridges(payload.channel_id)
