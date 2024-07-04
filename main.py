@@ -844,14 +844,15 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
             # I don't have the emoji mapped locally, I'll add it to my server and update my map
             try:
                 fallback_emoji = await copy_emoji_into_server(payload.emoji)
-                if not fallback_emoji:
-                    return
             except Exception:
-                return
+                fallback_emoji = None
     else:
         # It's a standard emoji, it's fine
         fallback_emoji = payload.emoji.name
         emoji_id_str = fallback_emoji
+
+    # Get the IDs of all emoji that match the current one
+    equivalent_emoji_ids = get_equivalent_emoji_ids(payload.emoji)
 
     # Now find the list of channels that can validly be reached via outbound chains from this channel
     reachable_channel_ids = bridges.get_reachable_channels(
@@ -864,15 +865,41 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         # Create a function to add reactions to messages asynchronously and gather them all at the end
         source_message_id_str = str(payload.message_id)
         source_channel_id_str = str(payload.channel_id)
-        async_add_reactions: list[Coroutine[Any, Any, DBReactionMap]] = []
+        async_add_reactions: list[Coroutine[Any, Any, DBReactionMap | None]] = []
 
         async def add_reaction_helper(
             bridged_channel: discord.TextChannel | discord.Thread,
             target_message_id: int,
-            fallback_emoji: discord.Emoji | str,
         ):
-            bridged_message = bridged_channel.get_partial_message(target_message_id)
-            await bridged_message.add_reaction(fallback_emoji)
+            bridged_message = await bridged_channel.fetch_message(target_message_id)
+
+            # I'll try to check whether there are already reactions in the target message matching mine
+            existing_matching_emoji = next(
+                (
+                    emoji
+                    for reaction in bridged_message.reactions
+                    if (
+                        (emoji := reaction.emoji)
+                        and (
+                            (
+                                not (is_str := isinstance(emoji, str))
+                                and (
+                                    emoji.name in equivalent_emoji_ids
+                                    or str(emoji.id) in equivalent_emoji_ids
+                                )
+                            )
+                            or (is_str and emoji in equivalent_emoji_ids)
+                        )
+                    )
+                ),
+                None,
+            )
+            if existing_matching_emoji:
+                await bridged_message.add_reaction(existing_matching_emoji)
+            elif fallback_emoji:
+                await bridged_message.add_reaction(fallback_emoji)
+            else:
+                return None
 
             # I'll return a reaction map to insert into the reaction map table
             return DBReactionMap(
@@ -935,9 +962,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                 if source_channel_id in reachable_channel_ids:
                     try:
                         async_add_reactions.append(
-                            add_reaction_helper(
-                                source_channel, source_message_id, fallback_emoji
-                            )
+                            add_reaction_helper(source_channel, source_message_id)
                         )
                     except discord.HTTPException as e:
                         warn(
@@ -984,9 +1009,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                 try:
                     async_add_reactions.append(
                         add_reaction_helper(
-                            bridged_channel,
-                            int(message_row.target_message),
-                            fallback_emoji,
+                            bridged_channel, int(message_row.target_message)
                         )
                     )
                 except discord.HTTPException as e:
@@ -998,7 +1021,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         reactions_added = await asyncio.gather(*async_add_reactions)
 
         def insert_into_reactions_map():
-            session.add_all(reactions_added)
+            session.add_all([r for r in reactions_added if r])
             session.commit()
 
         await sql_retry(insert_into_reactions_map)
