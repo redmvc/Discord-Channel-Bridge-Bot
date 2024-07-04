@@ -1144,16 +1144,7 @@ async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
     reactions_with_emoji = {
         reaction
         for reaction in message.reactions
-        if (
-            (isinstance(reaction.emoji, str) and reaction.emoji in equivalent_emoji_ids)
-            or (
-                not isinstance(reaction.emoji, str)
-                and (
-                    str(reaction.emoji.id) in equivalent_emoji_ids
-                    or reaction.emoji.name in equivalent_emoji_ids
-                )
-            )
-        )
+        if reaction.emoji == payload.emoji.name or reaction.emoji == payload.emoji
     }
     if len(reactions_with_emoji) > 0:
         for reaction in reactions_with_emoji:
