@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import random
+import re
 from typing import Any, Coroutine, TypedDict, cast
 from warnings import warn
 
@@ -344,6 +345,9 @@ async def bridge_message_helper(message: discord.Message):
     if not outbound_bridges:
         return
 
+    # Ensure that the message has emoji I have access to
+    message_content = await replace_missing_emoji(message.content)
+
     # Get all channels reachable from this one via an unbroken sequence of outbound bridges as well as their webhooks
     reachable_channels = bridges.get_reachable_channels(
         message.channel.id,
@@ -473,11 +477,13 @@ async def bridge_message_helper(message: discord.Message):
                             if reply_has_ping:
                                 display_name = "@" + display_name
 
-                            replied_content = truncate(
-                                discord.utils.remove_markdown(
-                                    message_replied_to.clean_content
-                                ),
-                                50,
+                            replied_content = await replace_missing_emoji(
+                                truncate(
+                                    discord.utils.remove_markdown(
+                                        message_replied_to.clean_content
+                                    ),
+                                    50,
+                                )
                             )
                             reply_embed = [
                                 discord.Embed.from_dict(
@@ -505,7 +511,7 @@ async def bridge_message_helper(message: discord.Message):
                         attachments.append(await attachment.to_file())
 
                     return await webhook.send(
-                        content=message.content,
+                        content=message_content,
                         allowed_mentions=discord.AllowedMentions(
                             users=True, roles=False, everyone=False
                         ),
@@ -589,6 +595,9 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
 
     if not bridges.get_outbound_bridges(payload.channel_id):
         return
+
+    # Ensure that the message has emoji I have access to
+    updated_message_content = await replace_missing_emoji(updated_message_content)
 
     # Get all channels reachable from this one via an unbroken sequence of outbound bridges as well as their webhooks
     reachable_channels = bridges.get_reachable_channels(
@@ -677,6 +686,52 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
         warn("Ran into an SQL error while trying to edit a message:\n" + str(e))
 
     await asyncio.gather(*async_message_edits)
+
+
+async def replace_missing_emoji(message_content: str) -> str:
+    """Return a version of the contents of a message that replaces any instances of an emoji that the bot can't find with matching ones, if possible.
+
+    #### Args:
+        - `message_content`: The content of the message to process.
+    """
+    if not globals.emoji_server:
+        # If we don't have an emoji server to store our own versions of emoji in then there's nothing we can do
+        return message_content
+
+    message_emoji: set[tuple[str, str]] = set(
+        re.findall(r"<(a?:[^:]+):(\d+)>", message_content)
+    )
+    if len(message_emoji) == 0:
+        # Message has no emoji
+        return message_content
+
+    emoji_to_replace: dict[str, str] = {}
+    for emoji_name, emoji_id_str in message_emoji:
+        emoji_id = int(emoji_id_str)
+        emoji = globals.client.get_emoji(emoji_id)
+        if emoji and emoji.available:
+            # I already have access to this emoji so it's fine
+            continue
+
+        if globals.emoji_mappings.get(emoji_id) and (
+            emoji := globals.client.get_emoji(globals.emoji_mappings[emoji_id])
+        ):
+            # I don't have access to this emoji but I have a matching one in my emoji mappings
+            emoji_to_replace[f"<{emoji_name}:{emoji_id_str}>"] = str(emoji)
+            continue
+
+        try:
+            emoji = await copy_emoji_into_server(
+                missing_emoji_name=emoji_name, missing_emoji_id=emoji_id_str
+            )
+            if emoji:
+                emoji_to_replace[f"<{emoji_name}:{emoji_id_str}>"] = str(emoji)
+        except Exception:
+            pass
+
+    for missing_emoji_str, new_emoji_str in emoji_to_replace.items():
+        message_content = message_content.replace(missing_emoji_str, new_emoji_str)
+    return message_content
 
 
 @globals.client.event
@@ -843,7 +898,9 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         if not fallback_emoji:
             # I don't have the emoji mapped locally, I'll add it to my server and update my map
             try:
-                fallback_emoji = await copy_emoji_into_server(payload.emoji)
+                fallback_emoji = await copy_emoji_into_server(
+                    missing_emoji=payload.emoji
+                )
             except Exception:
                 fallback_emoji = None
     else:
@@ -1050,14 +1107,20 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
 
 
 async def copy_emoji_into_server(
-    missing_emoji: discord.PartialEmoji,
+    *,
+    missing_emoji: discord.PartialEmoji | None = None,
+    missing_emoji_name: str | None = None,
+    missing_emoji_id: str | None = None,
 ) -> discord.Emoji | None:
     """Try to create an emoji in the emoji server and, if successful, return it.
 
     #### Args:
-        - `missing_emoji`: The emoji we are trying to copy into our emoji server.
+        - `missing_emoji`: The emoji we are trying to copy into our emoji server. Defaults to None, in which case `missing_emoji_name` and `missing_emoji_id` are used instead.
+        - `missing_emoji_name`: The name of a missing emoji, optionally preceded by an `"a:"` in case it's animated. Defaults to None, in which case `missing_emoji` is used instead.
+        - `missing_emoji_id`: The stringified ID of a missing emoji. Defaults to None, in which case `missing_emoji` is used instead.
 
     #### Raises:
+        - `ValueError`: Invalid number of arguments passed to function.
         - `Forbidden`: Emoji server permissions not set correctly.
         - `HTTPResponseError`: HTTP request to fetch emoji image returned a status other than 200.
         - `InvalidURL`: URL generated from emoji ID was not valid.
@@ -1067,18 +1130,38 @@ async def copy_emoji_into_server(
     if not globals.emoji_server:
         return None
 
-    if missing_emoji.animated:
+    if missing_emoji and (missing_emoji_name or missing_emoji_id):
+        raise ValueError(
+            "Either missing_emoji or missing_emoji_name and missing_emoji_id must be passed as arguments, not both."
+        )
+
+    if not missing_emoji and (not missing_emoji_name or not missing_emoji_id):
+        raise ValueError(
+            "At least one of missing_emoji or missing_emoji_name and missing_emoji_id must be passed as arguments."
+        )
+
+    if missing_emoji:
+        missing_emoji_id = str(missing_emoji.id)
+        missing_emoji_name = missing_emoji.name
+        missing_emoji_animated = missing_emoji.animated
+    else:
+        assert missing_emoji_name and missing_emoji_id
+        missing_emoji_animated = missing_emoji_name.startswith("a:")
+        if missing_emoji_animated:
+            missing_emoji_name = missing_emoji_name[2:]
+
+    if missing_emoji_animated:
         ext = "gif"
     else:
         ext = "png"
     image = await globals.get_image_from_URL(
-        f"https://cdn.discordapp.com/emojis/{missing_emoji.id}.{ext}?v=1"
+        f"https://cdn.discordapp.com/emojis/{missing_emoji_id}.{ext}?v=1"
     )
 
     delete_existing_emoji_query = None
     try:
         emoji = await globals.emoji_server.create_custom_emoji(
-            name=missing_emoji.name, image=image, reason="Bridging reaction."
+            name=missing_emoji_name, image=image, reason="Bridging reaction."
         )
     except discord.Forbidden as e:
         print("Emoji server permissions not set correctly.")
@@ -1102,7 +1185,7 @@ async def copy_emoji_into_server(
 
         try:
             emoji = await globals.emoji_server.create_custom_emoji(
-                name=missing_emoji.name, image=image, reason="Bridging reaction."
+                name=missing_emoji_name, image=image, reason="Bridging reaction."
             )
         except discord.Forbidden as e:
             print("Emoji server permissions not set correctly.")
@@ -1113,9 +1196,17 @@ async def copy_emoji_into_server(
         with SQLSession(engine) as session:
             if delete_existing_emoji_query is not None:
                 await sql_retry(lambda: session.execute(delete_existing_emoji_query))
-            await commands.map_emoji_helper(
-                external_emoji=missing_emoji, internal_emoji=emoji, session=session
-            )
+            if missing_emoji:
+                await commands.map_emoji_helper(
+                    external_emoji=missing_emoji, internal_emoji=emoji, session=session
+                )
+            else:
+                await commands.map_emoji_helper(
+                    external_emoji=int(missing_emoji_id),
+                    external_emoji_name=missing_emoji_name,
+                    internal_emoji=emoji,
+                    session=session,
+                )
             session.commit()
     except SQLError as e:
         warn("Couldn't add emoji mapping to table.")
