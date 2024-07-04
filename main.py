@@ -1343,37 +1343,37 @@ def get_equivalent_emoji_ids(
     """
     validate_types({"emoji": (emoji, (discord.PartialEmoji, int, str))})
 
-    if not isinstance(emoji, discord.PartialEmoji) or emoji.is_custom_emoji():
-        if not isinstance(emoji, discord.PartialEmoji):
-            # This should be an emoji ID
-            try:
-                emoji_id = int(emoji)
-            except ValueError:
-                # For some reason it's not, I'll just return it stringified then
-                return frozenset({str(emoji)})
-        else:
-            # is_custom_emoji() guarantees that emoji.id is not None
-            emoji_id = cast(int, emoji.id)
+    if isinstance(emoji, discord.PartialEmoji) and not emoji.is_custom_emoji():
+        return frozenset({emoji.name})
 
-        emoji_ids = {str(emoji_id)}.union(
+    if not isinstance(emoji, discord.PartialEmoji):
+        # This should be an emoji ID
+        try:
+            emoji_id = int(emoji)
+        except ValueError:
+            # For some reason it's not, I'll just return it stringified then
+            return frozenset({str(emoji)})
+    else:
+        # is_custom_emoji() guarantees that emoji.id is not None
+        emoji_id = cast(int, emoji.id)
+
+    emoji_ids = {str(emoji_id)}.union(
+        {
+            str(external_emoji)
+            for external_emoji, internal_emoji in globals.emoji_mappings.items()
+            if internal_emoji == emoji_id
+        }
+    )
+
+    if globals.emoji_mappings.get(emoji_id):
+        emoji_ids.add(str(globals.emoji_mappings[emoji_id]))
+        emoji_ids = emoji_ids.union(
             {
                 str(external_emoji)
                 for external_emoji, internal_emoji in globals.emoji_mappings.items()
-                if internal_emoji == emoji_id
+                if internal_emoji == globals.emoji_mappings[emoji_id]
             }
         )
-
-        if globals.emoji_mappings.get(emoji_id):
-            emoji_ids.add(str(globals.emoji_mappings[emoji_id]))
-            emoji_ids = emoji_ids.union(
-                {
-                    str(external_emoji)
-                    for external_emoji, internal_emoji in globals.emoji_mappings.items()
-                    if internal_emoji == globals.emoji_mappings[emoji_id]
-                }
-            )
-    else:
-        emoji_ids = {emoji.name}
 
     return frozenset(emoji_ids)
 
