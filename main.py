@@ -146,7 +146,7 @@ async def on_ready():
 
         if len(emoji_not_found) > 0:
             delete_missing_internal_emoji = SQLDelete(DBEmojiMap).where(
-                DBEmojiMap.internal_emoji.in_(list(emoji_not_found))
+                DBEmojiMap.internal_emoji.in_(emoji_not_found)
             )
             session.execute(delete_missing_internal_emoji)
 
@@ -185,7 +185,7 @@ async def on_ready():
 
         if len(inaccessible_channels) > 0:
             delete_inaccessible_channels = SQLDelete(DBAppWhitelist).where(
-                DBAppWhitelist.channel.in_(list(inaccessible_channels))
+                DBAppWhitelist.channel.in_(inaccessible_channels)
             )
             session.execute(delete_inaccessible_channels)
 
