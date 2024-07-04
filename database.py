@@ -83,6 +83,8 @@ class DBReactionMap(DBBase):
     - `source_channel (VARCHAR(32))`: The ID of the channel or thread that message was sent to.
     - `target_message (VARCHAR(32))`: The ID of the message that got this reaction bridged to it.
     - `target_channel (VARCHAR(32))`: The ID of the channel or thread that message is in.
+    - `target_emoji_id (VARCHAR(32))`: The ID of the emoji in the target message.
+    - `target_emoji_name (VARCHAR(32))`: The name of the emoji in the target message.
 
     #### Constraints
     - `unique_emoji_source_target (UNIQUE(source_emoji, source_message, target_message))`: A combination of source emoji, source message, and target message has to be unique.
@@ -104,6 +106,8 @@ class DBReactionMap(DBBase):
     source_channel: Mapped[str] = mapped_column(String(32), nullable=False)
     target_message: Mapped[str] = mapped_column(String(32), nullable=False)
     target_channel: Mapped[str] = mapped_column(String(32), nullable=False)
+    target_emoji_id: Mapped[str] = mapped_column(String(32), nullable=True)
+    target_emoji_name: Mapped[str] = mapped_column(String(32), nullable=True)
 
 
 class DBAutoBridgeThreadChannels(DBBase):
