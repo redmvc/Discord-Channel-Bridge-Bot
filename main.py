@@ -827,9 +827,8 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
     reaction_emoji: discord.Emoji | discord.PartialEmoji | str | None
     if payload.emoji.is_custom_emoji():
         # Custom emoji, I need to check whether it exists and is available to me
-        emoji_id = payload.emoji.id
-        if not emoji_id:
-            return
+        # is_custom_emoji() guarantees that payload.emoji.id is not None
+        emoji_id = cast(int, payload.emoji.id)
 
         reaction_emoji = globals.client.get_emoji(emoji_id)
         if not reaction_emoji or not reaction_emoji.available:
@@ -1114,8 +1113,6 @@ async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
 
     # Get the standardised ID for the removed emoji plus any mapped ones
     equivalent_emoji_ids = get_equivalent_emoji_ids(payload.emoji)
-    if not equivalent_emoji_ids:
-        return
 
     channel = await globals.get_channel_from_id(payload.channel_id)
     assert isinstance(channel, (discord.TextChannel, discord.Thread))
@@ -1167,15 +1164,10 @@ async def on_raw_reaction_clear_emoji(payload: discord.RawReactionClearEmojiEven
         # Only remove reactions across outbound bridges
         return
 
-    # Get the standardised ID for the removed emoji plus any mapped ones
-    equivalent_emoji_ids = get_equivalent_emoji_ids(payload.emoji)
-    if not equivalent_emoji_ids:
-        return
-
     await unreact(
         payload,
         str(payload.emoji.id) if payload.emoji.id else payload.emoji.name,
-        equivalent_emoji_ids,
+        get_equivalent_emoji_ids(payload.emoji),
     )
 
 
@@ -1343,7 +1335,7 @@ async def unreact(
 
 def get_equivalent_emoji_ids(
     emoji: discord.PartialEmoji | int | str,
-) -> frozenset[str] | None:
+) -> frozenset[str]:
     """Return a set with the IDs of all emoji that match the argument (due to being mapped to it in the emoji server).
 
     #### Args:
@@ -1360,9 +1352,8 @@ def get_equivalent_emoji_ids(
                 # For some reason it's not, I'll just return it stringified then
                 return frozenset({str(emoji)})
         else:
-            if not emoji.id:
-                return None
-            emoji_id = emoji.id
+            # is_custom_emoji() guarantees that emoji.id is not None
+            emoji_id = cast(int, emoji.id)
 
         emoji_ids = {str(emoji_id)}.union(
             {
