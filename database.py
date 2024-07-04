@@ -72,6 +72,44 @@ class DBMessageMap(DBBase):
     webhook: Mapped[str] = mapped_column(String(32), nullable=True)
 
 
+class DBReactionMap(DBBase):
+    """
+    An SQLAlchemy ORM class representing a database table listing the mappings between bridged reactions.
+
+    #### Columns
+    - `id (INT)`: The id number of a mapping, has `PRIMARY KEY` and `AUTO_INCREMENT`.
+    - `source_emoji (VARCHAR(30))`: The ID of the emoji in the source message.
+    - `source_message (VARCHAR(32))`: The ID of the message in the original channel.
+    - `source_channel (VARCHAR(32))`: The ID of the channel or thread that message was sent to.
+    - `target_message (VARCHAR(32))`: The ID of the message that got this reaction bridged to it.
+    - `target_channel (VARCHAR(32))`: The ID of the channel or thread that message is in.
+    - `target_emoji_id (VARCHAR(32))`: The ID of the emoji in the target message.
+    - `target_emoji_name (VARCHAR(32))`: The name of the emoji in the target message.
+
+    #### Constraints
+    - `unique_emoji_source_target (UNIQUE(source_emoji, source_message, target_message))`: A combination of source emoji, source message, and target message has to be unique.
+    """
+
+    __tablename__ = "reaction_mappings"
+    __table_args__ = (
+        UniqueConstraint(
+            "source_emoji",
+            "source_message",
+            "target_message",
+            name="unique_emoji_source_target",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    source_emoji: Mapped[str] = mapped_column(String(32), nullable=False)
+    source_message: Mapped[str] = mapped_column(String(32), nullable=False)
+    source_channel: Mapped[str] = mapped_column(String(32), nullable=False)
+    target_message: Mapped[str] = mapped_column(String(32), nullable=False)
+    target_channel: Mapped[str] = mapped_column(String(32), nullable=False)
+    target_emoji_id: Mapped[str] = mapped_column(String(32), nullable=True)
+    target_emoji_name: Mapped[str] = mapped_column(String(32), nullable=True)
+
+
 class DBAutoBridgeThreadChannels(DBBase):
     """
     An SQLAlchemy ORM class representing a database table listing all channels that will automatically bridge newly-created threads.
