@@ -679,6 +679,52 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
     await asyncio.gather(*async_message_edits)
 
 
+async def replace_missing_emoji(message_content: str) -> str:
+    """Return a version of the contents of a message that replaces any instances of an emoji that the bot can't find with matching ones, if possible.
+
+    #### Args:
+        - `message_content`: The content of the message to process.
+    """
+    if not globals.emoji_server:
+        # If we don't have an emoji server to store our own versions of emoji in then there's nothing we can do
+        return message_content
+
+    message_emoji: set[tuple[str, str]] = set(
+        re.findall(r"<(a?:[^:]+):(\d+)>", message_content)
+    )
+    if len(message_emoji) == 0:
+        # Message has no emoji
+        return message_content
+
+    emoji_to_replace: dict[str, str] = {}
+    for emoji_name, emoji_id_str in message_emoji:
+        emoji_id = int(emoji_id_str)
+        emoji = globals.client.get_emoji(emoji_id)
+        if emoji and emoji.available:
+            # I already have access to this emoji so it's fine
+            continue
+
+        if globals.emoji_mappings.get(emoji_id) and (
+            emoji := globals.client.get_emoji(globals.emoji_mappings[emoji_id])
+        ):
+            # I don't have access to this emoji but I have a matching one in my emoji mappings
+            emoji_to_replace[f"<{emoji_name}:{emoji_id_str}>"] = str(emoji)
+            continue
+
+        try:
+            emoji = await copy_emoji_into_server(
+                missing_emoji_name=emoji_name, missing_emoji_id=emoji_id_str
+            )
+            if emoji:
+                emoji_to_replace[f"<{emoji_name}:{emoji_id_str}>"] = str(emoji)
+        except Exception:
+            pass
+
+    for missing_emoji_str, new_emoji_str in emoji_to_replace.items():
+        message_content = message_content.replace(missing_emoji_str, new_emoji_str)
+    return message_content
+
+
 @globals.client.event
 async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
     """Delete bridged versions of a message, if possible.
