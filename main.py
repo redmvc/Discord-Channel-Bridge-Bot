@@ -895,19 +895,29 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                 None,
             )
             if existing_matching_emoji:
-                await bridged_message.add_reaction(existing_matching_emoji)
+                bridged_emoji = existing_matching_emoji
             elif fallback_emoji:
-                await bridged_message.add_reaction(fallback_emoji)
+                bridged_emoji = fallback_emoji
             else:
                 return None
 
+            await bridged_message.add_reaction(bridged_emoji)
+
             # I'll return a reaction map to insert into the reaction map table
+            if isinstance(bridged_emoji, str):
+                bridged_emoji_id = None
+                bridged_emoji_name = bridged_emoji
+            else:
+                bridged_emoji_id = str(bridged_emoji.id) if bridged_emoji.id else None
+                bridged_emoji_name = bridged_emoji.name
             return DBReactionMap(
-                emoji=emoji_id_str,
+                source_emoji=emoji_id_str,
                 source_message=source_message_id_str,
                 source_channel=source_channel_id_str,
                 target_message=str(target_message_id),
                 target_channel=str(bridged_channel.id),
+                target_emoji_id=bridged_emoji_id,
+                target_emoji_name=bridged_emoji_name,
             )
 
         with SQLSession(engine) as session:
@@ -916,7 +926,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                 return session.scalars(
                     SQLSelect(DBReactionMap).where(
                         DBReactionMap.source_message == source_message_id_str,
-                        DBReactionMap.emoji == emoji_id_str,
+                        DBReactionMap.source_emoji == emoji_id_str,
                     )
                 )
 
@@ -1221,7 +1231,7 @@ async def unreact(
             # First I find all of the messages that got this reaction bridged to them
             conditions = [DBReactionMap.source_message == str(payload.message_id)]
             if removed_emoji_id:
-                conditions.append(DBReactionMap.emoji == removed_emoji_id)
+                conditions.append(DBReactionMap.source_emoji == removed_emoji_id)
 
             bridged_reactions: ScalarResult[DBReactionMap] = await sql_retry(
                 lambda: session.scalars(SQLSelect(DBReactionMap).where(*conditions))
@@ -1230,7 +1240,9 @@ async def unreact(
                 (
                     map.target_message,
                     map.target_channel,
-                    equivalent_emoji_ids or get_equivalent_emoji_ids(map.emoji),
+                    map.target_emoji_id,
+                    map.target_emoji_name,
+                    equivalent_emoji_ids or get_equivalent_emoji_ids(map.source_emoji),
                 )
                 for map in bridged_reactions
             }
@@ -1246,11 +1258,11 @@ async def unreact(
             # Next I find the messages that still have reactions of this type in them even after I removed the ones above
             conditions = [
                 DBReactionMap.target_message.in_(
-                    [message_id for message_id, _, _ in bridged_messages]
+                    [message_id for message_id, _, _, _, _ in bridged_messages]
                 )
             ]
             if equivalent_emoji_ids:
-                conditions.append(DBReactionMap.emoji.in_(equivalent_emoji_ids))
+                conditions.append(DBReactionMap.source_emoji.in_(equivalent_emoji_ids))
             remaining_reactions: ScalarResult[DBReactionMap] = await sql_retry(
                 lambda: session.scalars(SQLSelect(DBReactionMap).where(*conditions))
             )
@@ -1260,7 +1272,9 @@ async def unreact(
                 (
                     map.target_message,
                     map.target_channel,
-                    equivalent_emoji_ids or get_equivalent_emoji_ids(map.emoji),
+                    map.target_emoji_id,
+                    map.target_emoji_name,
+                    equivalent_emoji_ids or get_equivalent_emoji_ids(map.source_emoji),
                 )
                 for map in remaining_reactions
             }
@@ -1272,62 +1286,65 @@ async def unreact(
                 return
 
             # There is at least one reaction in one target message that should no longer be there
-            def get_emoji_or_name(emoji_id: str):
-                try:
-                    emoji_or_name: discord.Emoji | str | None = (
-                        globals.client.get_emoji(int(emoji_id))
-                    )
-
-                    if not emoji_or_name and emoji_to_remove:
-                        # I can't find the emoji by ID but it might still be an emoji I can unreact if it happens to have the same name as the original one
-                        emoji_or_name = f"{emoji_to_remove.name}:{emoji_id}"
-                except ValueError:
-                    emoji_or_name = emoji_id
-
-                return emoji_or_name
-
-            async def remove_specific_emoji(
-                target_message: discord.Message,
-                target_channel_member: discord.Member,
-                emoji: discord.Emoji | str,
+            def get_emoji_or_name(
+                target_emoji_id: str | None,
+                target_emoji_name: str | None,
             ):
-                try:
-                    await target_message.remove_reaction(emoji, target_channel_member)
-                except Exception:
-                    pass
+                if target_emoji_name:
+                    if target_emoji_id:
+                        return f"{target_emoji_name}:{target_emoji_id}"
+                    else:
+                        return target_emoji_name
+                elif target_emoji_id:
+                    try:
+                        return globals.client.get_emoji(int(target_emoji_id))
+                    except ValueError:
+                        return None
+                else:
+                    return None
 
             async def remove_reactions_with_emoji(
                 target_channel_id: str,
                 target_message_id: str,
-                emoji_ids: frozenset[str],
+                target_emoji_id: str | None,
+                target_emoji_name: str | None,
             ):
                 target_channel = await globals.get_channel_from_id(
                     int(target_channel_id)
                 )
                 assert isinstance(target_channel, (discord.TextChannel, discord.Thread))
-                target_channel_member = target_channel.guild.me
 
                 target_message = await target_channel.fetch_message(
                     int(target_message_id)
                 )
 
-                await asyncio.gather(
-                    *[
-                        remove_specific_emoji(
-                            target_message, target_channel_member, emoji
+                emoji_to_remove = get_emoji_or_name(target_emoji_id, target_emoji_name)
+                if emoji_to_remove:
+                    try:
+                        await target_message.remove_reaction(
+                            emoji_to_remove, target_channel.guild.me
                         )
-                        for emoji_id in emoji_ids
-                        if (emoji := get_emoji_or_name(emoji_id))
-                    ]
-                )
+                    except Exception:
+                        pass
 
+            compacted_messages_to_remove_reaction_from = {
+                (
+                    target_message_id,
+                    target_channel_id,
+                    target_emoji_id,
+                    target_emoji_name,
+                )
+                for target_message_id, target_channel_id, target_emoji_id, target_emoji_name, _ in messages_to_remove_reaction_from
+            }
             await asyncio.gather(
                 *[
                     remove_reactions_with_emoji(
-                        target_channel_id, target_message_id, emoji_ids
+                        target_channel_id,
+                        target_message_id,
+                        target_emoji_id,
+                        target_emoji_name,
                     )
-                    for target_message_id, target_channel_id, emoji_ids in messages_to_remove_reaction_from
-                    if emoji_ids
+                    for target_message_id, target_channel_id, target_emoji_id, target_emoji_name in compacted_messages_to_remove_reaction_from
                 ]
             )
     except SQLError as e:
