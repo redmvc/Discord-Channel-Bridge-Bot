@@ -78,20 +78,20 @@ class DBReactionMap(DBBase):
 
     #### Columns
     - `id (INT)`: The id number of a mapping, has `PRIMARY KEY` and `AUTO_INCREMENT`.
-    - `emoji (VARCHAR(30))`: The ID of the emoji in the source message.
+    - `source_emoji (VARCHAR(30))`: The ID of the emoji in the source message.
     - `source_message (VARCHAR(32))`: The ID of the message in the original channel.
     - `source_channel (VARCHAR(32))`: The ID of the channel or thread that message was sent to.
     - `target_message (VARCHAR(32))`: The ID of the message that got this reaction bridged to it.
     - `target_channel (VARCHAR(32))`: The ID of the channel or thread that message is in.
 
     #### Constraints
-    - `unique_emoji_source_target (UNIQUE(emoji, source_message, target_message))`: A combination of emoji, source message, and target message has to be unique.
+    - `unique_emoji_source_target (UNIQUE(source_emoji, source_message, target_message))`: A combination of source emoji, source message, and target message has to be unique.
     """
 
     __tablename__ = "reaction_mappings"
     __table_args__ = (
         UniqueConstraint(
-            "emoji",
+            "source_emoji",
             "source_message",
             "target_message",
             name="unique_emoji_source_target",
@@ -99,7 +99,7 @@ class DBReactionMap(DBBase):
     )
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    emoji: Mapped[str] = mapped_column(String(32), nullable=False)
+    source_emoji: Mapped[str] = mapped_column(String(32), nullable=False)
     source_message: Mapped[str] = mapped_column(String(32), nullable=False)
     source_channel: Mapped[str] = mapped_column(String(32), nullable=False)
     target_message: Mapped[str] = mapped_column(String(32), nullable=False)

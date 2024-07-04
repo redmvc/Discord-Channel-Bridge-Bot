@@ -903,7 +903,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
 
             # I'll return a reaction map to insert into the reaction map table
             return DBReactionMap(
-                emoji=emoji_id_str,
+                source_emoji=emoji_id_str,
                 source_message=source_message_id_str,
                 source_channel=source_channel_id_str,
                 target_message=str(target_message_id),
@@ -916,7 +916,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                 return session.scalars(
                     SQLSelect(DBReactionMap).where(
                         DBReactionMap.source_message == source_message_id_str,
-                        DBReactionMap.emoji == emoji_id_str,
+                        DBReactionMap.source_emoji == emoji_id_str,
                     )
                 )
 
@@ -1221,7 +1221,7 @@ async def unreact(
             # First I find all of the messages that got this reaction bridged to them
             conditions = [DBReactionMap.source_message == str(payload.message_id)]
             if removed_emoji_id:
-                conditions.append(DBReactionMap.emoji == removed_emoji_id)
+                conditions.append(DBReactionMap.source_emoji == removed_emoji_id)
 
             bridged_reactions: ScalarResult[DBReactionMap] = await sql_retry(
                 lambda: session.scalars(SQLSelect(DBReactionMap).where(*conditions))
@@ -1230,7 +1230,7 @@ async def unreact(
                 (
                     map.target_message,
                     map.target_channel,
-                    equivalent_emoji_ids or get_equivalent_emoji_ids(map.emoji),
+                    equivalent_emoji_ids or get_equivalent_emoji_ids(map.source_emoji),
                 )
                 for map in bridged_reactions
             }
@@ -1250,7 +1250,7 @@ async def unreact(
                 )
             ]
             if equivalent_emoji_ids:
-                conditions.append(DBReactionMap.emoji.in_(equivalent_emoji_ids))
+                conditions.append(DBReactionMap.source_emoji.in_(equivalent_emoji_ids))
             remaining_reactions: ScalarResult[DBReactionMap] = await sql_retry(
                 lambda: session.scalars(SQLSelect(DBReactionMap).where(*conditions))
             )
@@ -1260,7 +1260,7 @@ async def unreact(
                 (
                     map.target_message,
                     map.target_channel,
-                    equivalent_emoji_ids or get_equivalent_emoji_ids(map.emoji),
+                    equivalent_emoji_ids or get_equivalent_emoji_ids(map.source_emoji),
                 )
                 for map in remaining_reactions
             }
