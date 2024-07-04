@@ -843,7 +843,9 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         if not fallback_emoji:
             # I don't have the emoji mapped locally, I'll add it to my server and update my map
             try:
-                fallback_emoji = await copy_emoji_into_server(payload.emoji)
+                fallback_emoji = await copy_emoji_into_server(
+                    missing_emoji=payload.emoji
+                )
             except Exception:
                 fallback_emoji = None
     else:
@@ -1050,14 +1052,20 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
 
 
 async def copy_emoji_into_server(
-    missing_emoji: discord.PartialEmoji,
+    *,
+    missing_emoji: discord.PartialEmoji | None = None,
+    missing_emoji_name: str | None = None,
+    missing_emoji_id: str | None = None,
 ) -> discord.Emoji | None:
     """Try to create an emoji in the emoji server and, if successful, return it.
 
     #### Args:
-        - `missing_emoji`: The emoji we are trying to copy into our emoji server.
+        - `missing_emoji`: The emoji we are trying to copy into our emoji server. Defaults to None, in which case `missing_emoji_name` and `missing_emoji_id` are used instead.
+        - `missing_emoji_name`: The name of a missing emoji, optionally preceded by an `"a:"` in case it's animated. Defaults to None, in which case `missing_emoji` is used instead.
+        - `missing_emoji_id`: The stringified ID of a missing emoji. Defaults to None, in which case `missing_emoji` is used instead.
 
     #### Raises:
+        - `ValueError`: Invalid number of arguments passed to function.
         - `Forbidden`: Emoji server permissions not set correctly.
         - `HTTPResponseError`: HTTP request to fetch emoji image returned a status other than 200.
         - `InvalidURL`: URL generated from emoji ID was not valid.
@@ -1067,18 +1075,38 @@ async def copy_emoji_into_server(
     if not globals.emoji_server:
         return None
 
-    if missing_emoji.animated:
+    if missing_emoji and (missing_emoji_name or missing_emoji_id):
+        raise ValueError(
+            "Either missing_emoji or missing_emoji_name and missing_emoji_id must be passed as arguments, not both."
+        )
+
+    if not missing_emoji and (not missing_emoji_name or not missing_emoji_id):
+        raise ValueError(
+            "At least one of missing_emoji or missing_emoji_name and missing_emoji_id must be passed as arguments."
+        )
+
+    if missing_emoji:
+        missing_emoji_id = str(missing_emoji.id)
+        missing_emoji_name = missing_emoji.name
+        missing_emoji_animated = missing_emoji.animated
+    else:
+        assert missing_emoji_name and missing_emoji_id
+        missing_emoji_animated = missing_emoji_name.startswith("a:")
+        if missing_emoji_animated:
+            missing_emoji_name = missing_emoji_name[2:]
+
+    if missing_emoji_animated:
         ext = "gif"
     else:
         ext = "png"
     image = await globals.get_image_from_URL(
-        f"https://cdn.discordapp.com/emojis/{missing_emoji.id}.{ext}?v=1"
+        f"https://cdn.discordapp.com/emojis/{missing_emoji_id}.{ext}?v=1"
     )
 
     delete_existing_emoji_query = None
     try:
         emoji = await globals.emoji_server.create_custom_emoji(
-            name=missing_emoji.name, image=image, reason="Bridging reaction."
+            name=missing_emoji_name, image=image, reason="Bridging reaction."
         )
     except discord.Forbidden as e:
         print("Emoji server permissions not set correctly.")
@@ -1102,7 +1130,7 @@ async def copy_emoji_into_server(
 
         try:
             emoji = await globals.emoji_server.create_custom_emoji(
-                name=missing_emoji.name, image=image, reason="Bridging reaction."
+                name=missing_emoji_name, image=image, reason="Bridging reaction."
             )
         except discord.Forbidden as e:
             print("Emoji server permissions not set correctly.")
@@ -1113,9 +1141,17 @@ async def copy_emoji_into_server(
         with SQLSession(engine) as session:
             if delete_existing_emoji_query is not None:
                 await sql_retry(lambda: session.execute(delete_existing_emoji_query))
-            await commands.map_emoji_helper(
-                external_emoji=missing_emoji, internal_emoji=emoji, session=session
-            )
+            if missing_emoji:
+                await commands.map_emoji_helper(
+                    external_emoji=missing_emoji, internal_emoji=emoji, session=session
+                )
+            else:
+                await commands.map_emoji_helper(
+                    external_emoji=int(missing_emoji_id),
+                    external_emoji_name=missing_emoji_name,
+                    internal_emoji=emoji,
+                    session=session,
+                )
             session.commit()
     except SQLError as e:
         warn("Couldn't add emoji mapping to table.")

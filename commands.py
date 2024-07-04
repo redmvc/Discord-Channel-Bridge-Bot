@@ -1438,6 +1438,7 @@ async def map_emoji_helper(
 
     #### Args:
         - `external_emoji`: The custom emoji that is not present in any servers the bot is in, or an ID of one.
+        - `external_emoji_name`: The name of the external emoji. Defaults to None.
         - `internal_emoji`: An emoji the bot has in its emoji server.
         - `session`: A connection to the database. Defaults to None.
 
