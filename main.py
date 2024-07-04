@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import random
+import re
 from typing import Any, Coroutine, TypedDict, cast
 from warnings import warn
 
@@ -344,6 +345,9 @@ async def bridge_message_helper(message: discord.Message):
     if not outbound_bridges:
         return
 
+    # Ensure that the message has emoji I have access to
+    message_content = await replace_missing_emoji(message.content)
+
     # Get all channels reachable from this one via an unbroken sequence of outbound bridges as well as their webhooks
     reachable_channels = bridges.get_reachable_channels(
         message.channel.id,
@@ -473,11 +477,13 @@ async def bridge_message_helper(message: discord.Message):
                             if reply_has_ping:
                                 display_name = "@" + display_name
 
-                            replied_content = truncate(
-                                discord.utils.remove_markdown(
-                                    message_replied_to.clean_content
-                                ),
-                                50,
+                            replied_content = await replace_missing_emoji(
+                                truncate(
+                                    discord.utils.remove_markdown(
+                                        message_replied_to.clean_content
+                                    ),
+                                    50,
+                                )
                             )
                             reply_embed = [
                                 discord.Embed.from_dict(
@@ -505,7 +511,7 @@ async def bridge_message_helper(message: discord.Message):
                         attachments.append(await attachment.to_file())
 
                     return await webhook.send(
-                        content=message.content,
+                        content=message_content,
                         allowed_mentions=discord.AllowedMentions(
                             users=True, roles=False, everyone=False
                         ),
@@ -589,6 +595,9 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
 
     if not bridges.get_outbound_bridges(payload.channel_id):
         return
+
+    # Ensure that the message has emoji I have access to
+    updated_message_content = await replace_missing_emoji(updated_message_content)
 
     # Get all channels reachable from this one via an unbroken sequence of outbound bridges as well as their webhooks
     reachable_channels = bridges.get_reachable_channels(
