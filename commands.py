@@ -1026,7 +1026,7 @@ async def create_bridge_and_db(
 
         await sql_retry(execute_query)
     except Exception as e:
-        if session:
+        if close_after and session:
             session.rollback()
             session.close()
 
@@ -1495,7 +1495,7 @@ async def map_emoji_helper(
 
         await sql_retry(lambda: session.execute(upsert_emoji))
     except Exception as e:
-        if session:
+        if close_after and session:
             session.rollback()
             session.close()
 
