@@ -823,36 +823,35 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         # Only bridge reactions across outbound bridges
         return
 
-    # Check whether I have access to the emoji
-    reaction_emoji: discord.Emoji | discord.PartialEmoji | str | None
+    # Choose a "fallback emoji" to use in case I don't have access to the one being reacted and the message across the bridge doesn't already have it
+    fallback_emoji: discord.Emoji | str | None
     if payload.emoji.is_custom_emoji():
         # Custom emoji, I need to check whether it exists and is available to me
         # is_custom_emoji() guarantees that payload.emoji.id is not None
         emoji_id = cast(int, payload.emoji.id)
+        emoji_id_str = str(emoji_id)
 
-        reaction_emoji = globals.client.get_emoji(emoji_id)
-        if not reaction_emoji or not reaction_emoji.available:
-            reaction_emoji = None
+        fallback_emoji = globals.client.get_emoji(emoji_id)
+        if not fallback_emoji or not fallback_emoji.available:
+            fallback_emoji = None
             # Couldn't find the reactji, will try to see if I've got it mapped locally
             mapped_emoji_id = globals.emoji_mappings.get(emoji_id)
             if mapped_emoji_id:
                 # I already have this Emoji mapped locally
-                reaction_emoji = globals.client.get_emoji(mapped_emoji_id)
+                fallback_emoji = globals.client.get_emoji(mapped_emoji_id)
 
-        if not reaction_emoji:
+        if not fallback_emoji:
             # I don't have the emoji mapped locally, I'll add it to my server and update my map
             try:
-                reaction_emoji = await copy_emoji_into_server(payload.emoji)
-                if not reaction_emoji:
+                fallback_emoji = await copy_emoji_into_server(payload.emoji)
+                if not fallback_emoji:
                     return
             except Exception:
                 return
-
-        emoji_id_str = str(emoji_id)
     else:
         # It's a standard emoji, it's fine
-        reaction_emoji = payload.emoji.name
-        emoji_id_str = reaction_emoji
+        fallback_emoji = payload.emoji.name
+        emoji_id_str = fallback_emoji
 
     # Now find the list of channels that can validly be reached via outbound chains from this channel
     reachable_channel_ids = bridges.get_reachable_channels(
@@ -870,10 +869,10 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         async def add_reaction_helper(
             bridged_channel: discord.TextChannel | discord.Thread,
             target_message_id: int,
-            reaction_emoji: discord.Emoji | str,
+            fallback_emoji: discord.Emoji | str,
         ):
             bridged_message = bridged_channel.get_partial_message(target_message_id)
-            await bridged_message.add_reaction(reaction_emoji)
+            await bridged_message.add_reaction(fallback_emoji)
 
             # I'll return a reaction map to insert into the reaction map table
             return DBReactionMap(
@@ -937,7 +936,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                     try:
                         async_add_reactions.append(
                             add_reaction_helper(
-                                source_channel, source_message_id, reaction_emoji
+                                source_channel, source_message_id, fallback_emoji
                             )
                         )
                     except discord.HTTPException as e:
@@ -987,7 +986,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                         add_reaction_helper(
                             bridged_channel,
                             int(message_row.target_message),
-                            reaction_emoji,
+                            fallback_emoji,
                         )
                     )
                 except discord.HTTPException as e:
