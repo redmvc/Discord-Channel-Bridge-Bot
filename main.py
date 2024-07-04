@@ -1352,7 +1352,8 @@ def get_equivalent_emoji_ids(
             emoji_id = int(emoji)
         except ValueError:
             # For some reason it's not, I'll just return it stringified then
-            return frozenset({str(emoji)})
+            # This can only happen if emoji is a string
+            return frozenset({cast(str, emoji)})
     else:
         # is_custom_emoji() guarantees that emoji.id is not None
         emoji_id = cast(int, emoji.id)
