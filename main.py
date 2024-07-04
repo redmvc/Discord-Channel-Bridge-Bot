@@ -910,6 +910,9 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
             else:
                 bridged_emoji_id = str(bridged_emoji.id) if bridged_emoji.id else None
                 bridged_emoji_name = bridged_emoji.name
+                if bridged_emoji.animated:
+                    bridged_emoji_name = f"a:{bridged_emoji_name}"
+
             return DBReactionMap(
                 source_emoji=emoji_id_str,
                 source_message=source_message_id_str,
