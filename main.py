@@ -1362,7 +1362,7 @@ def get_equivalent_emoji_ids(
     equivalent_emoji_ids: set[str] = set()
     while len(emoji_to_check) > 0:
         checking_emoji = emoji_to_check.pop()
-        if checking_emoji in equivalent_emoji_ids:
+        if str(checking_emoji) in equivalent_emoji_ids:
             continue
 
         equivalent_emoji_ids.add(str(checking_emoji))
