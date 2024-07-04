@@ -1205,6 +1205,7 @@ async def unreact(
     """
     if isinstance(payload, discord.RawReactionClearEvent):
         # Clear all reactions
+        emoji_to_remove = None
         removed_emoji_id = None
         equivalent_emoji_ids = None
     else:
@@ -1276,6 +1277,10 @@ async def unreact(
                     emoji_or_name: discord.Emoji | str | None = (
                         globals.client.get_emoji(int(emoji_id))
                     )
+
+                    if not emoji_or_name and emoji_to_remove:
+                        # I can't find the emoji by ID but it might still be an emoji I can unreact if it happens to have the same name as the original one
+                        emoji_or_name = f"{emoji_to_remove.name}:{emoji_id}"
                 except ValueError:
                     emoji_or_name = emoji_id
 
