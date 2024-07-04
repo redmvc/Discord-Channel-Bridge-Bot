@@ -823,37 +823,36 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         # Only bridge reactions across outbound bridges
         return
 
-    # Check whether I have access to the emoji
-    reaction_emoji: discord.Emoji | discord.PartialEmoji | str | None
+    # Choose a "fallback emoji" to use in case I don't have access to the one being reacted and the message across the bridge doesn't already have it
+    fallback_emoji: discord.Emoji | str | None
     if payload.emoji.is_custom_emoji():
         # Custom emoji, I need to check whether it exists and is available to me
-        emoji_id = payload.emoji.id
-        if not emoji_id:
-            return
+        # is_custom_emoji() guarantees that payload.emoji.id is not None
+        emoji_id = cast(int, payload.emoji.id)
+        emoji_id_str = str(emoji_id)
 
-        reaction_emoji = globals.client.get_emoji(emoji_id)
-        if not reaction_emoji or not reaction_emoji.available:
-            reaction_emoji = None
+        fallback_emoji = globals.client.get_emoji(emoji_id)
+        if not fallback_emoji or not fallback_emoji.available:
+            fallback_emoji = None
             # Couldn't find the reactji, will try to see if I've got it mapped locally
             mapped_emoji_id = globals.emoji_mappings.get(emoji_id)
             if mapped_emoji_id:
                 # I already have this Emoji mapped locally
-                reaction_emoji = globals.client.get_emoji(mapped_emoji_id)
+                fallback_emoji = globals.client.get_emoji(mapped_emoji_id)
 
-        if not reaction_emoji:
+        if not fallback_emoji:
             # I don't have the emoji mapped locally, I'll add it to my server and update my map
             try:
-                reaction_emoji = await copy_emoji_into_server(payload.emoji)
-                if not reaction_emoji:
-                    return
+                fallback_emoji = await copy_emoji_into_server(payload.emoji)
             except Exception:
-                return
-
-        emoji_id_str = str(emoji_id)
+                fallback_emoji = None
     else:
         # It's a standard emoji, it's fine
-        reaction_emoji = payload.emoji.name
-        emoji_id_str = reaction_emoji
+        fallback_emoji = payload.emoji.name
+        emoji_id_str = fallback_emoji
+
+    # Get the IDs of all emoji that match the current one
+    equivalent_emoji_ids = get_equivalent_emoji_ids(payload.emoji)
 
     # Now find the list of channels that can validly be reached via outbound chains from this channel
     reachable_channel_ids = bridges.get_reachable_channels(
@@ -866,15 +865,41 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         # Create a function to add reactions to messages asynchronously and gather them all at the end
         source_message_id_str = str(payload.message_id)
         source_channel_id_str = str(payload.channel_id)
-        async_add_reactions: list[Coroutine[Any, Any, DBReactionMap]] = []
+        async_add_reactions: list[Coroutine[Any, Any, DBReactionMap | None]] = []
 
         async def add_reaction_helper(
             bridged_channel: discord.TextChannel | discord.Thread,
             target_message_id: int,
-            reaction_emoji: discord.Emoji | str,
         ):
-            bridged_message = bridged_channel.get_partial_message(target_message_id)
-            await bridged_message.add_reaction(reaction_emoji)
+            bridged_message = await bridged_channel.fetch_message(target_message_id)
+
+            # I'll try to check whether there are already reactions in the target message matching mine
+            existing_matching_emoji = next(
+                (
+                    emoji
+                    for reaction in bridged_message.reactions
+                    if (
+                        (emoji := reaction.emoji)
+                        and (
+                            (
+                                not (is_str := isinstance(emoji, str))
+                                and (
+                                    emoji.name in equivalent_emoji_ids
+                                    or str(emoji.id) in equivalent_emoji_ids
+                                )
+                            )
+                            or (is_str and emoji in equivalent_emoji_ids)
+                        )
+                    )
+                ),
+                None,
+            )
+            if existing_matching_emoji:
+                await bridged_message.add_reaction(existing_matching_emoji)
+            elif fallback_emoji:
+                await bridged_message.add_reaction(fallback_emoji)
+            else:
+                return None
 
             # I'll return a reaction map to insert into the reaction map table
             return DBReactionMap(
@@ -937,9 +962,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                 if source_channel_id in reachable_channel_ids:
                     try:
                         async_add_reactions.append(
-                            add_reaction_helper(
-                                source_channel, source_message_id, reaction_emoji
-                            )
+                            add_reaction_helper(source_channel, source_message_id)
                         )
                     except discord.HTTPException as e:
                         warn(
@@ -986,9 +1009,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                 try:
                     async_add_reactions.append(
                         add_reaction_helper(
-                            bridged_channel,
-                            int(message_row.target_message),
-                            reaction_emoji,
+                            bridged_channel, int(message_row.target_message)
                         )
                     )
                 except discord.HTTPException as e:
@@ -1000,7 +1021,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         reactions_added = await asyncio.gather(*async_add_reactions)
 
         def insert_into_reactions_map():
-            session.add_all(reactions_added)
+            session.add_all([r for r in reactions_added if r])
             session.commit()
 
         await sql_retry(insert_into_reactions_map)
@@ -1112,11 +1133,6 @@ async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
         # Only remove reactions across outbound bridges
         return
 
-    # Get the standardised ID for the removed emoji plus any mapped ones
-    equivalent_emoji_ids = get_equivalent_emoji_ids(payload.emoji)
-    if not equivalent_emoji_ids:
-        return
-
     channel = await globals.get_channel_from_id(payload.channel_id)
     assert isinstance(channel, (discord.TextChannel, discord.Thread))
 
@@ -1125,30 +1141,16 @@ async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
     reactions_with_emoji = {
         reaction
         for reaction in message.reactions
-        if (
-            (isinstance(reaction.emoji, str) and reaction.emoji in equivalent_emoji_ids)
-            or (
-                not isinstance(reaction.emoji, str)
-                and (
-                    reaction.emoji.id in equivalent_emoji_ids
-                    or reaction.emoji.name in equivalent_emoji_ids
-                )
-            )
-        )
+        if reaction.emoji == payload.emoji.name or reaction.emoji == payload.emoji
     }
-    if len(reactions_with_emoji) > 0:
-        for reaction in reactions_with_emoji:
-            async for user in reaction.users():
-                if user.id != client_user_id:
-                    # There is at least one user who reacted to this message other than me, so I don't need to do anything
-                    return
+    for reaction in reactions_with_emoji:
+        async for user in reaction.users():
+            if user.id != client_user_id:
+                # There is at least one user who reacted to this message other than me, so I don't need to do anything
+                return
 
     # If I'm here, there are no remaining reactions of this kind on this message except perhaps for my own
-    await unreact(
-        payload,
-        str(payload.emoji.id) if payload.emoji.id else payload.emoji.name,
-        equivalent_emoji_ids,
-    )
+    await unreact(payload)
 
 
 @globals.client.event
@@ -1167,16 +1169,7 @@ async def on_raw_reaction_clear_emoji(payload: discord.RawReactionClearEmojiEven
         # Only remove reactions across outbound bridges
         return
 
-    # Get the standardised ID for the removed emoji plus any mapped ones
-    equivalent_emoji_ids = get_equivalent_emoji_ids(payload.emoji)
-    if not equivalent_emoji_ids:
-        return
-
-    await unreact(
-        payload,
-        str(payload.emoji.id) if payload.emoji.id else payload.emoji.name,
-        equivalent_emoji_ids,
-    )
+    await unreact(payload)
 
 
 @globals.client.event
@@ -1204,16 +1197,25 @@ async def unreact(
         | discord.RawReactionClearEmojiEvent
         | discord.RawReactionClearEvent
     ),
-    removed_emoji_id: str | None = None,
-    equivalent_emoji_ids: frozenset[str] | None = None,
 ):
     """Remove all reactions by the bot using a given emoji (or all emoji) on messages bridged from the current one (but not the current one itself).
 
     #### Args:
         - `payload`: The argument of the call to `on_raw_reaction_remove()`, `on_raw_reaction_clear_emoji()`, or `on_raw_reaction_clear()`.
-        - `removed_emoji_id`: The ID or name of the emoji that was removed. Defaults to None, in which case it'll remove all emoji bridged from the payload message.
-        - `equivalent_emoji_ids`: A set with the IDs of all emoji mapped to each other to remove, or just the name of an emoji in case its a standard one. Defaults to None, same as above.
     """
+    if isinstance(payload, discord.RawReactionClearEvent):
+        # Clear all reactions
+        emoji_to_remove = None
+        removed_emoji_id = None
+        equivalent_emoji_ids = None
+    else:
+        # Remove just one emoji
+        emoji_to_remove = payload.emoji
+        removed_emoji_id = (
+            str(emoji_to_remove.id) if emoji_to_remove.id else emoji_to_remove.name
+        )
+        equivalent_emoji_ids = get_equivalent_emoji_ids(emoji_to_remove)
+
     try:
         with SQLSession(engine) as session:
             # First I find all of the messages that got this reaction bridged to them
@@ -1263,75 +1265,71 @@ async def unreact(
                 for map in remaining_reactions
             }
 
-            if len(messages_to_remove_reaction_from) > 0:
-                # There is at least one reaction in one target message that should no longer be there
-                def get_emoji_or_name(emoji_id: str):
-                    try:
-                        emoji_or_name: discord.Emoji | str | None = (
-                            globals.client.get_emoji(int(emoji_id))
-                        )
-                    except ValueError:
-                        emoji_or_name = emoji_id
-
-                    return emoji_or_name
-
-                async def remove_specific_emoji(
-                    target_message: discord.Message,
-                    target_channel_member: discord.Member,
-                    emoji: discord.Emoji | str,
-                ):
-                    try:
-                        await target_message.remove_reaction(
-                            emoji, target_channel_member
-                        )
-                    except Exception:
-                        pass
-
-                async def remove_reactions_with_emoji(
-                    target_channel_id: str,
-                    target_message_id: str,
-                    emoji_to_remove: list[str | discord.Emoji | None],
-                ):
-                    target_channel = await globals.get_channel_from_id(
-                        int(target_channel_id)
-                    )
-                    assert isinstance(
-                        target_channel, (discord.TextChannel, discord.Thread)
-                    )
-                    target_channel_member = target_channel.guild.me
-
-                    target_message = await target_channel.fetch_message(
-                        int(target_message_id)
-                    )
-
-                    await asyncio.gather(
-                        *[
-                            remove_specific_emoji(
-                                target_message, target_channel_member, emoji
-                            )
-                            for emoji in emoji_to_remove
-                            if emoji
-                        ]
-                    )
-
-                remove_reactions_async = []
-                for (
-                    target_message_id,
-                    target_channel_id,
-                    emoji_ids,
-                ) in messages_to_remove_reaction_from:
-                    if emoji_ids:
-                        remove_reactions_async.append(
-                            remove_reactions_with_emoji(
-                                target_channel_id,
-                                target_message_id,
-                                [get_emoji_or_name(emoji_id) for emoji_id in emoji_ids],
-                            )
-                        )
-
-                await asyncio.gather(*remove_reactions_async)
-
             session.commit()
+
+            if len(messages_to_remove_reaction_from) == 0:
+                # I don't have to remove my reaction from any bridged messages
+                return
+
+            # There is at least one reaction in one target message that should no longer be there
+            def get_emoji_or_name(emoji_id: str):
+                try:
+                    emoji_or_name: discord.Emoji | str | None = (
+                        globals.client.get_emoji(int(emoji_id))
+                    )
+
+                    if not emoji_or_name and emoji_to_remove:
+                        # I can't find the emoji by ID but it might still be an emoji I can unreact if it happens to have the same name as the original one
+                        emoji_or_name = f"{emoji_to_remove.name}:{emoji_id}"
+                except ValueError:
+                    emoji_or_name = emoji_id
+
+                return emoji_or_name
+
+            async def remove_specific_emoji(
+                target_message: discord.Message,
+                target_channel_member: discord.Member,
+                emoji: discord.Emoji | str,
+            ):
+                try:
+                    await target_message.remove_reaction(emoji, target_channel_member)
+                except Exception:
+                    pass
+
+            async def remove_reactions_with_emoji(
+                target_channel_id: str,
+                target_message_id: str,
+                emoji_ids: frozenset[str],
+            ):
+                target_channel = await globals.get_channel_from_id(
+                    int(target_channel_id)
+                )
+                assert isinstance(target_channel, (discord.TextChannel, discord.Thread))
+                target_channel_member = target_channel.guild.me
+
+                target_message = await target_channel.fetch_message(
+                    int(target_message_id)
+                )
+
+                await asyncio.gather(
+                    *[
+                        remove_specific_emoji(
+                            target_message, target_channel_member, emoji
+                        )
+                        for emoji_id in emoji_ids
+                        if (emoji := get_emoji_or_name(emoji_id))
+                    ]
+                )
+
+            await asyncio.gather(
+                *[
+                    remove_reactions_with_emoji(
+                        target_channel_id, target_message_id, emoji_ids
+                    )
+                    for target_message_id, target_channel_id, emoji_ids in messages_to_remove_reaction_from
+                    if emoji_ids
+                ]
+            )
     except SQLError as e:
         if session:
             session.rollback()
@@ -1343,7 +1341,7 @@ async def unreact(
 
 def get_equivalent_emoji_ids(
     emoji: discord.PartialEmoji | int | str,
-) -> frozenset[str] | None:
+) -> frozenset[str]:
     """Return a set with the IDs of all emoji that match the argument (due to being mapped to it in the emoji server).
 
     #### Args:
@@ -1351,40 +1349,42 @@ def get_equivalent_emoji_ids(
     """
     validate_types({"emoji": (emoji, (discord.PartialEmoji, int, str))})
 
-    if not isinstance(emoji, discord.PartialEmoji) or emoji.is_custom_emoji():
-        if not isinstance(emoji, discord.PartialEmoji):
-            # This should be an emoji ID
-            try:
-                emoji_id = int(emoji)
-            except ValueError:
-                # For some reason it's not, I'll just return it stringified then
-                return frozenset({str(emoji)})
-        else:
-            if not emoji.id:
-                return None
-            emoji_id = emoji.id
+    if isinstance(emoji, discord.PartialEmoji) and not emoji.is_custom_emoji():
+        return frozenset({emoji.name})
 
-        emoji_ids = {str(emoji_id)}.union(
+    if not isinstance(emoji, discord.PartialEmoji):
+        # This should be an emoji ID
+        try:
+            emoji_id = int(emoji)
+        except ValueError:
+            # For some reason it's not, I'll just return it stringified then
+            # This can only happen if emoji is a string
+            return frozenset({cast(str, emoji)})
+    else:
+        # is_custom_emoji() guarantees that emoji.id is not None
+        emoji_id = cast(int, emoji.id)
+
+    # I'm going to go through every emoji in globals.emoji_mappings that can be reached from this emoji_id
+    emoji_to_check: set[int] = {emoji_id}
+    equivalent_emoji_ids: set[str] = set()
+    while len(emoji_to_check) > 0:
+        checking_emoji = emoji_to_check.pop()
+        if str(checking_emoji) in equivalent_emoji_ids:
+            continue
+
+        equivalent_emoji_ids.add(str(checking_emoji))
+
+        emoji_to_check = emoji_to_check.union(
             {
-                str(external_emoji)
+                external_emoji
                 for external_emoji, internal_emoji in globals.emoji_mappings.items()
-                if internal_emoji == emoji_id
+                if internal_emoji == checking_emoji
             }
         )
+        if globals.emoji_mappings.get(checking_emoji):
+            emoji_to_check.add(globals.emoji_mappings[checking_emoji])
 
-        if globals.emoji_mappings.get(emoji_id):
-            emoji_ids.add(str(globals.emoji_mappings[emoji_id]))
-            emoji_ids = emoji_ids.union(
-                {
-                    str(external_emoji)
-                    for external_emoji, internal_emoji in globals.emoji_mappings.items()
-                    if internal_emoji == globals.emoji_mappings[emoji_id]
-                }
-            )
-    else:
-        emoji_ids = {emoji.name}
-
-    return frozenset(emoji_ids)
+    return frozenset(equivalent_emoji_ids)
 
 
 @globals.client.event
