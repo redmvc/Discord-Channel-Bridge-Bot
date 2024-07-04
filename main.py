@@ -931,26 +931,38 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
             bridged_message = await bridged_channel.fetch_message(target_message_id)
 
             # I'll try to check whether there are already reactions in the target message matching mine
-            existing_matching_emoji = next(
-                (
-                    emoji
-                    for reaction in bridged_message.reactions
-                    if (
-                        (emoji := reaction.emoji)
-                        and (
-                            (
-                                not (is_str := isinstance(emoji, str))
-                                and (
-                                    emoji.name in equivalent_emoji_ids
-                                    or str(emoji.id) in equivalent_emoji_ids
+            existing_matching_emoji = None
+            if fallback_emoji:
+                existing_matching_emoji = next(
+                    (
+                        reaction.emoji
+                        for reaction in bridged_message.reactions
+                        if reaction.emoji == fallback_emoji
+                    ),
+                    None,
+                )
+            if not existing_matching_emoji:
+                existing_matching_emoji = next(
+                    (
+                        emoji
+                        for reaction in bridged_message.reactions
+                        if (
+                            (emoji := reaction.emoji)
+                            and (
+                                (
+                                    not (is_str := isinstance(emoji, str))
+                                    and (
+                                        emoji.name in equivalent_emoji_ids
+                                        or str(emoji.id) in equivalent_emoji_ids
+                                    )
                                 )
+                                or (is_str and emoji in equivalent_emoji_ids)
                             )
-                            or (is_str and emoji in equivalent_emoji_ids)
                         )
-                    )
-                ),
-                None,
-            )
+                    ),
+                    None,
+                )
+
             if existing_matching_emoji:
                 bridged_emoji = existing_matching_emoji
             elif fallback_emoji:
