@@ -39,7 +39,9 @@ class DBBridge(DBBase):
     """
 
     __tablename__ = "bridges"
-    __table_args__ = UniqueConstraint("source", "target", name="unique_source_target")
+    __table_args__ = (
+        UniqueConstraint("source", "target", name="unique_source_target"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     source: Mapped[str] = mapped_column(String(32), nullable=False)
@@ -87,8 +89,13 @@ class DBReactionMap(DBBase):
     """
 
     __tablename__ = "reaction_mappings"
-    __table_args__ = UniqueConstraint(
-        "emoji", "source_message", "target_message", name="unique_emoji_source_target"
+    __table_args__ = (
+        UniqueConstraint(
+            "emoji",
+            "source_message",
+            "target_message",
+            name="unique_emoji_source_target",
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
