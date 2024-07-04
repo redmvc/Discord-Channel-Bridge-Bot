@@ -1133,9 +1133,6 @@ async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
         # Only remove reactions across outbound bridges
         return
 
-    # Get the standardised ID for the removed emoji plus any mapped ones
-    equivalent_emoji_ids = get_equivalent_emoji_ids(payload.emoji)
-
     channel = await globals.get_channel_from_id(payload.channel_id)
     assert isinstance(channel, (discord.TextChannel, discord.Thread))
 
@@ -1153,11 +1150,7 @@ async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
                 return
 
     # If I'm here, there are no remaining reactions of this kind on this message except perhaps for my own
-    await unreact(
-        payload,
-        str(payload.emoji.id) if payload.emoji.id else payload.emoji.name,
-        equivalent_emoji_ids,
-    )
+    await unreact(payload)
 
 
 @globals.client.event
@@ -1176,11 +1169,7 @@ async def on_raw_reaction_clear_emoji(payload: discord.RawReactionClearEmojiEven
         # Only remove reactions across outbound bridges
         return
 
-    await unreact(
-        payload,
-        str(payload.emoji.id) if payload.emoji.id else payload.emoji.name,
-        get_equivalent_emoji_ids(payload.emoji),
-    )
+    await unreact(payload)
 
 
 @globals.client.event
@@ -1208,16 +1197,24 @@ async def unreact(
         | discord.RawReactionClearEmojiEvent
         | discord.RawReactionClearEvent
     ),
-    removed_emoji_id: str | None = None,
-    equivalent_emoji_ids: frozenset[str] | None = None,
 ):
     """Remove all reactions by the bot using a given emoji (or all emoji) on messages bridged from the current one (but not the current one itself).
 
     #### Args:
         - `payload`: The argument of the call to `on_raw_reaction_remove()`, `on_raw_reaction_clear_emoji()`, or `on_raw_reaction_clear()`.
-        - `removed_emoji_id`: The ID or name of the emoji that was removed. Defaults to None, in which case it'll remove all emoji bridged from the payload message.
-        - `equivalent_emoji_ids`: A set with the IDs of all emoji mapped to each other to remove, or just the name of an emoji in case its a standard one. Defaults to None, same as above.
     """
+    if isinstance(payload, discord.RawReactionClearEvent):
+        # Clear all reactions
+        removed_emoji_id = None
+        equivalent_emoji_ids = None
+    else:
+        # Remove just one emoji
+        emoji_to_remove = payload.emoji
+        removed_emoji_id = (
+            str(emoji_to_remove.id) if emoji_to_remove.id else emoji_to_remove.name
+        )
+        equivalent_emoji_ids = get_equivalent_emoji_ids(emoji_to_remove)
+
     try:
         with SQLSession(engine) as session:
             # First I find all of the messages that got this reaction bridged to them
