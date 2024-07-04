@@ -1264,75 +1264,74 @@ async def unreact(
                 for map in remaining_reactions
             }
 
-            if len(messages_to_remove_reaction_from) > 0:
-                # There is at least one reaction in one target message that should no longer be there
-                def get_emoji_or_name(emoji_id: str):
-                    try:
-                        emoji_or_name: discord.Emoji | str | None = (
-                            globals.client.get_emoji(int(emoji_id))
-                        )
-                    except ValueError:
-                        emoji_or_name = emoji_id
-
-                    return emoji_or_name
-
-                async def remove_specific_emoji(
-                    target_message: discord.Message,
-                    target_channel_member: discord.Member,
-                    emoji: discord.Emoji | str,
-                ):
-                    try:
-                        await target_message.remove_reaction(
-                            emoji, target_channel_member
-                        )
-                    except Exception:
-                        pass
-
-                async def remove_reactions_with_emoji(
-                    target_channel_id: str,
-                    target_message_id: str,
-                    emoji_to_remove: list[str | discord.Emoji | None],
-                ):
-                    target_channel = await globals.get_channel_from_id(
-                        int(target_channel_id)
-                    )
-                    assert isinstance(
-                        target_channel, (discord.TextChannel, discord.Thread)
-                    )
-                    target_channel_member = target_channel.guild.me
-
-                    target_message = await target_channel.fetch_message(
-                        int(target_message_id)
-                    )
-
-                    await asyncio.gather(
-                        *[
-                            remove_specific_emoji(
-                                target_message, target_channel_member, emoji
-                            )
-                            for emoji in emoji_to_remove
-                            if emoji
-                        ]
-                    )
-
-                remove_reactions_async = []
-                for (
-                    target_message_id,
-                    target_channel_id,
-                    emoji_ids,
-                ) in messages_to_remove_reaction_from:
-                    if emoji_ids:
-                        remove_reactions_async.append(
-                            remove_reactions_with_emoji(
-                                target_channel_id,
-                                target_message_id,
-                                [get_emoji_or_name(emoji_id) for emoji_id in emoji_ids],
-                            )
-                        )
-
-                await asyncio.gather(*remove_reactions_async)
-
             session.commit()
+
+            if len(messages_to_remove_reaction_from) == 0:
+                # I don't have to remove my reaction from any bridged messages
+                return
+
+            # There is at least one reaction in one target message that should no longer be there
+            def get_emoji_or_name(emoji_id: str):
+                try:
+                    emoji_or_name: discord.Emoji | str | None = (
+                        globals.client.get_emoji(int(emoji_id))
+                    )
+                except ValueError:
+                    emoji_or_name = emoji_id
+
+                return emoji_or_name
+
+            async def remove_specific_emoji(
+                target_message: discord.Message,
+                target_channel_member: discord.Member,
+                emoji: discord.Emoji | str,
+            ):
+                try:
+                    await target_message.remove_reaction(emoji, target_channel_member)
+                except Exception:
+                    pass
+
+            async def remove_reactions_with_emoji(
+                target_channel_id: str,
+                target_message_id: str,
+                emoji_to_remove: list[str | discord.Emoji | None],
+            ):
+                target_channel = await globals.get_channel_from_id(
+                    int(target_channel_id)
+                )
+                assert isinstance(target_channel, (discord.TextChannel, discord.Thread))
+                target_channel_member = target_channel.guild.me
+
+                target_message = await target_channel.fetch_message(
+                    int(target_message_id)
+                )
+
+                await asyncio.gather(
+                    *[
+                        remove_specific_emoji(
+                            target_message, target_channel_member, emoji
+                        )
+                        for emoji in emoji_to_remove
+                        if emoji
+                    ]
+                )
+
+            remove_reactions_async = []
+            for (
+                target_message_id,
+                target_channel_id,
+                emoji_ids,
+            ) in messages_to_remove_reaction_from:
+                if emoji_ids:
+                    remove_reactions_async.append(
+                        remove_reactions_with_emoji(
+                            target_channel_id,
+                            target_message_id,
+                            [get_emoji_or_name(emoji_id) for emoji_id in emoji_ids],
+                        )
+                    )
+
+            await asyncio.gather(*remove_reactions_async)
     except SQLError as e:
         if session:
             session.rollback()
