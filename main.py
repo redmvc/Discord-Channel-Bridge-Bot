@@ -1358,25 +1358,27 @@ def get_equivalent_emoji_ids(
         # is_custom_emoji() guarantees that emoji.id is not None
         emoji_id = cast(int, emoji.id)
 
-    emoji_ids = {str(emoji_id)}.union(
-        {
-            str(external_emoji)
-            for external_emoji, internal_emoji in globals.emoji_mappings.items()
-            if internal_emoji == emoji_id
-        }
-    )
+    # I'm going to go through every emoji in globals.emoji_mappings that can be reached from this emoji_id
+    emoji_to_check: set[int] = {emoji_id}
+    equivalent_emoji_ids: set[str] = set()
+    while len(emoji_to_check) > 0:
+        checking_emoji = emoji_to_check.pop()
+        if checking_emoji in equivalent_emoji_ids:
+            continue
 
-    if globals.emoji_mappings.get(emoji_id):
-        emoji_ids.add(str(globals.emoji_mappings[emoji_id]))
-        emoji_ids = emoji_ids.union(
+        equivalent_emoji_ids.add(str(checking_emoji))
+
+        emoji_to_check = emoji_to_check.union(
             {
-                str(external_emoji)
+                external_emoji
                 for external_emoji, internal_emoji in globals.emoji_mappings.items()
-                if internal_emoji == globals.emoji_mappings[emoji_id]
+                if internal_emoji == checking_emoji
             }
         )
+        if globals.emoji_mappings.get(checking_emoji):
+            emoji_to_check.add(globals.emoji_mappings[checking_emoji])
 
-    return frozenset(emoji_ids)
+    return frozenset(equivalent_emoji_ids)
 
 
 @globals.client.event
