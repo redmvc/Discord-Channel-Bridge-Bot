@@ -1146,12 +1146,11 @@ async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
         for reaction in message.reactions
         if reaction.emoji == payload.emoji.name or reaction.emoji == payload.emoji
     }
-    if len(reactions_with_emoji) > 0:
-        for reaction in reactions_with_emoji:
-            async for user in reaction.users():
-                if user.id != client_user_id:
-                    # There is at least one user who reacted to this message other than me, so I don't need to do anything
-                    return
+    for reaction in reactions_with_emoji:
+        async for user in reaction.users():
+            if user.id != client_user_id:
+                # There is at least one user who reacted to this message other than me, so I don't need to do anything
+                return
 
     # If I'm here, there are no remaining reactions of this kind on this message except perhaps for my own
     await unreact(
