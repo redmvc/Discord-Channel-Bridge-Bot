@@ -1215,9 +1215,9 @@ async def copy_emoji_into_server(
             await sql_retry(
                 lambda: session.add(
                     DBEmoji(
-                        id=emoji.id,
+                        id=str(emoji.id),
                         name=emoji.name,
-                        server_id=emoji_server_id,
+                        server_id=str(emoji_server_id),
                         animated=missing_emoji_animated,
                         image_hash=image_hash,
                         accessible=True,
