@@ -948,6 +948,7 @@ async def map_emoji(
                     external_emoji_id=id,
                     external_emoji_name=name,
                     internal_emoji=internal_emoji,
+                    image_hash=emoji_hash_map.map.emoji_to_hash[internal_emoji.id],
                 )
                 for id, name in zip(external_emoji_ids, external_emoji_names)
             ]
@@ -1524,6 +1525,7 @@ async def map_emoji_helper(
             {
                 "name": external_emoji_name,
                 "server_id": external_emoji_server_id,
+                "image_hash": image_hash,
                 "accessible": external_emoji_accessible,
             },
         )
