@@ -284,11 +284,7 @@ def get_emoji_information(
         - `ValueError`: `emoji` argument was passed and had type `PartialEmoji` but it was not a custom emoji, or `emoji_id` argument was passed and had type `str` but it was not a valid numerical ID.
     """
     types_to_validate: dict[str, tuple] = {}
-    if emoji and emoji_id:
-        raise ArgumentError(
-            "At most one of emoji and emoji_id must be passed as arguments."
-        )
-    elif emoji:
+    if emoji:
         types_to_validate = {"emoji": (emoji, (discord.PartialEmoji, discord.Emoji))}
     elif emoji_id:
         if emoji_name:
