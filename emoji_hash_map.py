@@ -59,7 +59,7 @@ class EmojiHashMap:
                 emoji_id_str = row.id
                 emoji_id = int(emoji_id_str)
 
-                emoji_hash = row.image_hash
+                emoji_hash = int(row.image_hash)
 
                 emoji_registered_as_accessible = row.accessible
                 emoji_actually_accessible = not not globals.client.get_emoji(emoji_id)
@@ -178,13 +178,13 @@ class EmojiHashMap:
                     "name": emoji.name,
                     "server_id": server_id_str,
                     "animated": emoji.animated,
-                    "image_hash": image_hash,
+                    "image_hash": str(image_hash),
                     "accessible": True,
                 },
                 {
                     "name": emoji.name,
                     "server_id": server_id_str,
-                    "image_hash": image_hash,
+                    "image_hash": str(image_hash),
                     "accessible": True,
                 },
             )

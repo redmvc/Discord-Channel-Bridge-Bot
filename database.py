@@ -134,7 +134,7 @@ class DBEmoji(DBBase):
     - `name (VARCHAR(32))`: The name of the emoji.
     - `server_id (VARCHAR(32))`: The ID of the server this emoji belongs to.
     - `animated (BOOL)`: Whether it's an animated emoji.
-    - `image_hash (INT)`: A hash of this emoji's image.
+    - `image_hash (VARCHAR(32))`: A hash of this emoji's image.
     - `accessible (BOOL)`: Whether the bot has access to this emoji.
     """
 
@@ -144,7 +144,7 @@ class DBEmoji(DBBase):
     name: Mapped[str] = mapped_column(String(32), nullable=True)
     server_id: Mapped[str] = mapped_column(String(32), nullable=True)
     animated: Mapped[bool] = mapped_column(Boolean, nullable=True)
-    image_hash: Mapped[int] = mapped_column(nullable=True)
+    image_hash: Mapped[str] = mapped_column(String(32), nullable=True)
     accessible: Mapped[bool] = mapped_column(Boolean, nullable=False)
 
 

@@ -1519,13 +1519,13 @@ async def map_emoji_helper(
                 "name": external_emoji_name,
                 "server_id": external_emoji_server_id,
                 "animated": external_emoji_animated,
-                "image_hash": image_hash,
+                "image_hash": str(image_hash),
                 "accessible": external_emoji_accessible,
             },
             {
                 "name": external_emoji_name,
                 "server_id": external_emoji_server_id,
-                "image_hash": image_hash,
+                "image_hash": str(image_hash),
                 "accessible": external_emoji_accessible,
             },
         )

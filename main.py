@@ -1193,7 +1193,7 @@ async def copy_emoji_into_server(
                         name=emoji.name,
                         server_id=str(emoji_server_id),
                         animated=missing_emoji_animated,
-                        image_hash=image_hash,
+                        image_hash=str(image_hash),
                         accessible=True,
                     )
                 )
