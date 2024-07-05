@@ -1136,6 +1136,7 @@ async def copy_emoji_into_server(
         missing_emoji_id = str(missing_emoji.id)
         missing_emoji_name = missing_emoji.name
         missing_emoji_animated = missing_emoji.animated
+        url = missing_emoji.url
     else:
         assert missing_emoji_name and missing_emoji_id
         missing_emoji_animated = missing_emoji_name.startswith("a:")
@@ -1144,13 +1145,13 @@ async def copy_emoji_into_server(
         elif missing_emoji_name.startswith(":"):
             missing_emoji_name = missing_emoji_name[1:]
 
-    if missing_emoji_animated:
-        ext = "gif"
-    else:
-        ext = "png"
-    image = await globals.get_image_from_URL(
-        f"https://cdn.discordapp.com/emojis/{missing_emoji_id}.{ext}?v=1"
-    )
+        if missing_emoji_animated:
+            ext = "gif"
+        else:
+            ext = "png"
+        url = f"https://cdn.discordapp.com/emojis/{missing_emoji_id}.{ext}?v=1"
+
+    image = await globals.get_image_from_URL(url)
     image_hash = hash(image)
 
     delete_existing_emoji_query = None
