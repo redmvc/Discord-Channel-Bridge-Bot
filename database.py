@@ -176,7 +176,7 @@ async def sql_upsert(
     insert_values: dict[str, Any],
     update_values: dict[str, Any],
 ) -> UpdateBase:
-    """Insert values into a table if a key is not duplicated or update them if it is.
+    """Return an `UpdateBase` for inserting values into a table if a key is not duplicated or updating them if it is.
 
     #### Args:
         - `table`: The table to insert into.
@@ -187,9 +187,6 @@ async def sql_upsert(
         - `ValueError`: `insert_values` does not have any keys not present in `update_values`.
         - `UnknownDBDialectError`: Invalid database dialect registered in `settings.json` file.
         - `SQLError`: SQL statement inferred from arguments was invalid or database connection failed.
-
-    #### Returns:
-        - `Insert`: The updated Insert command.
     """
     validate_types(
         {
