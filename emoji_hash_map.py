@@ -35,6 +35,7 @@ class EmojiHashMap:
             close_after = True
 
         self._emoji_to_hash: dict[int, str] = {}
+        self._hash_to_emoji: dict[str, set[int]] = {}
         self._hash_to_available_emoji: dict[str, set[int]] = {}
         self._hash_to_internal_emoji: dict[str, int] = {}
 
@@ -148,6 +149,10 @@ class EmojiHashMap:
         self._emoji_to_hash[emoji_id] = image_hash
         if accessible is None:
             accessible = not not globals.client.get_emoji(emoji_id)
+
+        if not self._hash_to_emoji.get(image_hash):
+            self._hash_to_emoji[image_hash] = set()
+        self._hash_to_emoji[image_hash].add(emoji_id)
 
         if accessible:
             if not self._hash_to_available_emoji.get(image_hash):
@@ -407,6 +412,12 @@ class EmojiHashMap:
         del self._emoji_to_hash[emoji_id]
 
         if (
+            self._hash_to_emoji.get(image_hash)
+            and emoji_id in self._hash_to_emoji[image_hash]
+        ):
+            self._hash_to_emoji[image_hash].remove(emoji_id)
+
+        if (
             self._hash_to_available_emoji.get(image_hash)
             and emoji_id in self._hash_to_available_emoji[image_hash]
         ):
@@ -510,35 +521,47 @@ class EmojiHashMap:
             raise e
 
     @overload
-    def get_available_matches(
-        self,
-        emoji: discord.PartialEmoji | int | str,
-    ) -> frozenset[int] | None:
-        ...
-
-    @overload
-    def get_available_matches(
-        self, emoji: discord.PartialEmoji | int | str, *, return_str: Literal[False]
-    ) -> frozenset[int] | None:
-        ...
-
-    @overload
-    def get_available_matches(
-        self, emoji: discord.PartialEmoji | int | str, *, return_str: Literal[True]
-    ) -> frozenset[str] | None:
-        ...
-
-    def get_available_matches(
+    def get_matches(
         self,
         emoji: discord.PartialEmoji | int | str,
         *,
+        only_accessible: bool | None = None,
+    ) -> frozenset[int] | None:
+        ...
+
+    @overload
+    def get_matches(
+        self,
+        emoji: discord.PartialEmoji | int | str,
+        *,
+        only_accessible: bool | None = None,
+        return_str: Literal[False],
+    ) -> frozenset[int] | None:
+        ...
+
+    @overload
+    def get_matches(
+        self,
+        emoji: discord.PartialEmoji | int | str,
+        *,
+        only_accessible: bool | None = None,
+        return_str: Literal[True],
+    ) -> frozenset[str] | None:
+        ...
+
+    def get_matches(
+        self,
+        emoji: discord.PartialEmoji | int | str,
+        *,
+        only_accessible: bool | None = None,
         return_str: bool | None = False,
     ) -> frozenset[int] | frozenset[str] | None:
         """Return a frozenset with the emoji IDs of emoji available to the bot that match the emoji passed as argument.
 
         #### Args:
             - `emoji`: The emoji to find matches for or ID of same.
-            - `return_str`: If set to `True` will return a frozenset of stringified IDs. Defaults to False.
+            - `only_accessible`: If set to True will return only emoji that are accessible by the bot. Defaults to False.
+            - `return_str`: If set to True will return a frozenset of stringified IDs. Defaults to False.
         """
         validate_types({"emoji": (emoji, (discord.PartialEmoji, int, str))})
 
@@ -556,15 +579,17 @@ class EmojiHashMap:
             return None
 
         image_hash = self._emoji_to_hash[emoji_id]
-        if not self._hash_to_available_emoji.get(image_hash):
+        if only_accessible:
+            hash_to_emoji = self._hash_to_available_emoji
+        else:
+            hash_to_emoji = self._hash_to_emoji
+        if not hash_to_emoji.get(image_hash):
             return None
 
         if not return_str:
-            return cast(
-                frozenset[int], frozenset(self._hash_to_available_emoji[image_hash])
-            )
+            return cast(frozenset[int], frozenset(hash_to_emoji[image_hash]))
 
-        return frozenset({str(id) for id in self._hash_to_available_emoji[image_hash]})
+        return frozenset({str(id) for id in hash_to_emoji[image_hash]})
 
     def get_internal_equivalent(self, emoji_id: int) -> int | None:
         """Return the ID of an internal emoji matching the one passed, if available.
@@ -607,7 +632,7 @@ class EmojiHashMap:
             return emoji
 
         if (
-            (matching_emoji_ids := self.get_available_matches(emoji_id))
+            (matching_emoji_ids := self.get_matches(emoji_id))
             and (matching_emoji_id := set(matching_emoji_ids).pop())
             and (emoji := globals.client.get_emoji(matching_emoji_id))
         ):

@@ -901,7 +901,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         emoji_id_str = fallback_emoji
 
     # Get the IDs of all emoji that match the current one
-    equivalent_emoji_ids = emoji_hash_map.map.get_available_matches(
+    equivalent_emoji_ids = emoji_hash_map.map.get_matches(
         payload.emoji, return_str=True
     )
     if not equivalent_emoji_ids:
@@ -1321,7 +1321,7 @@ async def unreact(
         removed_emoji_id = (
             str(emoji_to_remove.id) if emoji_to_remove.id else emoji_to_remove.name
         )
-        equivalent_emoji_ids = emoji_hash_map.map.get_available_matches(
+        equivalent_emoji_ids = emoji_hash_map.map.get_matches(
             emoji_to_remove, return_str=True
         )
 
@@ -1342,7 +1342,7 @@ async def unreact(
                     map.target_emoji_id,
                     map.target_emoji_name,
                     equivalent_emoji_ids
-                    or emoji_hash_map.map.get_available_matches(
+                    or emoji_hash_map.map.get_matches(
                         map.source_emoji, return_str=True
                     ),
                 )
@@ -1377,7 +1377,7 @@ async def unreact(
                     map.target_emoji_id,
                     map.target_emoji_name,
                     equivalent_emoji_ids
-                    or emoji_hash_map.map.get_available_matches(
+                    or emoji_hash_map.map.get_matches(
                         map.source_emoji, return_str=True
                     ),
                 )
