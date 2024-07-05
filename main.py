@@ -709,7 +709,7 @@ async def replace_missing_emoji(message_content: str) -> str:
     for emoji_name, emoji_id_str in message_emoji:
         emoji_id = int(emoji_id_str)
         emoji = globals.client.get_emoji(emoji_id)
-        if emoji and emoji.available:
+        if emoji and emoji.is_usable():
             # I already have access to this emoji so it's fine
             continue
 
@@ -887,7 +887,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         emoji_id_str = str(emoji_id)
 
         fallback_emoji = globals.client.get_emoji(emoji_id)
-        if not fallback_emoji or not fallback_emoji.available:
+        if not fallback_emoji or not fallback_emoji.is_usable():
             fallback_emoji = None
             # Couldn't find the reactji, will try to see if I've got it mapped locally
             mapped_emoji_id = globals.emoji_mappings.get(emoji_id)
