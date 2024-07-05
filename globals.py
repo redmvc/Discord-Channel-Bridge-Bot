@@ -3,7 +3,16 @@ from __future__ import annotations
 import asyncio
 import io
 import json
-from typing import Any, Callable, Literal, SupportsInt, TypedDict, TypeVar, cast
+from typing import (
+    Any,
+    Callable,
+    Literal,
+    SupportsInt,
+    TypedDict,
+    TypeVar,
+    cast,
+    overload,
+)
 
 import aiohttp
 import discord
@@ -88,9 +97,6 @@ auto_bridge_thread_channels: set[int] = set()
 
 # Server which can be used to store unknown emoji for mirroring reactions
 emoji_server: discord.Guild | None = None
-
-# Dictionary mapping external emoji to internal emoji
-emoji_mappings: dict[int, int] = {}
 
 # Dictionaries mapping emoji to the hashed values of their images and hashes to lists of emoji available to the bot
 emoji_to_hash: dict[int, int] = {}
@@ -303,6 +309,103 @@ def map_emoji_hash(emoji_id: int, image_hash: int, accessible: bool | None = Non
         and emoji_id in hash_to_available_emoji[image_hash]
     ):
         hash_to_available_emoji[image_hash].remove(emoji_id)
+
+
+@overload
+def get_available_matching_emoji(
+    emoji: discord.PartialEmoji | int | str,
+) -> frozenset[int] | None:
+    ...
+
+
+@overload
+def get_available_matching_emoji(
+    emoji: discord.PartialEmoji | int | str, *, return_str: Literal[False]
+) -> frozenset[int] | None:
+    ...
+
+
+@overload
+def get_available_matching_emoji(
+    emoji: discord.PartialEmoji | int | str, *, return_str: Literal[True]
+) -> frozenset[str] | None:
+    ...
+
+
+def get_available_matching_emoji(
+    emoji: discord.PartialEmoji | int | str, *, return_str: bool | None = False
+) -> frozenset[int] | frozenset[str] | None:
+    """Return a frozenset with the emoji IDs of emoji available to the bot that match the emoji passed as argument.
+
+    #### Args:
+        - `emoji`: The emoji to find matches for or ID of same.
+        - `return_str`: If set to `True` will return a frozenset of stringified IDs. Defaults to False.
+    """
+    validate_types({"emoji": (emoji, (discord.PartialEmoji, int))})
+
+    if isinstance(emoji, discord.PartialEmoji):
+        if not emoji.id:
+            return None
+        emoji_id = emoji.id
+    else:
+        try:
+            emoji_id = int(emoji)
+        except ValueError:
+            return None
+
+    if not emoji_to_hash.get(emoji_id):
+        return None
+
+    image_hash = emoji_to_hash[emoji_id]
+    if not hash_to_available_emoji.get(image_hash):
+        return None
+
+    if not return_str:
+        return cast(frozenset[int], frozenset(hash_to_available_emoji[image_hash]))
+
+    return frozenset({str(id) for id in hash_to_available_emoji[image_hash]})
+
+
+def get_internal_emoji_equivalent(emoji_id: int) -> int | None:
+    """Return the ID of an internal emoji matching the one passed, if available.
+
+    #### Args:
+        - `emoji_id`: The ID of the emoji to check.
+    """
+    validate_types({"emoji_id": (emoji_id, int)})
+
+    if not emoji_to_hash.get(emoji_id):
+        return None
+
+    image_hash = emoji_to_hash[emoji_id]
+    if not hash_to_internal_emoji.get(image_hash):
+        return None
+
+    return hash_to_internal_emoji[image_hash]
+
+
+def delete_emoji_from_hash_table(emoji_id: int):
+    """Delete an emoji from `emoji_to_hash`, `hash_to_available_emoji`, and `hash_to_internal_emoji`.
+
+    #### Args:
+        - `emoji_id`: The ID of the emoji to delete.
+    """
+    validate_types({"emoji_id": (emoji_id, int)})
+
+    if not emoji_to_hash.get(emoji_id):
+        return
+
+    image_hash = emoji_to_hash[emoji_id]
+    del emoji_to_hash[emoji_id]
+
+    if (
+        hash_to_available_emoji.get(image_hash)
+        and emoji_id in hash_to_available_emoji[image_hash]
+    ):
+        hash_to_available_emoji[image_hash].remove(emoji_id)
+
+    if hash_to_internal_emoji.get(image_hash):
+        del hash_to_internal_emoji[image_hash]
 
 
 async def wait_until_ready() -> bool:

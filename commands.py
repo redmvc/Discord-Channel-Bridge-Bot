@@ -18,7 +18,6 @@ from database import (
     DBAutoBridgeThreadChannels,
     DBBridge,
     DBEmoji,
-    DBEmojiMap,
     DBMessageMap,
     engine,
     sql_retry,
@@ -1437,7 +1436,7 @@ async def map_emoji_helper(
     image_hash: int | None = None,
     session: SQLSession | None = None,
 ) -> bool:
-    """Create a mapping between external and internal emoji, recording it locally and saving it in the emoji_mappings table.
+    """Create a mapping between external and internal emoji, recording it locally and saving it in the emoji table.
 
     #### Args:
         - `external_emoji`: The custom emoji that is not present in any servers the bot is in. Defaults to None.
@@ -1486,13 +1485,9 @@ async def map_emoji_helper(
 
     full_emoji = globals.client.get_emoji(external_emoji_id)
     if full_emoji and full_emoji.guild:
-        external_emoji_server_name = full_emoji.guild.name
         external_emoji_server_id = full_emoji.guild_id
     else:
-        external_emoji_server_name = ""
         external_emoji_server_id = None
-
-    globals.emoji_mappings[external_emoji_id] = internal_emoji.id
 
     if not session:
         session = SQLSession(engine)
@@ -1501,20 +1496,6 @@ async def map_emoji_helper(
         close_after = False
 
     try:
-        upsert_emoji = await sql_upsert(
-            DBEmojiMap,
-            {
-                "external_emoji": str(external_emoji_id),
-                "external_emoji_name": external_emoji_name or "",
-                "external_emoji_server_name": external_emoji_server_name,
-                "internal_emoji": str(internal_emoji.id),
-            },
-            {
-                "internal_emoji": str(internal_emoji.id),
-            },
-        )
-        await sql_retry(lambda: session.execute(upsert_emoji))
-
         if not image_hash:
             if external_emoji or full_emoji:
                 # Get the hash of the external emoji's image if we have access to it
@@ -1523,10 +1504,10 @@ async def map_emoji_helper(
                     (external_emoji if external_emoji else full_emoji),
                 )
                 image = await globals.get_image_from_URL(partial_or_full_emoji.url)
-                image_hash = hash(image)
             else:
                 image = await globals.get_image_from_URL(internal_emoji.url)
-                image_hash = hash(image)
+
+            image_hash = hash(image)
 
         external_emoji_accessible = not not full_emoji
         upsert_missing_emoji = await sql_upsert(
@@ -1600,7 +1581,7 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
         if (
             not isinstance(emoji, str)
             and emoji.id
-            and (mapped_emoji_id := globals.emoji_mappings.get(emoji.id))
+            and (mapped_emoji_id := globals.get_internal_emoji_equivalent(emoji.id))
             and (mapped_emoji := globals.client.get_emoji(mapped_emoji_id))
         ):
             return str(mapped_emoji)

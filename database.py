@@ -125,25 +125,6 @@ class DBAutoBridgeThreadChannels(DBBase):
     channel: Mapped[str] = mapped_column(String(32), nullable=False)
 
 
-class DBEmojiMap(DBBase):
-    """
-    An SQLAlchemy ORM class representing a database table matching external emoji we couldn't find with emoji we have stored in our emoji server.
-
-    #### Columns
-    - `external_emoji (VARCHAR(32))`: The ID of the external emoji which had been missing. Has `PRIMARY KEY`.
-    - `external_emoji_name (VARCHAR(32))`: The name of the external emoji on its original server.
-    - `external_emoji_server_name (VARCHAR(32))`: The name of the original server this emoji is from.
-    - `internal_emoji (VARCHAR(32))`: The ID of the internal emoji that we created to match it.
-    """
-
-    __tablename__ = "emoji_mapping"
-
-    external_emoji: Mapped[str] = mapped_column(String(32), primary_key=True)
-    external_emoji_name: Mapped[str] = mapped_column(String(32))
-    external_emoji_server_name: Mapped[str] = mapped_column(String(32))
-    internal_emoji: Mapped[str] = mapped_column(String(32), nullable=False)
-
-
 class DBEmoji(DBBase):
     """
     An SQLAlchemy ORM class representing a database table storing information about emoji.

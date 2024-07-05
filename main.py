@@ -24,7 +24,6 @@ from database import (
     DBAutoBridgeThreadChannels,
     DBBridge,
     DBEmoji,
-    DBEmojiMap,
     DBMessageMap,
     DBReactionMap,
     engine,
@@ -128,31 +127,6 @@ async def on_ready():
                 DBBridge.webhook.in_(invalid_webhooks)
             )
             session.execute(delete_invalid_webhooks)
-
-        # Try to identify mapped emoji
-        select_mapped_emoji: SQLSelect = SQLSelect(DBEmojiMap)
-        mapped_emoji_query_result: ScalarResult[DBEmojiMap] = session.scalars(
-            select_mapped_emoji
-        )
-        emoji_not_found = set()
-        for emoji_map in mapped_emoji_query_result:
-            if emoji_map.internal_emoji in emoji_not_found:
-                continue
-
-            internal_emoji_id = int(emoji_map.internal_emoji)
-            if not globals.client.get_emoji(internal_emoji_id):
-                emoji_not_found.add(emoji_map.internal_emoji)
-            else:
-                # The emoji is registered
-                globals.emoji_mappings[int(emoji_map.external_emoji)] = (
-                    internal_emoji_id
-                )
-
-        if len(emoji_not_found) > 0:
-            delete_missing_internal_emoji = SQLDelete(DBEmojiMap).where(
-                DBEmojiMap.internal_emoji.in_(emoji_not_found)
-            )
-            session.execute(delete_missing_internal_emoji)
 
         # Try to identify hashed emoji
         select_hashed_emoji: SQLSelect = SQLSelect(DBEmoji)
@@ -745,8 +719,8 @@ async def replace_missing_emoji(message_content: str) -> str:
             # I already have access to this emoji so it's fine
             continue
 
-        if globals.emoji_mappings.get(emoji_id) and (
-            emoji := globals.client.get_emoji(globals.emoji_mappings[emoji_id])
+        if (internal_emoji_id := globals.get_internal_emoji_equivalent(emoji_id)) and (
+            emoji := globals.client.get_emoji(internal_emoji_id)
         ):
             # I don't have access to this emoji but I have a matching one in my emoji mappings
             emoji_to_replace[f"<{emoji_name}:{emoji_id_str}>"] = str(emoji)
@@ -922,7 +896,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         if not fallback_emoji or not fallback_emoji.is_usable():
             fallback_emoji = None
             # Couldn't find the reactji, will try to see if I've got it mapped locally
-            mapped_emoji_id = globals.emoji_mappings.get(emoji_id)
+            mapped_emoji_id = globals.get_internal_emoji_equivalent(emoji_id)
             if mapped_emoji_id:
                 # I already have this Emoji mapped locally
                 fallback_emoji = globals.client.get_emoji(mapped_emoji_id)
@@ -941,7 +915,11 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         emoji_id_str = fallback_emoji
 
     # Get the IDs of all emoji that match the current one
-    equivalent_emoji_ids = get_equivalent_emoji_ids(payload.emoji)
+    equivalent_emoji_ids = globals.get_available_matching_emoji(
+        payload.emoji, return_str=True
+    )
+    if not equivalent_emoji_ids:
+        equivalent_emoji_ids = frozenset(str(payload.emoji.id))
 
     # Now find the list of channels that can validly be reached via outbound chains from this channel
     reachable_channel_ids = bridges.get_reachable_channels(
@@ -1219,13 +1197,9 @@ async def copy_emoji_into_server(
 
         # Try to delete an emoji from the server and then add this again.
         emoji_to_delete = random.choice(globals.emoji_server.emojis)
-        globals.emoji_mappings = {
-            external_id: internal_id
-            for external_id, internal_id in globals.emoji_mappings.items()
-            if internal_id != emoji_to_delete.id
-        }
-        delete_existing_emoji_query = SQLDelete(DBEmojiMap).where(
-            DBEmojiMap.internal_emoji == str(emoji_to_delete.id)
+        globals.delete_emoji_from_hash_table(emoji_to_delete.id)
+        delete_existing_emoji_query = SQLDelete(DBEmoji).where(
+            DBEmoji.id == str(emoji_to_delete.id)
         )
         await emoji_to_delete.delete()
 
@@ -1385,7 +1359,9 @@ async def unreact(
         removed_emoji_id = (
             str(emoji_to_remove.id) if emoji_to_remove.id else emoji_to_remove.name
         )
-        equivalent_emoji_ids = get_equivalent_emoji_ids(emoji_to_remove)
+        equivalent_emoji_ids = globals.get_available_matching_emoji(
+            emoji_to_remove, return_str=True
+        )
 
     try:
         with SQLSession(engine) as session:
@@ -1403,7 +1379,10 @@ async def unreact(
                     map.target_channel,
                     map.target_emoji_id,
                     map.target_emoji_name,
-                    equivalent_emoji_ids or get_equivalent_emoji_ids(map.source_emoji),
+                    equivalent_emoji_ids
+                    or globals.get_available_matching_emoji(
+                        map.source_emoji, return_str=True
+                    ),
                 )
                 for map in bridged_reactions
             }
@@ -1435,7 +1414,10 @@ async def unreact(
                     map.target_channel,
                     map.target_emoji_id,
                     map.target_emoji_name,
-                    equivalent_emoji_ids or get_equivalent_emoji_ids(map.source_emoji),
+                    equivalent_emoji_ids
+                    or globals.get_available_matching_emoji(
+                        map.source_emoji, return_str=True
+                    ),
                 )
                 for map in remaining_reactions
             }
@@ -1515,54 +1497,6 @@ async def unreact(
 
         warn("Ran into an SQL error while trying to remove a reaction:\n" + str(e))
         return
-
-
-def get_equivalent_emoji_ids(
-    emoji: discord.PartialEmoji | int | str,
-) -> frozenset[str]:
-    """Return a set with the IDs of all emoji that match the argument (due to being mapped to it in the emoji server).
-
-    #### Args:
-        - `emoji`: The emoji to find equivalencies for.
-    """
-    validate_types({"emoji": (emoji, (discord.PartialEmoji, int, str))})
-
-    if isinstance(emoji, discord.PartialEmoji) and not emoji.is_custom_emoji():
-        return frozenset({emoji.name})
-
-    if not isinstance(emoji, discord.PartialEmoji):
-        # This should be an emoji ID
-        try:
-            emoji_id = int(emoji)
-        except ValueError:
-            # For some reason it's not, I'll just return it stringified then
-            # This can only happen if emoji is a string
-            return frozenset({cast(str, emoji)})
-    else:
-        # is_custom_emoji() guarantees that emoji.id is not None
-        emoji_id = cast(int, emoji.id)
-
-    # I'm going to go through every emoji in globals.emoji_mappings that can be reached from this emoji_id
-    emoji_to_check: set[int] = {emoji_id}
-    equivalent_emoji_ids: set[str] = set()
-    while len(emoji_to_check) > 0:
-        checking_emoji = emoji_to_check.pop()
-        if str(checking_emoji) in equivalent_emoji_ids:
-            continue
-
-        equivalent_emoji_ids.add(str(checking_emoji))
-
-        emoji_to_check = emoji_to_check.union(
-            {
-                external_emoji
-                for external_emoji, internal_emoji in globals.emoji_mappings.items()
-                if internal_emoji == checking_emoji
-            }
-        )
-        if globals.emoji_mappings.get(checking_emoji):
-            emoji_to_check.add(globals.emoji_mappings[checking_emoji])
-
-    return frozenset(equivalent_emoji_ids)
 
 
 @globals.client.event
