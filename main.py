@@ -22,7 +22,6 @@ from database import (
     DBAppWhitelist,
     DBAutoBridgeThreadChannels,
     DBBridge,
-    DBEmoji,
     DBMessageMap,
     DBReactionMap,
     engine,
@@ -1150,7 +1149,7 @@ async def copy_emoji_into_server(
     image = await globals.get_image_from_URL(missing_emoji_url)
     image_hash = hash(image)
 
-    delete_existing_emoji_query = None
+    emoji_to_delete_id = None
     try:
         emoji = await globals.emoji_server.create_custom_emoji(
             name=missing_emoji_name, image=image, reason="Bridging reaction."
@@ -1165,10 +1164,7 @@ async def copy_emoji_into_server(
 
         # Try to delete an emoji from the server and then add this again.
         emoji_to_delete = random.choice(globals.emoji_server.emojis)
-        emoji_hash_map.map.delete_emoji(emoji_to_delete.id)
-        delete_existing_emoji_query = SQLDelete(DBEmoji).where(
-            DBEmoji.id == str(emoji_to_delete.id)
-        )
+        emoji_to_delete_id = emoji_to_delete.id
         await emoji_to_delete.delete()
 
         try:
@@ -1180,10 +1176,11 @@ async def copy_emoji_into_server(
             raise e
 
     # Copied the emoji, going to update my table
+    session = None
     try:
         with SQLSession(engine) as session:
-            if delete_existing_emoji_query is not None:
-                await sql_retry(lambda: session.execute(delete_existing_emoji_query))
+            if emoji_to_delete_id is not None:
+                await emoji_hash_map.map.delete_emoji(emoji_to_delete_id, session)
 
             await emoji_hash_map.map.add_emoji(
                 emoji=emoji,
@@ -1213,6 +1210,10 @@ async def copy_emoji_into_server(
     except SQLError as e:
         warn("Couldn't add emoji mapping to table.")
         print(e)
+
+        if session:
+            session.rollback()
+            session.close()
 
     return emoji
 

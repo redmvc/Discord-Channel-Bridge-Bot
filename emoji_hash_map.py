@@ -384,13 +384,19 @@ class EmojiHashMap:
             },
         )
 
-    def delete_emoji(self, emoji_id: int):
-        """Delete an emoji from the hash map.
+    async def delete_emoji(
+        self, emoji_id: int, session: SQLSession | Literal[True] | None = None
+    ):
+        """Delete an emoji from the hash map. If `session` is included, delete it from the database also.
 
         #### Args:
             - `emoji_id`: The ID of the emoji to delete.
+            - `session`: A connection to the database, or True in case a new one should be created.
         """
-        validate_types({"emoji_id": (emoji_id, int)})
+        types_to_validate: dict[str, tuple] = {"emoji_id": (emoji_id, int)}
+        if session:
+            types_to_validate["session"] = (session, (SQLSession, bool))
+        validate_types(types_to_validate)
 
         if not self._emoji_to_hash.get(emoji_id):
             return
@@ -406,6 +412,30 @@ class EmojiHashMap:
 
         if self._hash_to_internal_emoji.get(image_hash):
             del self._hash_to_internal_emoji[image_hash]
+
+        if session:
+            if isinstance(session, bool):
+                session = SQLSession(engine)
+                close_after = True
+            else:
+                close_after = False
+
+            try:
+                await sql_retry(
+                    lambda: session.execute(
+                        SQLDelete(DBEmoji).where(DBEmoji.id == str(emoji_id))
+                    )
+                )
+            except SQLError as e:
+                if close_after and session:
+                    session.rollback()
+                    session.close()
+
+                raise e
+
+            if close_after:
+                session.commit()
+                session.close()
 
     async def load_server_emoji(self, server_id: int | None = None):
         """Load all emoji in a server (or in all servers the bot is connected to) into the hash map.
@@ -432,7 +462,7 @@ class EmojiHashMap:
         async def update_emoji(
             server_id: int | str, is_internal: bool, emoji: discord.Emoji
         ):
-            self.delete_emoji(emoji.id)
+            await self.delete_emoji(emoji.id)
 
             image = await globals.get_image_from_URL(emoji.url)
             image_hash = hash(image)
