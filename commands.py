@@ -923,13 +923,16 @@ async def map_emoji(
     session = None
     try:
         with SQLSession(engine) as session:
+            image_hash = await emoji_hash_map.map.get_hash(
+                emoji=internal_emoji, session=session
+            )
             map_emojis = await asyncio.gather(
                 *[
                     map_emoji_helper(
                         external_emoji_id=id,
                         external_emoji_name=name,
                         internal_emoji=internal_emoji,
-                        image_hash=emoji_hash_map.map.emoji_to_hash[internal_emoji.id],
+                        image_hash=image_hash,
                         session=session,
                     )
                     for name, id in external_emojis_set

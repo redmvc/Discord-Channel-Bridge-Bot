@@ -18,17 +18,6 @@ from validations import validate_types
 class EmojiHashMap:
     """
     A mapping between emoji IDs and hashes of their images.
-
-    Attributes
-    ----------
-    emoji_to_hash : dict[int, int]
-        A dictionary whose keys are emoji IDs and whose values are the hashes of their images.
-
-    hash_to_available_emoji :  dict[int, set[int]]
-        A dictionary whose keys are image hashes and whose values are sets with the IDs of all emoji available to the bot with that image hash.
-
-    hash_to_internal_emoji : dict[int, int]
-        A dictionary whose keys are image hashes and whose values are IDs for the internal emoji with that hash.
     """
 
     def __init__(self, session: SQLSession | None = None):
@@ -44,9 +33,9 @@ class EmojiHashMap:
             session = SQLSession(engine)
             close_after = True
 
-        self.emoji_to_hash: dict[int, int] = {}
-        self.hash_to_available_emoji: dict[int, set[int]] = {}
-        self.hash_to_internal_emoji: dict[int, int] = {}
+        self._emoji_to_hash: dict[int, int] = {}
+        self._hash_to_available_emoji: dict[int, set[int]] = {}
+        self._hash_to_internal_emoji: dict[int, int] = {}
 
         try:
             select_hashed_emoji: SQLSelect = SQLSelect(DBEmoji)
@@ -97,7 +86,7 @@ class EmojiHashMap:
         accessible: bool | None = None,
         server_id: int | str | None = None,
         is_internal: bool | None = None,
-    ):
+    ) -> tuple[int, int]:
         """Add an emoji to the hash map.
 
         #### Args:
@@ -109,6 +98,9 @@ class EmojiHashMap:
 
         #### Raises:
             - `ValueError`: `emoji_id`, `image_hash`, or `server_id` were not valid numerical IDs.
+
+        #### Returns:
+            - `tuple[int, int]`: A tuple with the emoji ID and the hash of its image.
         """
         types_to_validate: dict[str, tuple] = {
             "emoji_id": (emoji_id, (int, str)),
@@ -135,22 +127,24 @@ class EmojiHashMap:
         emoji_id = int(emoji_id)
         image_hash = int(image_hash)
 
-        self.emoji_to_hash[emoji_id] = image_hash
+        self._emoji_to_hash[emoji_id] = image_hash
         if accessible is None:
             accessible = not not globals.client.get_emoji(emoji_id)
 
         if accessible:
-            if not self.hash_to_available_emoji.get(image_hash):
-                self.hash_to_available_emoji[image_hash] = set()
-            self.hash_to_available_emoji[image_hash].add(emoji_id)
+            if not self._hash_to_available_emoji.get(image_hash):
+                self._hash_to_available_emoji[image_hash] = set()
+            self._hash_to_available_emoji[image_hash].add(emoji_id)
         elif (
-            self.hash_to_available_emoji.get(image_hash)
-            and emoji_id in self.hash_to_available_emoji[image_hash]
+            self._hash_to_available_emoji.get(image_hash)
+            and emoji_id in self._hash_to_available_emoji[image_hash]
         ):
-            self.hash_to_available_emoji[image_hash].remove(emoji_id)
+            self._hash_to_available_emoji[image_hash].remove(emoji_id)
 
         if is_internal:
-            self.hash_to_internal_emoji[image_hash] = emoji_id
+            self._hash_to_internal_emoji[image_hash] = emoji_id
+
+        return (emoji_id, image_hash)
 
     async def _add_emoji_to_database(
         self,
@@ -253,8 +247,8 @@ class EmojiHashMap:
         accessible: bool = False,
         is_internal: bool | None = None,
         session: SQLSession | Literal[True] | None = None,
-    ):
-        """Inserts an emoji into the hash map and, optionally, into the `emoji` database table.
+    ) -> tuple[int, int]:
+        """Insert an emoji into the hash map and, optionally, into the `emoji` database table.
 
         #### Args:
             - `emoji`: The Discord emoji to insert. Defaults to None, in which case `emoji_id` and `emoji_name` will be used instead.
@@ -276,6 +270,9 @@ class EmojiHashMap:
             - `InvalidURL`: URL generated from emoji was not valid.
             - `RuntimeError`: Session connection failed.
             - `ServerTimeoutError`: Connection to server timed out.
+
+        #### Returns:
+            - `tuple[int, int]`: A tuple with the emoji ID and the hash of its image.
         """
         if session:
             validate_types({"session": (session, (SQLSession, bool))})
@@ -293,7 +290,7 @@ class EmojiHashMap:
             assert (emoji_server_id_raw := globals.settings.get("emoji_server_id"))
             emoji_server_id = int(emoji_server_id_raw)
 
-        self._add_emoji_to_map(
+        emoji_id, image_hash = self._add_emoji_to_map(
             emoji_id,
             image_hash,
             accessible=accessible,
@@ -330,6 +327,8 @@ class EmojiHashMap:
             if close_after:
                 session.commit()
                 session.close()
+
+        return (emoji_id, image_hash)
 
     async def upsert_emoji(
         self,
@@ -377,20 +376,20 @@ class EmojiHashMap:
         """
         validate_types({"emoji_id": (emoji_id, int)})
 
-        if not self.emoji_to_hash.get(emoji_id):
+        if not self._emoji_to_hash.get(emoji_id):
             return
 
-        image_hash = self.emoji_to_hash[emoji_id]
-        del self.emoji_to_hash[emoji_id]
+        image_hash = self._emoji_to_hash[emoji_id]
+        del self._emoji_to_hash[emoji_id]
 
         if (
-            self.hash_to_available_emoji.get(image_hash)
-            and emoji_id in self.hash_to_available_emoji[image_hash]
+            self._hash_to_available_emoji.get(image_hash)
+            and emoji_id in self._hash_to_available_emoji[image_hash]
         ):
-            self.hash_to_available_emoji[image_hash].remove(emoji_id)
+            self._hash_to_available_emoji[image_hash].remove(emoji_id)
 
-        if self.hash_to_internal_emoji.get(image_hash):
-            del self.hash_to_internal_emoji[image_hash]
+        if self._hash_to_internal_emoji.get(image_hash):
+            del self._hash_to_internal_emoji[image_hash]
 
     async def load_server_emoji(self, server_id: int | None = None):
         """Load all emoji in a server (or in all servers the bot is connected to) into the hash map.
@@ -505,19 +504,19 @@ class EmojiHashMap:
             except ValueError:
                 return None
 
-        if not self.emoji_to_hash.get(emoji_id):
+        if not self._emoji_to_hash.get(emoji_id):
             return None
 
-        image_hash = self.emoji_to_hash[emoji_id]
-        if not self.hash_to_available_emoji.get(image_hash):
+        image_hash = self._emoji_to_hash[emoji_id]
+        if not self._hash_to_available_emoji.get(image_hash):
             return None
 
         if not return_str:
             return cast(
-                frozenset[int], frozenset(self.hash_to_available_emoji[image_hash])
+                frozenset[int], frozenset(self._hash_to_available_emoji[image_hash])
             )
 
-        return frozenset({str(id) for id in self.hash_to_available_emoji[image_hash]})
+        return frozenset({str(id) for id in self._hash_to_available_emoji[image_hash]})
 
     def get_internal_equivalent(self, emoji_id: int) -> int | None:
         """Return the ID of an internal emoji matching the one passed, if available.
@@ -527,14 +526,14 @@ class EmojiHashMap:
         """
         validate_types({"emoji_id": (emoji_id, int)})
 
-        if not self.emoji_to_hash.get(emoji_id):
+        if not self._emoji_to_hash.get(emoji_id):
             return None
 
-        image_hash = self.emoji_to_hash[emoji_id]
-        if not self.hash_to_internal_emoji.get(image_hash):
+        image_hash = self._emoji_to_hash[emoji_id]
+        if not self._hash_to_internal_emoji.get(image_hash):
             return None
 
-        return self.hash_to_internal_emoji[image_hash]
+        return self._hash_to_internal_emoji[image_hash]
 
     def get_accessible_emoji(
         self, emoji_id: int, *, skip_self: bool = False
@@ -568,15 +567,51 @@ class EmojiHashMap:
 
         return None
 
+    async def get_hash(
+        self,
+        *,
+        emoji: discord.PartialEmoji | discord.Emoji | None = None,
+        emoji_id: int | str | None = None,
+        emoji_name: str | None = None,
+        session: SQLSession | None = None,
+    ) -> int | None:
+        """Return the hash of an emoji.
+
+        If only `emoji_id` is passed and the emoji can't be found in our existing hash map, returns None; otherwise will ensure the emoji is in the hash map.
+
+        #### Args:
+            - `emoji`: The emoji to get a hash for. Defaults to None, in which case `emoji_id` is used instead.
+            - `emoji_id`: The ID of the emoji to get a hash for. Defaults to None, in which case `emoji` is used instead.
+            - `emoji_name`: The name of the emoji. Defaults to None, but must be included if `emoji_id` is. If it starts with `"a:"` the emoji will be marked as animated.
+            - `session`: A connection to the database. Defaults to None, in which case a new one will be created for any necessary DB operations.
+
+        #### Raises:
+            - `ArgumentError`: The number of arguments passed is incorrect.
+            - `ValueError`: `emoji` argument was passed and had type `PartialEmoji` but it was not a custom emoji, or `emoji_id` argument was passed and had type `str` but it was not a valid numerical ID.
+            - `HTTPResponseError`: HTTP request to fetch image returned a status other than 200.
+            - `InvalidURL`: URL generated from emoji was not valid.
+            - `RuntimeError`: Session connection failed.
+            - `ServerTimeoutError`: Connection to server timed out.
+        """
+        if not emoji and emoji_id and not emoji_name:
+            emoji_id = int(emoji_id)
+            if self._emoji_to_hash.get(emoji_id):
+                return self._emoji_to_hash[emoji_id]
+            return None
+
+        return await self.ensure_hash_map(
+            emoji=emoji, emoji_id=emoji_id, emoji_name=emoji_name, session=session
+        )
+
     async def ensure_hash_map(
         self,
         *,
         emoji: discord.Emoji | discord.PartialEmoji | None = None,
-        emoji_id: int | None = None,
+        emoji_id: int | str | None = None,
         emoji_name: str | None = None,
         session: SQLSession | None = None,
-    ):
-        """Check that the emoji is in the hash map and, if not, add it to the map and to the database.
+    ) -> int | None:
+        """Check that the emoji is in the hash map and, if not, add it to the map and to the database, then return the hash.
 
         #### Args:
             - `emoji`: A Discord emoji. Defaults to None, in which case the values below will be used instead.
@@ -595,19 +630,18 @@ class EmojiHashMap:
         if session:
             validate_types({"session": (session, SQLSession)})
 
-        emoji_id, emoji_name, _, emoji_url = globals.get_emoji_information(
+        emoji_id, emoji_name, _, _ = globals.get_emoji_information(
             emoji, emoji_id, emoji_name
         )
 
-        if self.emoji_to_hash.get(emoji_id):
-            return
+        if self._emoji_to_hash.get(emoji_id):
+            return self._emoji_to_hash[emoji_id]
 
-        try:
-            image = await globals.get_image_from_URL(emoji_url)
-            image_hash = hash(image)
-            self._add_emoji_to_map(emoji_id, image_hash)
-        except Exception:
-            pass
+        _, image_hash = await self.add_emoji(
+            emoji=emoji, emoji_id=emoji_id, emoji_name=emoji_name, session=session
+        )
+
+        return image_hash
 
 
 map: EmojiHashMap
