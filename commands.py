@@ -944,7 +944,7 @@ async def map_emoji(
         map_emojis = await asyncio.gather(
             *[
                 map_emoji_helper(
-                    external_emoji=id,
+                    external_emoji_id=id,
                     external_emoji_name=name,
                     internal_emoji=internal_emoji,
                 )
@@ -1429,7 +1429,8 @@ async def validate_auto_bridge_thread_channels(
 
 async def map_emoji_helper(
     *,
-    external_emoji: discord.PartialEmoji | int,
+    external_emoji: discord.PartialEmoji | None = None,
+    external_emoji_id: int | None = None,
     external_emoji_name: str | None = None,
     internal_emoji: discord.Emoji,
     session: SQLSession | None = None,
@@ -1437,32 +1438,45 @@ async def map_emoji_helper(
     """Create a mapping between external and internal emoji, recording it locally and saving it in the emoji_mappings table.
 
     #### Args:
-        - `external_emoji`: The custom emoji that is not present in any servers the bot is in, or an ID of one.
+        - `external_emoji`: The custom emoji that is not present in any servers the bot is in. Defaults to None.
+        - `external_emoji_id`: The ID of the external emoji. Defaults to None.
         - `external_emoji_name`: The name of the external emoji. Defaults to None.
         - `internal_emoji`: An emoji the bot has in its emoji server.
         - `session`: A connection to the database. Defaults to None.
 
     #### Raises:
+        - `ValueError`: Incorrect number of arguments passed.
         - `UnknownDBDialectError`: Invalid database dialect registered in `settings.json` file.
         - `SQLError`: SQL statement inferred from arguments was invalid or database connection failed.
     """
-    if not isinstance(external_emoji, int) and not external_emoji.id:
+    if not external_emoji_id and (not external_emoji or not external_emoji.id):
         return False
 
+    if external_emoji and external_emoji_id:
+        raise ValueError(
+            "You must pass either external_emoji or external_emoji_id, not both."
+        )
+    if not external_emoji and not external_emoji_id:
+        raise ValueError("You must pass one of external_emoji or external_emoji_id.")
+
     types_to_validate: dict[str, tuple] = {
-        "external_emoji": (external_emoji, (discord.PartialEmoji, int)),
         "internal_emoji": (internal_emoji, discord.Emoji),
     }
+    if external_emoji:
+        types_to_validate["external_emoji"] = (external_emoji, discord.PartialEmoji)
+    if external_emoji_id:
+        types_to_validate["external_emoji_id"] = (external_emoji_id, int)
     if external_emoji_name:
         types_to_validate["external_emoji_name"] = (external_emoji_name, str)
     if session:
         types_to_validate["session"] = (session, SQLSession)
     validate_types(types_to_validate)
 
-    if isinstance(external_emoji, int):
-        external_emoji_id = external_emoji
+    if external_emoji_id:
         external_emoji_name = external_emoji_name or ""
+        external_emoji_animated = internal_emoji.animated
     else:
+        assert external_emoji
         external_emoji_id = cast(int, external_emoji.id)
         external_emoji_name = external_emoji_name or external_emoji.name
 
