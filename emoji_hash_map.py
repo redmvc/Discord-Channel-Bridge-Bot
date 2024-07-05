@@ -2,6 +2,7 @@ import asyncio
 from typing import Any, Coroutine, Literal, Sequence, cast, overload
 
 import discord
+from sqlalchemy import Delete as SQLDelete
 from sqlalchemy import ScalarResult
 from sqlalchemy import Select as SQLSelect
 from sqlalchemy import Update as SQLUpdate
@@ -42,6 +43,7 @@ class EmojiHashMap:
             hashed_emoji_query_result: ScalarResult[DBEmoji] = session.scalars(
                 select_hashed_emoji
             )
+            emoji_ids_to_delete: set[str] = set()
             accessibility_flips: set[str] = set()
             for row in hashed_emoji_query_result:
                 emoji_id_str = row.id
@@ -49,8 +51,17 @@ class EmojiHashMap:
 
                 emoji_hash = int(row.image_hash)
 
-                emoji_registered_as_accessible = row.accessible
                 emoji_actually_accessible = not not globals.client.get_emoji(emoji_id)
+                server_id = int(row.server_id)
+                if (
+                    globals.client.get_guild(server_id)
+                    and not emoji_actually_accessible
+                ):
+                    # Emoji isn't accessible despite me being in its guild, it was probably deleted
+                    emoji_ids_to_delete.add(emoji_id_str)
+                    continue
+
+                emoji_registered_as_accessible = row.accessible
                 if emoji_registered_as_accessible != emoji_actually_accessible:
                     accessibility_flips.add(emoji_id_str)
 
@@ -58,7 +69,12 @@ class EmojiHashMap:
                     emoji_id,
                     emoji_hash,
                     accessible=emoji_actually_accessible,
-                    server_id=row.server_id,
+                    server_id=server_id,
+                )
+
+            if len(emoji_ids_to_delete) > 0:
+                session.execute(
+                    SQLDelete(DBEmoji).where(DBEmoji.id.in_(emoji_ids_to_delete))
                 )
 
             if len(accessibility_flips) > 0:
