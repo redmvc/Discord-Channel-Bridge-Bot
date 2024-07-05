@@ -1438,7 +1438,7 @@ async def validate_auto_bridge_thread_channels(
 async def map_emoji_helper(
     *,
     external_emoji: discord.PartialEmoji | None = None,
-    external_emoji_id: int | None = None,
+    external_emoji_id: int | str | None = None,
     external_emoji_name: str | None = None,
     internal_emoji: discord.Emoji,
     image_hash: int | None = None,
@@ -1463,37 +1463,18 @@ async def map_emoji_helper(
         - `RuntimeError`: Session connection failed.
         - `ServerTimeoutError`: Connection to server timed out.
     """
-    if not external_emoji_id and (not external_emoji or not external_emoji.id):
-        return False
-
-    if external_emoji and external_emoji_id:
-        raise ValueError(
-            "You must pass either external_emoji or external_emoji_id, not both."
-        )
-    if not external_emoji and not external_emoji_id:
-        raise ValueError("You must pass one of external_emoji or external_emoji_id.")
-
     types_to_validate: dict[str, tuple] = {
         "internal_emoji": (internal_emoji, discord.Emoji),
     }
-    if external_emoji:
-        types_to_validate["external_emoji"] = (external_emoji, discord.PartialEmoji)
-    if external_emoji_id:
-        types_to_validate["external_emoji_id"] = (external_emoji_id, int)
-    if external_emoji_name:
-        types_to_validate["external_emoji_name"] = (external_emoji_name, str)
     if session:
         types_to_validate["session"] = (session, SQLSession)
     validate_types(types_to_validate)
 
-    if external_emoji_id:
-        external_emoji_name = external_emoji_name or None
-        external_emoji_animated = internal_emoji.animated
-    else:
-        assert external_emoji
-        external_emoji_id = cast(int, external_emoji.id)
-        external_emoji_name = external_emoji_name or external_emoji.name
-        external_emoji_animated = external_emoji.animated
+    external_emoji_id, external_emoji_name, external_emoji_animated, _ = (
+        globals.get_emoji_information(
+            external_emoji, external_emoji_id, external_emoji_name
+        )
+    )
 
     full_emoji = globals.client.get_emoji(external_emoji_id)
     if full_emoji and full_emoji.guild:
