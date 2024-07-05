@@ -1,15 +1,17 @@
-from typing import Literal, cast, overload
+import asyncio
+from typing import Any, Coroutine, Literal, Sequence, cast, overload
 
 import discord
 from sqlalchemy import ScalarResult
 from sqlalchemy import Select as SQLSelect
 from sqlalchemy import Update as SQLUpdate
+from sqlalchemy import UpdateBase
 from sqlalchemy import not_ as sql_not
 from sqlalchemy.exc import StatementError as SQLError
 from sqlalchemy.orm import Session as SQLSession
 
 import globals
-from database import DBEmoji, engine
+from database import DBEmoji, engine, sql_upsert
 from validations import validate_types
 
 
@@ -138,6 +140,83 @@ class EmojiHashMap:
 
         if self.hash_to_internal_emoji.get(image_hash):
             del self.hash_to_internal_emoji[image_hash]
+
+    async def load_server_emoji(self, server_id: int | None = None):
+        """Load all emoji in a server (or in all servers the bot is connected to) into the hash map.
+
+        #### Args:
+            - `server_id`: The ID of the server to load. Defaults to None, in which case will load the emoji from all servers the bot is connected to.
+
+        #### Raises:
+            - `ValueError`: The server ID passed as argument does not belong to a server the bot is in.
+        """
+        if server_id:
+            server = globals.client.get_guild(server_id)
+            if not server:
+                raise ValueError("Bot is not in server.")
+
+            servers: Sequence[discord.Guild] = [server]
+        else:
+            servers = globals.client.guilds
+
+        async def update_emoji(
+            server_id_str: str, is_internal: bool, emoji: discord.Emoji
+        ):
+            self.delete_emoji(emoji.id)
+
+            image = await globals.get_image_from_URL(emoji.url)
+            image_hash = hash(image)
+            self.add_emoji(emoji.id, image_hash, True)
+
+            if is_internal:
+                self.hash_to_internal_emoji[image_hash] = emoji.id
+
+            return await sql_upsert(
+                DBEmoji,
+                {
+                    "id": str(emoji.id),
+                    "name": emoji.name,
+                    "server_id": server_id_str,
+                    "animated": emoji.animated,
+                    "image_hash": image_hash,
+                    "accessible": True,
+                },
+                {
+                    "name": emoji.name,
+                    "server_id": server_id_str,
+                    "image_hash": image_hash,
+                    "accessible": True,
+                },
+            )
+
+        session = None
+        try:
+            with SQLSession(engine) as session:
+                update_emoji_async: list[Coroutine[Any, Any, UpdateBase]]
+                for server in servers:
+                    update_emoji_async = []
+
+                    server_id_str = str(server.id)
+                    is_internal = (
+                        globals.emoji_server is not None
+                        and server.id == globals.emoji_server.id
+                    )
+                    for emoji in server.emojis:
+                        update_emoji_async.append(
+                            update_emoji(server_id_str, is_internal, emoji)
+                        )
+
+                    # I'll gather the requests one server at a time
+                    upserts = await asyncio.gather(*update_emoji_async)
+                    for upsert in upserts:
+                        session.execute(upsert)
+
+                session.commit()
+        except SQLError as e:
+            if session:
+                session.rollback()
+                session.close()
+            raise e
 
     @overload
     def get_available_matches(
