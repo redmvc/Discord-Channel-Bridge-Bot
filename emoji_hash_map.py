@@ -363,7 +363,9 @@ class EmojiHashMap:
             emoji_animated = emoji.animated
             url = emoji.url
         else:
-            assert emoji_name and emoji_id
+            emoji_id = cast(int, emoji_id)
+            emoji_name = cast(str, emoji_name)
+
             emoji_animated = emoji_name.startswith("a:")
             if emoji_animated:
                 emoji_name = emoji_name[2:]
