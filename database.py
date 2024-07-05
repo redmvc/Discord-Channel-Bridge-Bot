@@ -179,7 +179,7 @@ async def sql_upsert(
         - `insert_values`: A dictionary whose keys are the names of columns in the table being inserted into and whose values are the values to insert. Must include at least one unique key as well as all keys in `update_values`.
         - `update_values`: A dictionary whose keys are the names of columns in the table being inserted into and whose values are the values to update on duplicate keys. At least one unique key present in `insert_values` must be absent from this dictionary.
 
-    ### Raises:
+    #### Raises:
         - `ValueError`: `insert_values` does not have any keys not present in `update_values`.
         - `UnknownDBDialectError`: Invalid database dialect registered in `settings.json` file.
         - `SQLError`: SQL statement inferred from arguments was invalid or database connection failed.
