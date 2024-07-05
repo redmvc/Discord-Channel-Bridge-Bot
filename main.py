@@ -160,6 +160,7 @@ async def on_ready():
             select_hashed_emoji
         )
         accessibility_flips: set[str] = set()
+        emoji_server_id_str = globals.settings.get("emoji_server_id")
         for row in hashed_emoji_query_result:
             emoji_id_str = row.id
             emoji_id = int(emoji_id_str)
@@ -172,6 +173,9 @@ async def on_ready():
                 accessibility_flips.add(emoji_id_str)
 
             globals.map_emoji_hash(emoji_id, emoji_hash, emoji_actually_accessible)
+
+            if row.server_id == emoji_server_id_str:
+                globals.hash_to_internal_emoji[emoji_hash] = emoji_id
 
         if len(accessibility_flips) > 0:
             session.execute(
@@ -236,7 +240,6 @@ async def on_ready():
         )
 
     # Finally I'll check whether I have a registered emoji server and save it if so
-    emoji_server_id_str = globals.settings.get("emoji_server_id")
     try:
         if emoji_server_id_str:
             emoji_server_id = int(emoji_server_id_str)
@@ -1253,6 +1256,7 @@ async def copy_emoji_into_server(
                 )
             )
             globals.map_emoji_hash(emoji.id, image_hash, True)
+            globals.hash_to_internal_emoji[image_hash] = emoji.id
 
             if missing_emoji:
                 await commands.map_emoji_helper(

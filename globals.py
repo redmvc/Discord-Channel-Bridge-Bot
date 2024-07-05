@@ -95,6 +95,7 @@ emoji_mappings: dict[int, int] = {}
 # Dictionaries mapping emoji to the hashed values of their images and hashes to lists of emoji available to the bot
 emoji_to_hash: dict[int, int] = {}
 hash_to_available_emoji: dict[int, set[int]] = {}
+hash_to_internal_emoji: dict[int, int] = {}
 
 # Dictionary listing all apps whitelisted per channel
 per_channel_whitelist: dict[int, set[int]] = {}
