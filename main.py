@@ -702,7 +702,7 @@ async def replace_missing_emoji(message_content: str) -> str:
 
         try:
             emoji = await copy_emoji_into_server(
-                missing_emoji_name=emoji_name, missing_emoji_id=emoji_id_str
+                missing_emoji_id=emoji_id_str, missing_emoji_name=emoji_name
             )
             if emoji:
                 emoji_to_replace[f"<{emoji_name}:{emoji_id_str}>"] = str(emoji)
@@ -1106,15 +1106,15 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
 async def copy_emoji_into_server(
     *,
     missing_emoji: discord.PartialEmoji | None = None,
-    missing_emoji_name: str | None = None,
     missing_emoji_id: str | int | None = None,
+    missing_emoji_name: str | None = None,
 ) -> discord.Emoji | None:
     """Try to create an emoji in the emoji server and, if successful, return it.
 
     #### Args:
         - `missing_emoji`: The emoji we are trying to copy into our emoji server. Defaults to None, in which case `missing_emoji_name` and `missing_emoji_id` are used instead.
-        - `missing_emoji_name`: The name of a missing emoji, optionally preceded by an `"a:"` in case it's animated. Defaults to None, in which case `missing_emoji` is used instead.
         - `missing_emoji_id`: The ID of the missing emoji. Defaults to None, in which case `missing_emoji` is used instead.
+        - `missing_emoji_name`: The name of a missing emoji, optionally preceded by an `"a:"` in case it's animated. Defaults to None, but must be included if `missing_emoji_id` is.
 
     #### Raises:
         - `ArgumentError`: The number of arguments passed is incorrect.
