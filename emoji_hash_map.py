@@ -540,7 +540,7 @@ class EmojiHashMap:
             - `emoji`: The emoji to find matches for or ID of same.
             - `return_str`: If set to `True` will return a frozenset of stringified IDs. Defaults to False.
         """
-        validate_types({"emoji": (emoji, (discord.PartialEmoji, int))})
+        validate_types({"emoji": (emoji, (discord.PartialEmoji, int, str))})
 
         if isinstance(emoji, discord.PartialEmoji):
             if not emoji.id:
