@@ -52,9 +52,10 @@ class EmojiHashMap:
                 emoji_hash = int(row.image_hash)
 
                 emoji_actually_accessible = not not globals.client.get_emoji(emoji_id)
-                server_id = int(row.server_id)
                 if (
-                    globals.client.get_guild(server_id)
+                    row.server_id
+                    and (server_id := int(row.server_id))
+                    and globals.client.get_guild(server_id)
                     and not emoji_actually_accessible
                 ):
                     # Emoji isn't accessible despite me being in its guild, it was probably deleted
@@ -69,7 +70,7 @@ class EmojiHashMap:
                     emoji_id,
                     emoji_hash,
                     accessible=emoji_actually_accessible,
-                    server_id=server_id,
+                    server_id=row.server_id,
                 )
 
             if len(emoji_ids_to_delete) > 0:
