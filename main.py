@@ -21,6 +21,7 @@ from database import (
     DBAppWhitelist,
     DBAutoBridgeThreadChannels,
     DBBridge,
+    DBEmoji,
     DBEmojiMap,
     DBMessageMap,
     DBReactionMap,
@@ -1141,6 +1142,7 @@ async def copy_emoji_into_server(
     """
     if not globals.emoji_server:
         return None
+    emoji_server_id = globals.emoji_server.id
 
     if missing_emoji and (missing_emoji_name or missing_emoji_id):
         raise ValueError(
@@ -1169,6 +1171,7 @@ async def copy_emoji_into_server(
     image = await globals.get_image_from_URL(
         f"https://cdn.discordapp.com/emojis/{missing_emoji_id}.{ext}?v=1"
     )
+    image_hash = hash(image)
 
     delete_existing_emoji_query = None
     try:
@@ -1208,6 +1211,20 @@ async def copy_emoji_into_server(
         with SQLSession(engine) as session:
             if delete_existing_emoji_query is not None:
                 await sql_retry(lambda: session.execute(delete_existing_emoji_query))
+
+            await sql_retry(
+                lambda: session.add(
+                    DBEmoji(
+                        id=emoji.id,
+                        name=emoji.name,
+                        server_id=emoji_server_id,
+                        animated=missing_emoji_animated,
+                        image_hash=image_hash,
+                        accessible=True,
+                    )
+                )
+            )
+
             if missing_emoji:
                 await commands.map_emoji_helper(
                     external_emoji=missing_emoji, internal_emoji=emoji, session=session
@@ -1219,6 +1236,7 @@ async def copy_emoji_into_server(
                     internal_emoji=emoji,
                     session=session,
                 )
+
             session.commit()
     except SQLError as e:
         warn("Couldn't add emoji mapping to table.")
