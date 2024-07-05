@@ -1581,7 +1581,13 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
         if (
             not isinstance(emoji, str)
             and emoji.id
-            and (mapped_emoji_id := globals.get_internal_emoji_equivalent(emoji.id))
+            and (
+                (mapped_emoji_id := globals.get_internal_emoji_equivalent(emoji.id))
+                or (
+                    (available_ids := globals.get_available_matching_emoji(emoji.id))
+                    and (mapped_emoji_id := set(available_ids).pop())
+                )
+            )
             and (mapped_emoji := globals.client.get_emoji(mapped_emoji_id))
         ):
             return str(mapped_emoji)

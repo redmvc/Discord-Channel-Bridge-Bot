@@ -726,6 +726,15 @@ async def replace_missing_emoji(message_content: str) -> str:
             emoji_to_replace[f"<{emoji_name}:{emoji_id_str}>"] = str(emoji)
             continue
 
+        if (
+            (matching_emoji_ids := globals.get_available_matching_emoji(emoji_id))
+            and (matching_emoji_id := set(matching_emoji_ids).pop())
+            and (emoji := globals.client.get_emoji(matching_emoji_id))
+        ):
+            # I have access to another non-internal matching emoji
+            emoji_to_replace[f"<{emoji_name}:{emoji_id_str}>"] = str(emoji)
+            continue
+
         try:
             emoji = await copy_emoji_into_server(
                 missing_emoji_name=emoji_name, missing_emoji_id=emoji_id_str
@@ -896,9 +905,13 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         if not fallback_emoji or not fallback_emoji.is_usable():
             fallback_emoji = None
             # Couldn't find the reactji, will try to see if I've got it mapped locally
-            mapped_emoji_id = globals.get_internal_emoji_equivalent(emoji_id)
-            if mapped_emoji_id:
-                # I already have this Emoji mapped locally
+            if internal_emoji_id := globals.get_internal_emoji_equivalent(emoji_id):
+                # I already have this Emoji assigned to an internal one
+                fallback_emoji = globals.client.get_emoji(internal_emoji_id)
+            elif (mapped_emoji := globals.get_available_matching_emoji(emoji_id)) and (
+                mapped_emoji_id := set(mapped_emoji).pop()
+            ):
+                # I have access to another emoji that matches this one
                 fallback_emoji = globals.client.get_emoji(mapped_emoji_id)
 
         if not fallback_emoji:
