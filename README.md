@@ -57,7 +57,7 @@ It's very straightforward to run your own copy of this bot. You'll need access t
 5. Edit your `requirements.txt` file to include the appropriate SQL library depending on your SQL dialect, then run `pip install -r requirements.txt` on your command line from the main folder.
 6. Run `main.py`. This will automatically create the necessary tables in your database if they're not already there, and all commands will be working out of the box.
 
-If you set up a server for the bot to store emoji, you can run the command `/map_emoji :internal_emoji: :external_emoji: [:external_emoji_2: [:external_emoji_3: ...]]` from that server to create an internal equivalence between emoji for the bot to bridge.
+If you set up a server for the bot to store emoji, you can run the command `/map_emoji :internal_emoji: :external_emoji: [:external_emoji_2: [:external_emoji_3: ...]]` from that server to create an internal equivalence between emoji for the bot to bridge. You can also run the command `/hash_server_emoji [server_id]` in order to store hashes of every emoji in a server so that the bridge will store hashes of each emoji so that it can automatically match different emoji from different servers that use the same image.
 
 ### Help, issues, and bugs
 If you have any issues with this bot, feel free to create an issue on the Issue Tracker or DM `redmagnos` on Discord.

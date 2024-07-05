@@ -43,6 +43,7 @@ async def help(
             "demolish_all",
             "whitelist",
             "map_emoji",
+            "hash_server_emoji",
         ]
         | None
     ) = None,
@@ -58,9 +59,9 @@ async def help(
 
     if not command:
         if interaction_from_emoji_server:
-            map_emoji_mention = ", `/map_emoji`"
+            emoji_server_commands = ", `/map_emoji`, `/hash_server_emoji`"
         else:
-            map_emoji_mention = ""
+            emoji_server_commands = ""
 
         await interaction.response.send_message(
             "This bot bridges channels and threads to each other, mirroring messages sent from one to the other. When a message is bridged:"
@@ -70,7 +71,7 @@ async def help(
             + "\n- whenever someone adds a reaction to one message the bot will add the same reaction (if it can) to all of its mirrors;"
             + "\n- and deleting the original message will delete its copies (but not vice-versa)."
             + "\nThreads created in a channel do not automatically get matched to other channels bridged to it; create and bridge them manually or use the `/bridge_thread` or `/auto_bridge_threads` command."
-            + f"\n\nList of commands: `/bridge`, `/bridge_thread`, `/auto_bridge_threads`, `/demolish`, `/demolish_all`, `/whitelist`{map_emoji_mention}, `/help`.\nType `/help command` for detailed explanation of a command.",
+            + f"\n\nList of commands: `/bridge`, `/bridge_thread`, `/auto_bridge_threads`, `/demolish`, `/demolish_all`, `/whitelist`{emoji_server_commands}, `/help`.\nType `/help command` for detailed explanation of a command.",
             ephemeral=True,
         )
     else:
@@ -129,6 +130,13 @@ async def help(
                 "`/map_emoji :internal_emoji: :external_emoji: [:external_emoji_2: [:external_emoji_3: ...]]`"
                 + "\nNecessary permissions to run command: Create Expressions, Manage Expressions."
                 + "\n\nCreates an internal mapping between an emoji from an external server which the bot doesn't have access to and an emoji stored in the bot's emoji server, so that they are considered equivalent by the bot when bridging reactions. You can also pass multiple external emoji separated by spaces to map all of them to the same internal one.",
+                ephemeral=True,
+            )
+        elif command == "hash_server_emoji" and interaction_from_emoji_server:
+            await interaction.response.send_message(
+                "`/hash_server_emoji [server_id]`"
+                + "\nNecessary permissions to run command: Create Expressions, Manage Expressions."
+                + "\n\nLoads all of the emoji of a given server into the bot's hash map for equivalence matching. If `server_id` is not provided, will loas the emoji from every server the bot is connected to into the map.",
                 ephemeral=True,
             )
         else:
@@ -965,6 +973,109 @@ async def map_emoji(
             f"✅ All emoji mappings to {str(internal_emoji)} created!",
             ephemeral=True,
         )
+
+
+@discord.app_commands.default_permissions(
+    create_expressions=True, manage_expressions=True
+)
+@globals.command_tree.command(
+    name="hash_server_emoji",
+    description="Load all of the emoji of a server or servers into the bot's hash map for equivalence matching.",
+    guild=globals.emoji_server,
+)
+@discord.app_commands.rename(
+    server_id_str="server",
+)
+@discord.app_commands.describe(
+    server_id_str="The ID of the server to load.",
+)
+async def hash_server_emoji(
+    interaction: discord.Interaction, server_id_str: str | None = None
+):
+    if server_id_str:
+        try:
+            server_id = int(server_id_str)
+        except ValueError:
+            await interaction.response.send_message(
+                "❌ Server ID passed is not a valid numerical ID.", ephemeral=True
+            )
+            return
+
+        server = globals.client.get_guild(server_id)
+        if not server:
+            await interaction.response.send_message(
+                "❌ Server ID passed is not an ID of a server the bot is in.",
+                ephemeral=True,
+            )
+            return
+
+        message = "Are you sure you want to hash the emoji of this server? This may take a bit and make the bot unresponsive in the meantime."
+    else:
+        server = None
+        message = "Are you **sure** you want to hash the emoji of all servers this bot is in? This may take multiple minutes and make the bot unresponsive in the meantime."
+
+    view = discord.ui.View()
+    view.add_item(ConfirmHashServer(interaction, server))
+    view.add_item(CancelHashServer(interaction))
+
+    await interaction.response.send_message(message, view=view, ephemeral=True)
+
+
+class CancelHashServer(discord.ui.Button):
+    def __init__(self, original_interaction: discord.Interaction):
+        super().__init__(label="No", style=discord.ButtonStyle.grey)
+        self._original_interaction = original_interaction
+
+    async def callback(self, interaction: discord.Interaction):
+        await self._original_interaction.edit_original_response(
+            view=None, content="Request cancelled."
+        )
+
+
+class ConfirmHashServer(discord.ui.Button):
+    def __init__(
+        self,
+        original_interaction: discord.Interaction,
+        server_to_hash: discord.Guild | None = None,
+    ):
+        if server_to_hash:
+            super().__init__(label="Yes", style=discord.ButtonStyle.red)
+        else:
+            super().__init__(label="Yes", style=discord.ButtonStyle.danger, emoji="⚠️")
+
+        self._original_interaction = original_interaction
+        self._server_to_hash_id = server_to_hash.id if server_to_hash else None
+
+    async def callback(self, interaction: discord.Interaction):
+        # await self._original_interaction.delete_original_response()
+        await self._original_interaction.edit_original_response(
+            view=None, content="Hashing..."
+        )
+        await interaction.response.defer(thinking=True, ephemeral=True)
+        try:
+            await emoji_hash_map.map.load_server_emoji(self._server_to_hash_id)
+        except ValueError:
+            await interaction.followup.send(
+                "❌ Server ID passed is not an ID of a server the bot is in.",
+                ephemeral=True,
+            )
+            return
+        except SQLError as e:
+            await interaction.followup.send(
+                "❌ There was a problem with the database connection.",
+                ephemeral=True,
+            )
+            warn(e)
+            return
+        except Exception as e:
+            await interaction.followup.send(
+                "❌ An unknown error occurred.",
+                ephemeral=True,
+            )
+            warn(e)
+            return
+
+        await interaction.followup.send("✅ Successfully hashed emoji!", ephemeral=True)
 
 
 async def create_bridge_and_db(
