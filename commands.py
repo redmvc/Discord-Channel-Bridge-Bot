@@ -940,23 +940,30 @@ async def map_emoji(
 
     await interaction.response.defer(thinking=True, ephemeral=True)
 
+    session = None
     try:
-        map_emojis = await asyncio.gather(
-            *[
-                map_emoji_helper(
-                    external_emoji_id=id,
-                    external_emoji_name=name,
-                    internal_emoji=internal_emoji,
-                    image_hash=emoji_hash_map.map.emoji_to_hash[internal_emoji.id],
-                )
-                for id, name in zip(external_emoji_ids, external_emoji_names)
-            ]
-        )
+        with SQLSession(engine) as session:
+            map_emojis = await asyncio.gather(
+                *[
+                    map_emoji_helper(
+                        external_emoji_id=id,
+                        external_emoji_name=name,
+                        internal_emoji=internal_emoji,
+                        image_hash=emoji_hash_map.map.emoji_to_hash[internal_emoji.id],
+                        session=session,
+                    )
+                    for id, name in zip(external_emoji_ids, external_emoji_names)
+                ]
+            )
     except Exception:
         await interaction.followup.send(
             f"❌ There was a database error trying to map emoji to {str(internal_emoji)}.",
             ephemeral=True,
         )
+        if session:
+            session.rollback()
+            session.close()
+
         return
 
     if not max(map_emojis):
@@ -1445,7 +1452,7 @@ async def map_emoji_helper(
         - `external_emoji_name`: The name of the external emoji. Defaults to None.
         - `internal_emoji`: An emoji the bot has in its emoji server.
         - `image_hash`: The hash of the image associated with this emoji. Defaults to None, in which case will use the hash associated with `internal_emoji`.
-        - `session`: A connection to the database. Defaults to None.
+        - `session`: A connection to the database. Defaults to None, in which case a new one will be created.
 
     #### Raises:
         - `ValueError`: Incorrect number of arguments passed.
