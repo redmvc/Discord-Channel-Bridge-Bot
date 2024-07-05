@@ -11,6 +11,7 @@ from sqlalchemy import or_ as sql_or
 from sqlalchemy.exc import StatementError as SQLError
 from sqlalchemy.orm import Session as SQLSession
 
+import emoji_hash_map
 import globals
 from bridge import Bridge, bridges
 from database import (
@@ -1526,8 +1527,11 @@ async def map_emoji_helper(
                 "accessible": external_emoji_accessible,
             },
         )
-        globals.map_emoji_hash(external_emoji_id, image_hash, external_emoji_accessible)
         await sql_retry(lambda: session.execute(upsert_missing_emoji))
+
+        emoji_hash_map.map.add_emoji(
+            external_emoji_id, image_hash, external_emoji_accessible
+        )
     except Exception as e:
         if close_after and session:
             session.rollback()
@@ -1582,9 +1586,17 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
             not isinstance(emoji, str)
             and emoji.id
             and (
-                (mapped_emoji_id := globals.get_internal_emoji_equivalent(emoji.id))
+                (
+                    mapped_emoji_id := emoji_hash_map.map.get_internal_equivalent(
+                        emoji.id
+                    )
+                )
                 or (
-                    (available_ids := globals.get_available_matching_emoji(emoji.id))
+                    (
+                        available_ids := emoji_hash_map.map.get_available_matches(
+                            emoji.id
+                        )
+                    )
                     and (mapped_emoji_id := set(available_ids).pop())
                 )
             )

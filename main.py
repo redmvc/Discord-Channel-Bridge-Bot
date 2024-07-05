@@ -10,13 +10,12 @@ import discord
 from sqlalchemy import Delete as SQLDelete
 from sqlalchemy import ScalarResult
 from sqlalchemy import Select as SQLSelect
-from sqlalchemy import Update as SQLUpdate
-from sqlalchemy import not_ as sql_not
 from sqlalchemy import or_ as sql_or
 from sqlalchemy.exc import StatementError as SQLError
 from sqlalchemy.orm import Session as SQLSession
 
 import commands
+import emoji_hash_map
 import globals
 from bridge import Bridge, bridges
 from database import (
@@ -129,34 +128,7 @@ async def on_ready():
             session.execute(delete_invalid_webhooks)
 
         # Try to identify hashed emoji
-        select_hashed_emoji: SQLSelect = SQLSelect(DBEmoji)
-        hashed_emoji_query_result: ScalarResult[DBEmoji] = session.scalars(
-            select_hashed_emoji
-        )
-        accessibility_flips: set[str] = set()
-        emoji_server_id_str = globals.settings.get("emoji_server_id")
-        for row in hashed_emoji_query_result:
-            emoji_id_str = row.id
-            emoji_id = int(emoji_id_str)
-
-            emoji_hash = row.image_hash
-
-            emoji_registered_as_accessible = row.accessible
-            emoji_actually_accessible = not not globals.client.get_emoji(emoji_id)
-            if emoji_registered_as_accessible != emoji_actually_accessible:
-                accessibility_flips.add(emoji_id_str)
-
-            globals.map_emoji_hash(emoji_id, emoji_hash, emoji_actually_accessible)
-
-            if row.server_id == emoji_server_id_str:
-                globals.hash_to_internal_emoji[emoji_hash] = emoji_id
-
-        if len(accessibility_flips) > 0:
-            session.execute(
-                SQLUpdate(DBEmoji)
-                .where(DBEmoji.id.in_(accessibility_flips))
-                .values(accessible=sql_not(DBEmoji.accessible))
-            )
+        emoji_hash_map.map = emoji_hash_map.EmojiHashMap(session)
 
         # Try to find all apps whitelisted per channel
         select_whitelisted_apps: SQLSelect = SQLSelect(DBAppWhitelist)
@@ -214,6 +186,7 @@ async def on_ready():
         )
 
     # Finally I'll check whether I have a registered emoji server and save it if so
+    emoji_server_id_str = globals.settings.get("emoji_server_id")
     try:
         if emoji_server_id_str:
             emoji_server_id = int(emoji_server_id_str)
@@ -719,15 +692,15 @@ async def replace_missing_emoji(message_content: str) -> str:
             # I already have access to this emoji so it's fine
             continue
 
-        if (internal_emoji_id := globals.get_internal_emoji_equivalent(emoji_id)) and (
-            emoji := globals.client.get_emoji(internal_emoji_id)
-        ):
+        if (
+            internal_emoji_id := emoji_hash_map.map.get_internal_equivalent(emoji_id)
+        ) and (emoji := globals.client.get_emoji(internal_emoji_id)):
             # I don't have access to this emoji but I have a matching one in my emoji mappings
             emoji_to_replace[f"<{emoji_name}:{emoji_id_str}>"] = str(emoji)
             continue
 
         if (
-            (matching_emoji_ids := globals.get_available_matching_emoji(emoji_id))
+            (matching_emoji_ids := emoji_hash_map.map.get_available_matches(emoji_id))
             and (matching_emoji_id := set(matching_emoji_ids).pop())
             and (emoji := globals.client.get_emoji(matching_emoji_id))
         ):
@@ -905,12 +878,14 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         if not fallback_emoji or not fallback_emoji.is_usable():
             fallback_emoji = None
             # Couldn't find the reactji, will try to see if I've got it mapped locally
-            if internal_emoji_id := globals.get_internal_emoji_equivalent(emoji_id):
+            if internal_emoji_id := emoji_hash_map.map.get_internal_equivalent(
+                emoji_id
+            ):
                 # I already have this Emoji assigned to an internal one
                 fallback_emoji = globals.client.get_emoji(internal_emoji_id)
-            elif (mapped_emoji := globals.get_available_matching_emoji(emoji_id)) and (
-                mapped_emoji_id := set(mapped_emoji).pop()
-            ):
+            elif (
+                mapped_emoji := emoji_hash_map.map.get_available_matches(emoji_id)
+            ) and (mapped_emoji_id := set(mapped_emoji).pop()):
                 # I have access to another emoji that matches this one
                 fallback_emoji = globals.client.get_emoji(mapped_emoji_id)
 
@@ -928,7 +903,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         emoji_id_str = fallback_emoji
 
     # Get the IDs of all emoji that match the current one
-    equivalent_emoji_ids = globals.get_available_matching_emoji(
+    equivalent_emoji_ids = emoji_hash_map.map.get_available_matches(
         payload.emoji, return_str=True
     )
     if not equivalent_emoji_ids:
@@ -1210,7 +1185,7 @@ async def copy_emoji_into_server(
 
         # Try to delete an emoji from the server and then add this again.
         emoji_to_delete = random.choice(globals.emoji_server.emojis)
-        globals.delete_emoji_from_hash_table(emoji_to_delete.id)
+        emoji_hash_map.map.delete_emoji(emoji_to_delete.id)
         delete_existing_emoji_query = SQLDelete(DBEmoji).where(
             DBEmoji.id == str(emoji_to_delete.id)
         )
@@ -1242,8 +1217,8 @@ async def copy_emoji_into_server(
                     )
                 )
             )
-            globals.map_emoji_hash(emoji.id, image_hash, True)
-            globals.hash_to_internal_emoji[image_hash] = emoji.id
+            emoji_hash_map.map.add_emoji(emoji.id, image_hash, True)
+            emoji_hash_map.map.hash_to_internal_emoji[image_hash] = emoji.id
 
             if missing_emoji:
                 await commands.map_emoji_helper(
@@ -1372,7 +1347,7 @@ async def unreact(
         removed_emoji_id = (
             str(emoji_to_remove.id) if emoji_to_remove.id else emoji_to_remove.name
         )
-        equivalent_emoji_ids = globals.get_available_matching_emoji(
+        equivalent_emoji_ids = emoji_hash_map.map.get_available_matches(
             emoji_to_remove, return_str=True
         )
 
@@ -1393,7 +1368,7 @@ async def unreact(
                     map.target_emoji_id,
                     map.target_emoji_name,
                     equivalent_emoji_ids
-                    or globals.get_available_matching_emoji(
+                    or emoji_hash_map.map.get_available_matches(
                         map.source_emoji, return_str=True
                     ),
                 )
@@ -1428,7 +1403,7 @@ async def unreact(
                     map.target_emoji_id,
                     map.target_emoji_name,
                     equivalent_emoji_ids
-                    or globals.get_available_matching_emoji(
+                    or emoji_hash_map.map.get_available_matches(
                         map.source_emoji, return_str=True
                     ),
                 )
