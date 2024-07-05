@@ -1484,7 +1484,7 @@ async def map_emoji_helper(
             image_hash = hash(image)
 
         external_emoji_accessible = not not full_emoji
-        await emoji_hash_map.map.add_emoji_to_database(
+        await emoji_hash_map.map.add_emoji(
             emoji_id=external_emoji_id,
             emoji_name=external_emoji_name,
             emoji_server_id=external_emoji_server_id,
@@ -1492,9 +1492,6 @@ async def map_emoji_helper(
             image_hash=image_hash,
             accessible=external_emoji_accessible,
             session=session,
-        )
-        emoji_hash_map.map.add_emoji_to_map(
-            external_emoji_id, image_hash, accessible=external_emoji_accessible
         )
     except Exception as e:
         if close_after and session:

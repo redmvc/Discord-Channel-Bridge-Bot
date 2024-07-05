@@ -65,7 +65,7 @@ class EmojiHashMap:
                 if emoji_registered_as_accessible != emoji_actually_accessible:
                     accessibility_flips.add(emoji_id_str)
 
-                self.add_emoji_to_map(
+                self._add_emoji_to_map(
                     emoji_id,
                     emoji_hash,
                     accessible=emoji_actually_accessible,
@@ -89,7 +89,7 @@ class EmojiHashMap:
             session.commit()
             session.close()
 
-    def add_emoji_to_map(
+    def _add_emoji_to_map(
         self,
         emoji_id: int | str,
         image_hash: int | str,
@@ -152,7 +152,7 @@ class EmojiHashMap:
         if is_internal:
             self.hash_to_internal_emoji[image_hash] = emoji_id
 
-    async def add_emoji_to_database(
+    async def _add_emoji_to_database(
         self,
         *,
         emoji: discord.PartialEmoji | discord.Emoji | None = None,
@@ -194,7 +194,7 @@ class EmojiHashMap:
         types_to_validate: dict[str, tuple] = {}
         if emoji_server_id:
             types_to_validate["emoji_server_id"] = (emoji_server_id, (int, str))
-        if emoji_animated:
+        if emoji_animated is not None:
             types_to_validate["emoji_animated"] = (emoji_animated, bool)
         else:
             emoji_animated = emoji_animated_inferred
@@ -239,6 +239,97 @@ class EmojiHashMap:
         if session and close_after:
             session.commit()
             session.close()
+
+    async def add_emoji(
+        self,
+        *,
+        emoji: discord.PartialEmoji | discord.Emoji | None = None,
+        emoji_id: int | str | None = None,
+        emoji_name: str | None = None,
+        emoji_server_id: int | str | None = None,
+        emoji_animated: bool | None = None,
+        image: bytes | None = None,
+        image_hash: int | str | None = None,
+        accessible: bool = False,
+        is_internal: bool | None = None,
+        session: SQLSession | Literal[True] | None = None,
+    ):
+        """Inserts an emoji into the hash map and, optionally, into the `emoji` database table.
+
+        #### Args:
+            - `emoji`: The Discord emoji to insert. Defaults to None, in which case `emoji_id` and `emoji_name` will be used instead.
+            - `emoji_id`: The ID of the emoji to insert. Defaults to None, in which case `emoji` will be used instead.
+            - `emoji_name`: The name of the emoji. Defaults to None, but must be included if `emoji_id` is. If it starts with `"a:"` the emoji will be marked as animated.
+            - `emoji_server_id`: The ID of the server this emoji is from. Defaults to None.
+            - `emoji_animated`: Whether the emoji is animated. Defaults to None, in which case its value will be inferred from the other arguments.
+            - `image`: The emoji image to extract a hash from. Defaults to None, in which case the hash will be calculated from the other arguments.
+            - `image_hash`: The hash of the emoji image. Defaults to None, in which case it will be calculated from the other arguments.
+            - `accessible`: Whether the bot can access the emoji. Defaults to False.
+            - `is_internal`: If set to True, will set `accessible` to True and add the emoji to the internal emoji hash map.
+            - `session`: A connection to the database. If set to None, the emoji will not be inserted into the database; if set to True, a new session will be created to perform the database operations.
+
+        #### Raises:
+            - `ArgumentError`: The number of arguments passed is incorrect.
+            - `ValueError`: `emoji` argument was passed and had type `PartialEmoji` but it was not a custom emoji, or `emoji_id` argument was passed and had type `str` but it was not a valid numerical ID.
+            - `SQLError`: An error occurred while connecting to the database.
+            - `HTTPResponseError`: HTTP request to fetch image returned a status other than 200.
+            - `InvalidURL`: URL generated from emoji was not valid.
+            - `RuntimeError`: Session connection failed.
+            - `ServerTimeoutError`: Connection to server timed out.
+        """
+        if session:
+            validate_types({"session": (session, (SQLSession, bool))})
+
+        if not emoji_id or not image_hash:
+            emoji_id, emoji_name, _, emoji_url = globals.get_emoji_information(
+                emoji, emoji_id, emoji_name
+            )
+            if not image_hash:
+                if not image:
+                    image = await globals.get_image_from_URL(emoji_url)
+                image_hash = hash(image)
+
+        if is_internal:
+            assert (emoji_server_id_raw := globals.settings.get("emoji_server_id"))
+            emoji_server_id = int(emoji_server_id_raw)
+
+        self._add_emoji_to_map(
+            emoji_id,
+            image_hash,
+            accessible=accessible,
+            server_id=emoji_server_id,
+            is_internal=is_internal,
+        )
+
+        if session:
+            if isinstance(session, bool):
+                session = SQLSession(engine)
+                close_after = True
+            else:
+                close_after = False
+
+            try:
+                await self._add_emoji_to_database(
+                    emoji=emoji,
+                    emoji_id=emoji_id,
+                    emoji_name=emoji_name,
+                    emoji_server_id=emoji_server_id,
+                    emoji_animated=emoji_animated,
+                    image=image,
+                    image_hash=image_hash,
+                    accessible=accessible,
+                    session=session,
+                )
+            except SQLError as e:
+                if session and close_after:
+                    session.rollback()
+                    session.close()
+
+                raise e
+
+            if close_after:
+                session.commit()
+                session.close()
 
     async def upsert_emoji(
         self,
@@ -330,7 +421,7 @@ class EmojiHashMap:
 
             image = await globals.get_image_from_URL(emoji.url)
             image_hash = hash(image)
-            self.add_emoji_to_map(
+            self._add_emoji_to_map(
                 emoji.id, image_hash, accessible=True, is_internal=is_internal
             )
 
@@ -514,7 +605,7 @@ class EmojiHashMap:
         try:
             image = await globals.get_image_from_URL(emoji_url)
             image_hash = hash(image)
-            self.add_emoji_to_map(emoji_id, image_hash)
+            self._add_emoji_to_map(emoji_id, image_hash)
         except Exception:
             pass
 

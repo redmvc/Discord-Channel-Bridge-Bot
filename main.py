@@ -1185,14 +1185,13 @@ async def copy_emoji_into_server(
             if delete_existing_emoji_query is not None:
                 await sql_retry(lambda: session.execute(delete_existing_emoji_query))
 
-            await emoji_hash_map.map.add_emoji_to_database(
+            await emoji_hash_map.map.add_emoji(
                 emoji=emoji,
                 emoji_server_id=emoji_server_id,
                 image_hash=image_hash,
-                accessible=True,
+                is_internal=True,
                 session=session,
             )
-            emoji_hash_map.map.add_emoji_to_map(emoji.id, image_hash, is_internal=True)
 
             if missing_emoji:
                 await commands.map_emoji_helper(
