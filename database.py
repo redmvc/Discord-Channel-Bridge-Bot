@@ -1,6 +1,6 @@
 from typing import Any, Callable, cast
 
-from sqlalchemy import Select as SQLSelect
+from sqlalchemy import Boolean, Select as SQLSelect
 from sqlalchemy import String, UniqueConstraint
 from sqlalchemy import Update as SQLUpdate
 from sqlalchemy import UpdateBase, create_engine
@@ -142,6 +142,29 @@ class DBEmojiMap(DBBase):
     external_emoji_name: Mapped[str] = mapped_column(String(32))
     external_emoji_server_name: Mapped[str] = mapped_column(String(32))
     internal_emoji: Mapped[str] = mapped_column(String(32), nullable=False)
+
+
+class DBEmoji(DBBase):
+    """
+    An SQLAlchemy ORM class representing a database table storing information about emoji.
+
+    #### Columns
+    - `id (VARCHAR(32))`: The emoji ID, has `PRIMARY KEY`.
+    - `name (VARCHAR(32))`: The name of the emoji.
+    - `server_id (VARCHAR(32))`: The ID of the server this emoji belongs to.
+    - `animated (BOOL)`: Whether it's an animated emoji.
+    - `image_hash (INT)`: A hash of this emoji's image.
+    - `accessible (BOOL)`: Whether the bot has access to this emoji.
+    """
+
+    __tablename__ = "emoji"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    name: Mapped[str] = mapped_column(String(32), nullable=True)
+    server_id: Mapped[str] = mapped_column(String(32), nullable=True)
+    animated: Mapped[bool] = mapped_column(Boolean, nullable=True)
+    image_hash: Mapped[int] = mapped_column(nullable=True)
+    accessible: Mapped[bool] = mapped_column(Boolean, nullable=False)
 
 
 class DBAppWhitelist(DBBase):
