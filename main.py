@@ -1227,13 +1227,17 @@ async def copy_emoji_into_server(
 
             if missing_emoji:
                 await commands.map_emoji_helper(
-                    external_emoji=missing_emoji, internal_emoji=emoji, session=session
+                    external_emoji=missing_emoji,
+                    internal_emoji=emoji,
+                    image_hash=image_hash,
+                    session=session,
                 )
             else:
                 await commands.map_emoji_helper(
                     external_emoji_id=int(missing_emoji_id),
                     external_emoji_name=missing_emoji_name,
                     internal_emoji=emoji,
+                    image_hash=image_hash,
                     session=session,
                 )
 

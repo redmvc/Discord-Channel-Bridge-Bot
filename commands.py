@@ -17,6 +17,7 @@ from database import (
     DBAppWhitelist,
     DBAutoBridgeThreadChannels,
     DBBridge,
+    DBEmoji,
     DBEmojiMap,
     DBMessageMap,
     engine,
@@ -1433,6 +1434,7 @@ async def map_emoji_helper(
     external_emoji_id: int | None = None,
     external_emoji_name: str | None = None,
     internal_emoji: discord.Emoji,
+    image_hash: int | None = None,
     session: SQLSession | None = None,
 ) -> bool:
     """Create a mapping between external and internal emoji, recording it locally and saving it in the emoji_mappings table.
@@ -1442,6 +1444,7 @@ async def map_emoji_helper(
         - `external_emoji_id`: The ID of the external emoji. Defaults to None.
         - `external_emoji_name`: The name of the external emoji. Defaults to None.
         - `internal_emoji`: An emoji the bot has in its emoji server.
+        - `image_hash`: The hash of the image associated with this emoji. Defaults to None, in which case will use the hash associated with `internal_emoji`.
         - `session`: A connection to the database. Defaults to None.
 
     #### Raises:
@@ -1473,18 +1476,21 @@ async def map_emoji_helper(
     validate_types(types_to_validate)
 
     if external_emoji_id:
-        external_emoji_name = external_emoji_name or ""
+        external_emoji_name = external_emoji_name or None
         external_emoji_animated = internal_emoji.animated
     else:
         assert external_emoji
         external_emoji_id = cast(int, external_emoji.id)
         external_emoji_name = external_emoji_name or external_emoji.name
+        external_emoji_animated = external_emoji.animated
 
     full_emoji = globals.client.get_emoji(external_emoji_id)
     if full_emoji and full_emoji.guild:
         external_emoji_server_name = full_emoji.guild.name
+        external_emoji_server_id = full_emoji.guild_id
     else:
         external_emoji_server_name = ""
+        external_emoji_server_id = None
 
     globals.emoji_mappings[external_emoji_id] = internal_emoji.id
 
@@ -1499,7 +1505,7 @@ async def map_emoji_helper(
             DBEmojiMap,
             {
                 "external_emoji": str(external_emoji_id),
-                "external_emoji_name": external_emoji_name,
+                "external_emoji_name": external_emoji_name or "",
                 "external_emoji_server_name": external_emoji_server_name,
                 "internal_emoji": str(internal_emoji.id),
             },
@@ -1507,8 +1513,35 @@ async def map_emoji_helper(
                 "internal_emoji": str(internal_emoji.id),
             },
         )
-
         await sql_retry(lambda: session.execute(upsert_emoji))
+
+        if not image_hash and (external_emoji or full_emoji):
+            # Get the hash of the external emoji's image if we have access to it
+            partial_or_full_emoji = cast(
+                discord.PartialEmoji | discord.Emoji,
+                (external_emoji if external_emoji else full_emoji),
+            )
+            image = await globals.get_image_from_URL(partial_or_full_emoji.url)
+            image_hash = hash(image)
+
+        external_emoji_accessible = not not full_emoji
+        upsert_missing_emoji = await sql_upsert(
+            DBEmoji,
+            {
+                "id": str(external_emoji_id),
+                "name": external_emoji_name,
+                "server_id": external_emoji_server_id,
+                "animated": external_emoji_animated,
+                "image_hash": image_hash,
+                "accessible": external_emoji_accessible,
+            },
+            {
+                "name": external_emoji_name,
+                "server_id": external_emoji_server_id,
+                "accessible": external_emoji_accessible,
+            },
+        )
+        await sql_retry(lambda: session.execute(upsert_missing_emoji))
     except Exception as e:
         if close_after and session:
             session.rollback()
