@@ -149,6 +149,10 @@ class EmojiHashMap:
 
         #### Raises:
             - `ValueError`: The server ID passed as argument does not belong to a server the bot is in.
+            - `HTTPResponseError`: HTTP request to fetch image returned a status other than 200.
+            - `InvalidURL`: URL generated from emoji was not valid.
+            - `RuntimeError`: Session connection failed.
+            - `ServerTimeoutError`: Connection to server timed out.
         """
         if server_id:
             server = globals.client.get_guild(server_id)
@@ -343,6 +347,10 @@ class EmojiHashMap:
         #### Raises:
             - `ArgumentError`: The number of arguments passed is incorrect.
             - `ValueError`: `emoji` argument was passed and had type `PartialEmoji` but it was not a custom emoji, or `emoji_id` argument was passed and had type `str` but it was not a valid numerical ID.
+            - `HTTPResponseError`: HTTP request to fetch image returned a status other than 200.
+            - `InvalidURL`: URL generated from emoji was not valid.
+            - `RuntimeError`: Session connection failed.
+            - `ServerTimeoutError`: Connection to server timed out.
         """
         if session:
             validate_types({"session": (session, SQLSession)})

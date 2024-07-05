@@ -672,6 +672,12 @@ async def replace_missing_emoji(message_content: str) -> str:
 
     #### Args:
         - `message_content`: The content of the message to process.
+
+    #### Raises
+        - `HTTPResponseError`: HTTP request to fetch image returned a status other than 200.
+        - `InvalidURL`: URL generated from emoji was not valid.
+        - `RuntimeError`: Session connection failed.
+        - `ServerTimeoutError`: Connection to server timed out.
     """
     if not globals.emoji_server:
         # If we don't have an emoji server to store our own versions of emoji in then there's nothing we can do
@@ -846,6 +852,12 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
 
     #### Args:
         - `payload`: The raw event payload data.
+
+    #### Raises
+        - `HTTPResponseError`: HTTP request to fetch image returned a status other than 200.
+        - `InvalidURL`: URL generated from emoji was not valid.
+        - `RuntimeError`: Session connection failed.
+        - `ServerTimeoutError`: Connection to server timed out.
     """
     if not await globals.wait_until_ready():
         return

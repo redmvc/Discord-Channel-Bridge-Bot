@@ -1452,6 +1452,10 @@ async def map_emoji_helper(
         - `ValueError`: Incorrect number of arguments passed.
         - `UnknownDBDialectError`: Invalid database dialect registered in `settings.json` file.
         - `SQLError`: SQL statement inferred from arguments was invalid or database connection failed.
+        - `HTTPResponseError`: HTTP request to fetch image returned a status other than 200.
+        - `InvalidURL`: URL generated from emoji was not valid.
+        - `RuntimeError`: Session connection failed.
+        - `ServerTimeoutError`: Connection to server timed out.
     """
     if not external_emoji_id and (not external_emoji or not external_emoji.id):
         return False
