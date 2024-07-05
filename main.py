@@ -873,6 +873,9 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
     fallback_emoji: discord.Emoji | str | None
     if payload.emoji.is_custom_emoji():
         # Custom emoji, I need to check whether it exists and is available to me
+        # I'll add this to my hash map if it's not there already
+        await emoji_hash_map.map.ensure_hash_map(emoji=payload.emoji)
+
         # is_custom_emoji() guarantees that payload.emoji.id is not None
         emoji_id = cast(int, payload.emoji.id)
         emoji_id_str = str(emoji_id)
@@ -880,9 +883,6 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         fallback_emoji = globals.client.get_emoji(emoji_id)
         if not fallback_emoji or not fallback_emoji.is_usable():
             # Couldn't find the reactji, will try to see if I've got it mapped locally
-            await emoji_hash_map.map.ensure_hash_map(
-                emoji_id=emoji_id, emoji_name=payload.emoji.name
-            )
             fallback_emoji = emoji_hash_map.map.get_accessible_emoji(
                 emoji_id, skip_self=True
             )
