@@ -213,5 +213,37 @@ class EmojiHashMap:
 
         return self.hash_to_internal_emoji[image_hash]
 
+    def get_accessible_emoji(
+        self, emoji_id: int, *, skip_self: bool = False
+    ) -> discord.Emoji | None:
+        """Return an emoji matching the ID passed. First tries to return the one matching the ID itself, then an internal equivalent, and finally any accessible ones.
+
+        #### Args:
+            - `emoji_id`: The ID of the emoji to get.
+            - `skip_self`: Whether the function should ignore the attempt to get an emoji associated with the ID itself. Defaults to False.
+        """
+        validate_types({"emoji_id": (emoji_id, int)})
+
+        if (
+            not skip_self
+            and (emoji := globals.client.get_emoji(emoji_id))
+            and emoji.is_usable()
+        ):
+            return emoji
+
+        if (internal_emoji_id := self.get_internal_equivalent(emoji_id)) and (
+            emoji := globals.client.get_emoji(internal_emoji_id)
+        ):
+            return emoji
+
+        if (
+            (matching_emoji_ids := self.get_available_matches(emoji_id))
+            and (matching_emoji_id := set(matching_emoji_ids).pop())
+            and (emoji := globals.client.get_emoji(matching_emoji_id))
+        ):
+            return emoji
+
+        return None
+
 
 map: EmojiHashMap
