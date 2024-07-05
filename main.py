@@ -10,6 +10,8 @@ import discord
 from sqlalchemy import Delete as SQLDelete
 from sqlalchemy import ScalarResult
 from sqlalchemy import Select as SQLSelect
+from sqlalchemy import Update as SQLUpdate
+from sqlalchemy import not_ as sql_not
 from sqlalchemy import or_ as sql_or
 from sqlalchemy.exc import StatementError as SQLError
 from sqlalchemy.orm import Session as SQLSession
@@ -151,6 +153,32 @@ async def on_ready():
                 DBEmojiMap.internal_emoji.in_(emoji_not_found)
             )
             session.execute(delete_missing_internal_emoji)
+
+        # Try to identify hashed emoji
+        select_hashed_emoji: SQLSelect = SQLSelect(DBEmoji)
+        hashed_emoji_query_result: ScalarResult[DBEmoji] = session.scalars(
+            select_hashed_emoji
+        )
+        accessibility_flips: set[str] = set()
+        for row in hashed_emoji_query_result:
+            emoji_id_str = row.id
+            emoji_id = int(emoji_id_str)
+
+            emoji_hash = row.image_hash
+
+            emoji_registered_as_accessible = row.accessible
+            emoji_actually_accessible = not not globals.client.get_emoji(emoji_id)
+            if emoji_registered_as_accessible != emoji_actually_accessible:
+                accessibility_flips.add(emoji_id_str)
+
+            globals.map_emoji_hash(emoji_id, emoji_hash, emoji_actually_accessible)
+
+        if len(accessibility_flips) > 0:
+            session.execute(
+                SQLUpdate(DBEmoji)
+                .where(DBEmoji.id.in_(accessibility_flips))
+                .values(accessible=sql_not(DBEmoji.accessible))
+            )
 
         # Try to find all apps whitelisted per channel
         select_whitelisted_apps: SQLSelect = SQLSelect(DBAppWhitelist)
