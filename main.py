@@ -1141,6 +1141,8 @@ async def copy_emoji_into_server(
         missing_emoji_animated = missing_emoji_name.startswith("a:")
         if missing_emoji_animated:
             missing_emoji_name = missing_emoji_name[2:]
+        elif missing_emoji_name.startswith(":"):
+            missing_emoji_name = missing_emoji_name[1:]
 
     if missing_emoji_animated:
         ext = "gif"
