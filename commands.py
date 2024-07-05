@@ -18,7 +18,6 @@ from database import (
     DBAppWhitelist,
     DBAutoBridgeThreadChannels,
     DBBridge,
-    DBEmoji,
     DBMessageMap,
     engine,
     sql_retry,
@@ -1516,26 +1515,16 @@ async def map_emoji_helper(
             image_hash = hash(image)
 
         external_emoji_accessible = not not full_emoji
-        upsert_missing_emoji = await sql_upsert(
-            DBEmoji,
-            {
-                "id": str(external_emoji_id),
-                "name": external_emoji_name,
-                "server_id": external_emoji_server_id,
-                "animated": external_emoji_animated,
-                "image_hash": str(image_hash),
-                "accessible": external_emoji_accessible,
-            },
-            {
-                "name": external_emoji_name,
-                "server_id": external_emoji_server_id,
-                "image_hash": str(image_hash),
-                "accessible": external_emoji_accessible,
-            },
+        await emoji_hash_map.map.add_emoji_to_database(
+            emoji_id=external_emoji_id,
+            emoji_name=external_emoji_name,
+            emoji_server_id=external_emoji_server_id,
+            emoji_animated=external_emoji_animated,
+            image_hash=image_hash,
+            accessible=external_emoji_accessible,
+            session=session,
         )
-        await sql_retry(lambda: session.execute(upsert_missing_emoji))
-
-        emoji_hash_map.map.add_emoji(
+        emoji_hash_map.map.add_emoji_to_map(
             external_emoji_id, image_hash, external_emoji_accessible
         )
     except Exception as e:
