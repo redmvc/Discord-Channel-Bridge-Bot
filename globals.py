@@ -92,6 +92,10 @@ emoji_server: discord.Guild | None = None
 # Dictionary mapping external emoji to internal emoji
 emoji_mappings: dict[int, int] = {}
 
+# Dictionaries mapping emoji to the hashed values of their images and hashes to lists of emoji available to the bot
+emoji_to_hash: dict[int, int] = {}
+hash_to_available_emoji: dict[int, set[int]] = {}
+
 # Dictionary listing all apps whitelisted per channel
 per_channel_whitelist: dict[int, set[int]] = {}
 
@@ -267,6 +271,37 @@ async def get_image_from_URL(url: str) -> bytes:
         raise Exception("Unknown problem occurred trying to fetch image.")
 
     return image_bytes.read()
+
+
+def map_emoji_hash(emoji_id: int, image_hash: int, accessible: bool | None = None):
+    """Populate the `emoji_to_hash` and `hash_to_available_emoji` dictionaries with an emoji and its hash.
+
+    #### Args:
+        - `emoji_id`: The ID of the emoji.
+        - `image_hash`: The hash of its image.
+        - `accessible`: Whether the emoji is accessible to the bot. Defaults to None, in which case will try to figure it out from the id.
+    """
+    types_to_validate: dict[str, tuple] = {
+        "emoji_id": (emoji_id, int),
+        "image_hash": (image_hash, int),
+    }
+    if accessible is not None:
+        types_to_validate["accessible"] = (accessible, bool)
+    validate_types(types_to_validate)
+
+    emoji_to_hash[emoji_id] = image_hash
+    if accessible is None:
+        accessible = not not client.get_emoji(emoji_id)
+
+    if accessible:
+        if not hash_to_available_emoji.get(image_hash):
+            hash_to_available_emoji[image_hash] = set()
+        hash_to_available_emoji[image_hash].add(emoji_id)
+    elif (
+        hash_to_available_emoji.get(image_hash)
+        and emoji_id in hash_to_available_emoji[image_hash]
+    ):
+        hash_to_available_emoji[image_hash].remove(emoji_id)
 
 
 async def wait_until_ready() -> bool:

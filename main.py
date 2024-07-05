@@ -1224,6 +1224,7 @@ async def copy_emoji_into_server(
                     )
                 )
             )
+            globals.map_emoji_hash(emoji.id, image_hash, True)
 
             if missing_emoji:
                 await commands.map_emoji_helper(

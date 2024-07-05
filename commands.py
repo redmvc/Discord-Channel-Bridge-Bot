@@ -1541,6 +1541,10 @@ async def map_emoji_helper(
                 "accessible": external_emoji_accessible,
             },
         )
+        if image_hash:
+            globals.map_emoji_hash(
+                external_emoji_id, image_hash, external_emoji_accessible
+            )
         await sql_retry(lambda: session.execute(upsert_missing_emoji))
     except Exception as e:
         if close_after and session:
