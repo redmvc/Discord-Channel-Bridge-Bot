@@ -1,4 +1,5 @@
 import asyncio
+import re
 from logging import warn
 from typing import Any, AsyncIterator, Coroutine, Iterable, Literal, cast
 
@@ -876,8 +877,8 @@ async def whitelist(interaction: discord.Interaction, apps: str):
     internal_emoji_id_str="internal_emoji",
 )
 @discord.app_commands.describe(
-    internal_emoji_id_str="The emoji from this server to map the external emoji to, or its ID.",
-    external_emojis="The emoji/emojis from another server or its ID/their IDs.",
+    internal_emoji_id_str="The emoji from this server to map the external emoji to.",
+    external_emojis="The emoji/emojis from another server.",
 )
 async def map_emoji(
     interaction: discord.Interaction,
@@ -890,34 +891,14 @@ async def map_emoji(
         )
         return
 
-    external_emoji_ids_str = []
-    external_emoji_names = []
-    for external_emoji in external_emojis.split():
-        external_emoji_id_str = (
-            external_emoji.replace("<:", "")
-            .replace("<", "")
-            .replace(">", "")
-            .replace("\\", "")
-        )
-        if ":" in external_emoji_id_str:
-            emoji_data = external_emoji_id_str.split(":")
-            external_emoji_ids_str.append(emoji_data[-1])
-            external_emoji_names.append(emoji_data[-2])
-        else:
-            external_emoji_names.append("")
-
-    internal_emoji_id_str = (
-        internal_emoji_id_str.replace("<:", "")
-        .replace("<", "")
-        .replace(">", "")
-        .replace("\\", "")
+    external_emojis_set: set[tuple[str, str | int]] = set(
+        re.findall(r"<(a?:[^:]+):(\d+)>", external_emojis)
     )
-    if ":" in internal_emoji_id_str:
-        internal_emoji_id_str = internal_emoji_id_str.split(":")[-1]
+    internal_emoji_split = re.findall(r"<(a?:[^:]+):(\d+)>", internal_emoji_id_str)[0]
 
     try:
-        external_emoji_ids = [int(id) for id in external_emoji_ids_str]
-        internal_emoji_id = int(internal_emoji_id_str)
+        external_emojis_set = {(name, int(id)) for name, id in external_emojis_set}
+        internal_emoji_id = int(internal_emoji_split[1])
     except Exception:
         await interaction.response.send_message(
             "❌ Emoji IDs not valid.", ephemeral=True
@@ -925,7 +906,6 @@ async def map_emoji(
         return
 
     internal_emoji = globals.client.get_emoji(internal_emoji_id)
-
     if (
         not internal_emoji
         or not internal_emoji.guild
@@ -952,7 +932,7 @@ async def map_emoji(
                         image_hash=emoji_hash_map.map.emoji_to_hash[internal_emoji.id],
                         session=session,
                     )
-                    for id, name in zip(external_emoji_ids, external_emoji_names)
+                    for name, id in external_emojis_set
                 ]
             )
     except Exception:
@@ -960,6 +940,7 @@ async def map_emoji(
             f"❌ There was a database error trying to map emoji to {str(internal_emoji)}.",
             ephemeral=True,
         )
+
         if session:
             session.rollback()
             session.close()
