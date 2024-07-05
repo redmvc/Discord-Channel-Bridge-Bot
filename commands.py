@@ -1515,14 +1515,18 @@ async def map_emoji_helper(
         )
         await sql_retry(lambda: session.execute(upsert_emoji))
 
-        if not image_hash and (external_emoji or full_emoji):
-            # Get the hash of the external emoji's image if we have access to it
-            partial_or_full_emoji = cast(
-                discord.PartialEmoji | discord.Emoji,
-                (external_emoji if external_emoji else full_emoji),
-            )
-            image = await globals.get_image_from_URL(partial_or_full_emoji.url)
-            image_hash = hash(image)
+        if not image_hash:
+            if external_emoji or full_emoji:
+                # Get the hash of the external emoji's image if we have access to it
+                partial_or_full_emoji = cast(
+                    discord.PartialEmoji | discord.Emoji,
+                    (external_emoji if external_emoji else full_emoji),
+                )
+                image = await globals.get_image_from_URL(partial_or_full_emoji.url)
+                image_hash = hash(image)
+            else:
+                image = await globals.get_image_from_URL(internal_emoji.url)
+                image_hash = hash(image)
 
         external_emoji_accessible = not not full_emoji
         upsert_missing_emoji = await sql_upsert(
@@ -1541,10 +1545,7 @@ async def map_emoji_helper(
                 "accessible": external_emoji_accessible,
             },
         )
-        if image_hash:
-            globals.map_emoji_hash(
-                external_emoji_id, image_hash, external_emoji_accessible
-            )
+        globals.map_emoji_hash(external_emoji_id, image_hash, external_emoji_accessible)
         await sql_retry(lambda: session.execute(upsert_missing_emoji))
     except Exception as e:
         if close_after and session:
