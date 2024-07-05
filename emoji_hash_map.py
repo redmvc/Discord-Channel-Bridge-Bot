@@ -324,5 +324,67 @@ class EmojiHashMap:
 
         return None
 
+    async def ensure_hash_map(
+        self,
+        *,
+        emoji: discord.Emoji | discord.PartialEmoji | None = None,
+        emoji_id: int | None = None,
+        emoji_name: str | None = None,
+        session: SQLSession | None = None,
+    ):
+        """Check that the emoji is in the hash map and, if not, add it to the map.
+
+        #### Args:
+            - `emoji_id`: The ID of the emoji.
+        """
+        if emoji and emoji_id:
+            raise ValueError("You must pass either emoji or emoji_id, not both.")
+        if not emoji and not emoji_id:
+            raise ValueError("You must pass one of emoji or emoji_id.")
+        if emoji_id and not emoji_name:
+            raise ValueError("If passing emoji_id you must pass emoji_name too.")
+        if emoji and not emoji.id:
+            raise ValueError("Emoji must be custom emoji.")
+
+        types_to_validate: dict[str, tuple] = {}
+        if emoji:
+            types_to_validate["emoji"] = (emoji, (discord.PartialEmoji, discord.Emoji))
+        if emoji_id:
+            types_to_validate["emoji_id"] = (emoji_id, int)
+        if emoji_name:
+            types_to_validate["emoji_name"] = (emoji_name, str)
+        if session:
+            types_to_validate["session"] = (session, SQLSession)
+        validate_types(types_to_validate)
+
+        if emoji:
+            emoji_id = cast(int, emoji.id)
+            emoji_name = emoji.name
+            emoji_animated = emoji.animated
+            url = emoji.url
+        else:
+            assert emoji_name and emoji_id
+            emoji_animated = emoji_name.startswith("a:")
+            if emoji_animated:
+                emoji_name = emoji_name[2:]
+            elif emoji_name.startswith(":"):
+                emoji_name = emoji_name[1:]
+
+            if emoji_animated:
+                ext = "gif"
+            else:
+                ext = "png"
+            url = f"https://cdn.discordapp.com/emojis/{emoji_id}.{ext}?v=1"
+
+        if self.emoji_to_hash.get(emoji_id):
+            return
+
+        try:
+            image = await globals.get_image_from_URL(url)
+            image_hash = hash(image)
+            self.add_emoji(emoji_id, image_hash)
+        except Exception:
+            pass
+
 
 map: EmojiHashMap

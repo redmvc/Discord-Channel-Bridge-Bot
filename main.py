@@ -692,6 +692,9 @@ async def replace_missing_emoji(message_content: str) -> str:
             # I already have access to this emoji so it's fine
             continue
 
+        await emoji_hash_map.map.ensure_hash_map(
+            emoji_id=emoji_id, emoji_name=emoji_name
+        )
         if emoji := emoji_hash_map.map.get_accessible_emoji(emoji_id, skip_self=True):
             # I don't have access to this emoji but I have a matching one in my emoji mappings
             emoji_to_replace[f"<{emoji_name}:{emoji_id_str}>"] = str(emoji)
@@ -866,6 +869,9 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         fallback_emoji = globals.client.get_emoji(emoji_id)
         if not fallback_emoji or not fallback_emoji.is_usable():
             # Couldn't find the reactji, will try to see if I've got it mapped locally
+            await emoji_hash_map.map.ensure_hash_map(
+                emoji_id=emoji_id, emoji_name=payload.emoji.name
+            )
             fallback_emoji = emoji_hash_map.map.get_accessible_emoji(
                 emoji_id, skip_self=True
             )
