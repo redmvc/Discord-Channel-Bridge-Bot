@@ -332,57 +332,30 @@ class EmojiHashMap:
         emoji_name: str | None = None,
         session: SQLSession | None = None,
     ):
-        """Check that the emoji is in the hash map and, if not, add it to the map.
+        """Check that the emoji is in the hash map and, if not, add it to the map and to the database.
 
         #### Args:
-            - `emoji_id`: The ID of the emoji.
+            - `emoji`: A Discord emoji. Defaults to None, in which case the values below will be used instead.
+            - `emoji_id`: The ID of an emoji. Defaults to None, in which case the value above will be used instead.
+            - `emoji_name`: The name of the emoji. Defaults to None, but must be included if `emoji_id` is. If it starts with `"a:"` the emoji will be marked as animated.
+            - `session`: A connection to the database. Defaults to None, in which case a new one will be created for the DB operations.
+
+        #### Raises:
+            - `ArgumentError`: The number of arguments passed is incorrect.
+            - `ValueError`: `emoji` argument was passed and had type `PartialEmoji` but it was not a custom emoji, or `emoji_id` argument was passed and had type `str` but it was not a valid numerical ID.
         """
-        if emoji and emoji_id:
-            raise ValueError("You must pass either emoji or emoji_id, not both.")
-        if not emoji and not emoji_id:
-            raise ValueError("You must pass one of emoji or emoji_id.")
-        if emoji_id and not emoji_name:
-            raise ValueError("If passing emoji_id you must pass emoji_name too.")
-        if emoji and not emoji.id:
-            raise ValueError("Emoji must be custom emoji.")
-
-        types_to_validate: dict[str, tuple] = {}
-        if emoji:
-            types_to_validate["emoji"] = (emoji, (discord.PartialEmoji, discord.Emoji))
-        if emoji_id:
-            types_to_validate["emoji_id"] = (emoji_id, int)
-        if emoji_name:
-            types_to_validate["emoji_name"] = (emoji_name, str)
         if session:
-            types_to_validate["session"] = (session, SQLSession)
-        validate_types(types_to_validate)
+            validate_types({"session": (session, SQLSession)})
 
-        if emoji:
-            emoji_id = cast(int, emoji.id)
-            emoji_name = emoji.name
-            emoji_animated = emoji.animated
-            url = emoji.url
-        else:
-            emoji_id = cast(int, emoji_id)
-            emoji_name = cast(str, emoji_name)
-
-            emoji_animated = emoji_name.startswith("a:")
-            if emoji_animated:
-                emoji_name = emoji_name[2:]
-            elif emoji_name.startswith(":"):
-                emoji_name = emoji_name[1:]
-
-            if emoji_animated:
-                ext = "gif"
-            else:
-                ext = "png"
-            url = f"https://cdn.discordapp.com/emojis/{emoji_id}.{ext}?v=1"
+        emoji_id, emoji_name, _, emoji_url = globals.get_emoji_information(
+            emoji, emoji_id, emoji_name
+        )
 
         if self.emoji_to_hash.get(emoji_id):
             return
 
         try:
-            image = await globals.get_image_from_URL(url)
+            image = await globals.get_image_from_URL(emoji_url)
             image_hash = hash(image)
             self.add_emoji(emoji_id, image_hash)
         except Exception:

@@ -1107,17 +1107,18 @@ async def copy_emoji_into_server(
     *,
     missing_emoji: discord.PartialEmoji | None = None,
     missing_emoji_name: str | None = None,
-    missing_emoji_id: str | None = None,
+    missing_emoji_id: str | int | None = None,
 ) -> discord.Emoji | None:
     """Try to create an emoji in the emoji server and, if successful, return it.
 
     #### Args:
         - `missing_emoji`: The emoji we are trying to copy into our emoji server. Defaults to None, in which case `missing_emoji_name` and `missing_emoji_id` are used instead.
         - `missing_emoji_name`: The name of a missing emoji, optionally preceded by an `"a:"` in case it's animated. Defaults to None, in which case `missing_emoji` is used instead.
-        - `missing_emoji_id`: The stringified ID of a missing emoji. Defaults to None, in which case `missing_emoji` is used instead.
+        - `missing_emoji_id`: The ID of the missing emoji. Defaults to None, in which case `missing_emoji` is used instead.
 
     #### Raises:
-        - `ValueError`: Invalid number of arguments passed to function.
+        - `ArgumentError`: The number of arguments passed is incorrect.
+        - `ValueError`: `missing_emoji` argument was passed and had type `PartialEmoji` but it was not a custom emoji, or `missing_emoji_id` argument was passed and had type `str` but it was not a valid numerical ID.
         - `Forbidden`: Emoji server permissions not set correctly.
         - `HTTPResponseError`: HTTP request to fetch emoji image returned a status other than 200.
         - `InvalidURL`: URL generated from emoji ID was not valid.
@@ -1128,38 +1129,13 @@ async def copy_emoji_into_server(
         return None
     emoji_server_id = globals.emoji_server.id
 
-    if missing_emoji and (missing_emoji_name or missing_emoji_id):
-        raise ValueError(
-            "Either missing_emoji or missing_emoji_name and missing_emoji_id must be passed as arguments, not both."
+    missing_emoji_id, missing_emoji_name, missing_emoji_animated, missing_emoji_url = (
+        globals.get_emoji_information(
+            missing_emoji, missing_emoji_id, missing_emoji_name
         )
+    )
 
-    if not missing_emoji and (not missing_emoji_name or not missing_emoji_id):
-        raise ValueError(
-            "At least one of missing_emoji or missing_emoji_name and missing_emoji_id must be passed as arguments."
-        )
-
-    if missing_emoji:
-        missing_emoji_id = str(missing_emoji.id)
-        missing_emoji_name = missing_emoji.name
-        missing_emoji_animated = missing_emoji.animated
-        url = missing_emoji.url
-    else:
-        missing_emoji_id = cast(str, missing_emoji_id)
-        missing_emoji_name = cast(str, missing_emoji_name)
-
-        missing_emoji_animated = missing_emoji_name.startswith("a:")
-        if missing_emoji_animated:
-            missing_emoji_name = missing_emoji_name[2:]
-        elif missing_emoji_name.startswith(":"):
-            missing_emoji_name = missing_emoji_name[1:]
-
-        if missing_emoji_animated:
-            ext = "gif"
-        else:
-            ext = "png"
-        url = f"https://cdn.discordapp.com/emojis/{missing_emoji_id}.{ext}?v=1"
-
-    image = await globals.get_image_from_URL(url)
+    image = await globals.get_image_from_URL(missing_emoji_url)
     image_hash = hash(image)
 
     delete_existing_emoji_query = None
@@ -1221,7 +1197,7 @@ async def copy_emoji_into_server(
                 )
             else:
                 await commands.map_emoji_helper(
-                    external_emoji_id=int(missing_emoji_id),
+                    external_emoji_id=missing_emoji_id,
                     external_emoji_name=missing_emoji_name,
                     internal_emoji=emoji,
                     image_hash=image_hash,
