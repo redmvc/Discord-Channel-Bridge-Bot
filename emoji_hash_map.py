@@ -135,7 +135,9 @@ class EmojiHashMap:
 
         if not is_internal and server_id:
             server_id = int(server_id)
-            if server_id == globals.settings.get("emoji_server_id"):
+            if (
+                emoji_server_id := globals.settings.get("emoji_server_id")
+            ) and server_id == int(emoji_server_id):
                 is_internal = True
                 accessible = True
             elif globals.client.get_guild(server_id):
