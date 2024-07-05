@@ -1425,7 +1425,7 @@ async def map_emoji_helper(
     external_emoji_id: int | str | None = None,
     external_emoji_name: str | None = None,
     internal_emoji: discord.Emoji,
-    image_hash: int | None = None,
+    image_hash: str | None = None,
     session: SQLSession | None = None,
 ) -> bool:
     """Create a mapping between external and internal emoji, recording it locally and saving it in the emoji table.
@@ -1484,7 +1484,7 @@ async def map_emoji_helper(
             else:
                 image = await globals.get_image_from_URL(internal_emoji.url)
 
-            image_hash = hash(image)
+            image_hash = globals.hash_image(image)
 
         external_emoji_accessible = not not full_emoji
         await emoji_hash_map.map.add_emoji(

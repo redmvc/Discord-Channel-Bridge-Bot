@@ -34,9 +34,9 @@ class EmojiHashMap:
             session = SQLSession(engine)
             close_after = True
 
-        self._emoji_to_hash: dict[int, int] = {}
-        self._hash_to_available_emoji: dict[int, set[int]] = {}
-        self._hash_to_internal_emoji: dict[int, int] = {}
+        self._emoji_to_hash: dict[int, str] = {}
+        self._hash_to_available_emoji: dict[str, set[int]] = {}
+        self._hash_to_internal_emoji: dict[str, int] = {}
 
         try:
             select_hashed_emoji: SQLSelect = SQLSelect(DBEmoji)
@@ -49,7 +49,7 @@ class EmojiHashMap:
                 emoji_id_str = row.id
                 emoji_id = int(emoji_id_str)
 
-                emoji_hash = int(row.image_hash)
+                emoji_hash = row.image_hash
 
                 emoji_actually_accessible = not not globals.client.get_emoji(emoji_id)
                 if (
@@ -98,12 +98,12 @@ class EmojiHashMap:
     def _add_emoji_to_map(
         self,
         emoji_id: int | str,
-        image_hash: int | str,
+        image_hash: str,
         *,
         accessible: bool | None = None,
         server_id: int | str | None = None,
         is_internal: bool | None = None,
-    ) -> tuple[int, int]:
+    ) -> tuple[int, str]:
         """Add an emoji to the hash map.
 
         #### Args:
@@ -114,14 +114,14 @@ class EmojiHashMap:
             - `is_internal`: If set to True, will set `accessible` to True and add the emoji to the internal emoji hash map.
 
         #### Raises:
-            - `ValueError`: `emoji_id`, `image_hash`, or `server_id` were not valid numerical IDs.
+            - `ValueError`: `emoji_id` or `server_id` were not valid numerical IDs.
 
         #### Returns:
-            - `tuple[int, int]`: A tuple with the emoji ID and the hash of its image.
+            - `tuple[int, str]`: A tuple with the emoji ID and the hash of its image.
         """
         types_to_validate: dict[str, tuple] = {
             "emoji_id": (emoji_id, (int, str)),
-            "image_hash": (image_hash, (int, str)),
+            "image_hash": (image_hash, str),
         }
         if is_internal:
             types_to_validate["is_internal"] = (is_internal, bool)
@@ -144,7 +144,6 @@ class EmojiHashMap:
                 accessible = True
 
         emoji_id = int(emoji_id)
-        image_hash = int(image_hash)
 
         self._emoji_to_hash[emoji_id] = image_hash
         if accessible is None:
@@ -174,7 +173,7 @@ class EmojiHashMap:
         emoji_server_id: int | str | None = None,
         emoji_animated: bool | None = None,
         image: bytes | None = None,
-        image_hash: int | str | None = None,
+        image_hash: str | None = None,
         accessible: bool = False,
         session: SQLSession | None = None,
     ):
@@ -212,7 +211,7 @@ class EmojiHashMap:
         else:
             emoji_animated = emoji_animated_inferred
         if image_hash:
-            types_to_validate["image_hash"] = (image_hash, (int, str))
+            types_to_validate["image_hash"] = (image_hash, str)
         elif image:
             types_to_validate["image"] = (image, bytes)
         if accessible:
@@ -230,7 +229,7 @@ class EmojiHashMap:
         if not image_hash:
             if not image:
                 image = await globals.get_image_from_URL(emoji_url)
-            image_hash = hash(image)
+            image_hash = globals.hash_image(image)
 
         try:
             upsert_emoji = await self.upsert_emoji(
@@ -262,11 +261,11 @@ class EmojiHashMap:
         emoji_server_id: int | str | None = None,
         emoji_animated: bool | None = None,
         image: bytes | None = None,
-        image_hash: int | str | None = None,
+        image_hash: str | None = None,
         accessible: bool = False,
         is_internal: bool | None = None,
         session: SQLSession | Literal[True] | None = None,
-    ) -> tuple[int, int]:
+    ) -> tuple[int, str]:
         """Insert an emoji into the hash map and, optionally, into the `emoji` database table.
 
         #### Args:
@@ -291,7 +290,7 @@ class EmojiHashMap:
             - `ServerTimeoutError`: Connection to server timed out.
 
         #### Returns:
-            - `tuple[int, int]`: A tuple with the emoji ID and the hash of its image.
+            - `tuple[int, str]`: A tuple with the emoji ID and the hash of its image.
         """
         if session:
             validate_types({"session": (session, (SQLSession, bool))})
@@ -303,7 +302,7 @@ class EmojiHashMap:
             if not image_hash:
                 if not image:
                     image = await globals.get_image_from_URL(emoji_url)
-                image_hash = hash(image)
+                image_hash = globals.hash_image(image)
 
         if is_internal:
             assert (emoji_server_id_raw := globals.settings.get("emoji_server_id"))
@@ -356,7 +355,7 @@ class EmojiHashMap:
         emoji_name: str | None = None,
         emoji_server_id: int | str | None = None,
         emoji_animated: bool | None = None,
-        image_hash: int | str,
+        image_hash: str,
         accessible: bool | None = None,
     ) -> UpdateBase:
         """Return an `UpdateBase` for upserting an emoji into the database.
@@ -373,12 +372,12 @@ class EmojiHashMap:
             "id": str(emoji_id),
             "name": emoji_name,
             "animated": not not emoji_animated,
-            "image_hash": str(image_hash),
+            "image_hash": image_hash,
             "accessible": not not accessible,
         }
         update_dict = {
             "name": emoji_name,
-            "image_hash": str(image_hash),
+            "image_hash": image_hash,
             "accessible": not not accessible,
         }
         if emoji_server_id:
@@ -469,7 +468,7 @@ class EmojiHashMap:
             await self.delete_emoji(emoji.id)
 
             image = await globals.get_image_from_URL(emoji.url)
-            image_hash = hash(image)
+            image_hash = globals.hash_image(image)
             self._add_emoji_to_map(
                 emoji.id, image_hash, accessible=True, is_internal=is_internal
             )
@@ -624,7 +623,7 @@ class EmojiHashMap:
         emoji_id: int | str | None = None,
         emoji_name: str | None = None,
         session: SQLSession | None = None,
-    ) -> int | None:
+    ) -> str | None:
         """Return the hash of an emoji.
 
         If only `emoji_id` is passed and the emoji can't be found in our existing hash map, returns None; otherwise will ensure the emoji is in the hash map.
@@ -660,7 +659,7 @@ class EmojiHashMap:
         emoji_id: int | str | None = None,
         emoji_name: str | None = None,
         session: SQLSession | None = None,
-    ) -> int | None:
+    ) -> str | None:
         """Check that the emoji is in the hash map and, if not, add it to the map and to the database, then return the hash.
 
         #### Args:

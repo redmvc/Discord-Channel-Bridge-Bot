@@ -3,15 +3,8 @@ from __future__ import annotations
 import asyncio
 import io
 import json
-from typing import (
-    Any,
-    Callable,
-    Literal,
-    SupportsInt,
-    TypedDict,
-    TypeVar,
-    cast,
-)
+from hashlib import md5
+from typing import Any, Callable, Literal, SupportsInt, TypedDict, TypeVar, cast
 
 import aiohttp
 import discord
@@ -344,6 +337,15 @@ def get_emoji_information(
         )
 
     return (emoji_int, emoji_name, emoji_animated, emoji_url)
+
+
+def hash_image(image: bytes) -> str:
+    """Return a string with a hash of an image.
+
+    #### Args:
+        - `image`: The image bytes object.
+    """
+    return md5(image).hexdigest()
 
 
 async def wait_until_ready() -> bool:

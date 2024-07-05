@@ -1147,7 +1147,7 @@ async def copy_emoji_into_server(
     )
 
     image = await globals.get_image_from_URL(missing_emoji_url)
-    image_hash = hash(image)
+    image_hash = globals.hash_image(image)
 
     emoji_to_delete_id = None
     try:
