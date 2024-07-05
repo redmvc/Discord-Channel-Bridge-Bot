@@ -325,7 +325,6 @@ class EmojiHashMap:
 
             try:
                 await self._add_emoji_to_database(
-                    emoji=emoji,
                     emoji_id=emoji_id,
                     emoji_name=emoji_name,
                     emoji_server_id=emoji_server_id,
