@@ -89,7 +89,7 @@ class EmojiHashMap:
             session.close()
 
     def add_emoji_to_map(
-        self, emoji_id: int, image_hash: int, accessible: bool | None = None
+        self, emoji_id: int | str, image_hash: int | str, accessible: bool | None = None
     ):
         """Add an emoji to the hash map.
 
@@ -97,14 +97,20 @@ class EmojiHashMap:
             - `emoji_id`: The ID of the emoji.
             - `image_hash`: The hash of its image.
             - `accessible`: Whether the emoji is accessible to the bot. Defaults to None, in which case will try to figure it out from the id.
+
+        #### Raises:
+            - `ValueError`: Either `emoji_id` or `image_hash` were not valid numerical IDs.
         """
         types_to_validate: dict[str, tuple] = {
-            "emoji_id": (emoji_id, int),
-            "image_hash": (image_hash, int),
+            "emoji_id": (emoji_id, (int, str)),
+            "image_hash": (image_hash, (int, str)),
         }
         if accessible is not None:
             types_to_validate["accessible"] = (accessible, bool)
         validate_types(types_to_validate)
+
+        emoji_id = int(emoji_id)
+        image_hash = int(image_hash)
 
         self.emoji_to_hash[emoji_id] = image_hash
         if accessible is None:
