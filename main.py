@@ -1158,7 +1158,7 @@ async def copy_emoji_into_server(
         print("Emoji server permissions not set correctly.")
         raise e
     except discord.HTTPException as e:
-        if len(globals.emoji_server.emojis) == 0:
+        if len(globals.emoji_server.emojis) < 50:
             # Something weird happened, the error was not due to a full server
             raise e
 
