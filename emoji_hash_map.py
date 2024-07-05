@@ -54,7 +54,6 @@ class EmojiHashMap:
                 select_hashed_emoji
             )
             accessibility_flips: set[str] = set()
-            emoji_server_id_str = globals.settings.get("emoji_server_id")
             for row in hashed_emoji_query_result:
                 emoji_id_str = row.id
                 emoji_id = int(emoji_id_str)
@@ -66,10 +65,12 @@ class EmojiHashMap:
                 if emoji_registered_as_accessible != emoji_actually_accessible:
                     accessibility_flips.add(emoji_id_str)
 
-                self.add_emoji_to_map(emoji_id, emoji_hash, emoji_actually_accessible)
-
-                if row.server_id == emoji_server_id_str:
-                    self.hash_to_internal_emoji[emoji_hash] = emoji_id
+                self.add_emoji_to_map(
+                    emoji_id,
+                    emoji_hash,
+                    accessible=emoji_actually_accessible,
+                    server_id=row.server_id,
+                )
 
             if len(accessibility_flips) > 0:
                 session.execute(
@@ -89,25 +90,47 @@ class EmojiHashMap:
             session.close()
 
     def add_emoji_to_map(
-        self, emoji_id: int | str, image_hash: int | str, accessible: bool | None = None
+        self,
+        emoji_id: int | str,
+        image_hash: int | str,
+        *,
+        accessible: bool | None = None,
+        server_id: int | str | None = None,
+        is_internal: bool | None = None,
     ):
         """Add an emoji to the hash map.
 
         #### Args:
             - `emoji_id`: The ID of the emoji.
             - `image_hash`: The hash of its image.
-            - `accessible`: Whether the emoji is accessible to the bot. Defaults to None, in which case will try to figure it out from the id.
+            - `accessible`: Whether the emoji is accessible to the bot. Defaults to None, in which case will try to figure it out from the other arguments.
+            - `server_id`: The ID of the server this emoji is in. If included and equal to the bot's emoji server, will set `accessible` to True and add the emoji to the internal emoji hash map.
+            - `is_internal`: If set to True, will set `accessible` to True and add the emoji to the internal emoji hash map.
 
         #### Raises:
-            - `ValueError`: Either `emoji_id` or `image_hash` were not valid numerical IDs.
+            - `ValueError`: `emoji_id`, `image_hash`, or `server_id` were not valid numerical IDs.
         """
         types_to_validate: dict[str, tuple] = {
             "emoji_id": (emoji_id, (int, str)),
             "image_hash": (image_hash, (int, str)),
         }
-        if accessible is not None:
-            types_to_validate["accessible"] = (accessible, bool)
+        if is_internal:
+            types_to_validate["is_internal"] = (is_internal, bool)
+            accessible = True
+        else:
+            if accessible:
+                types_to_validate["accessible"] = (accessible, bool)
+            if server_id:
+                types_to_validate["server_id"] = (server_id, (int, str))
         validate_types(types_to_validate)
+
+        if not is_internal and server_id:
+            server_id = int(server_id)
+            if server_id == globals.settings.get("emoji_server_id"):
+                is_internal = True
+                accessible = True
+            elif globals.client.get_guild(server_id):
+                accessible = True
 
         emoji_id = int(emoji_id)
         image_hash = int(image_hash)
@@ -125,6 +148,9 @@ class EmojiHashMap:
             and emoji_id in self.hash_to_available_emoji[image_hash]
         ):
             self.hash_to_available_emoji[image_hash].remove(emoji_id)
+
+        if is_internal:
+            self.hash_to_internal_emoji[image_hash] = emoji_id
 
     async def add_emoji_to_database(
         self,
@@ -304,10 +330,9 @@ class EmojiHashMap:
 
             image = await globals.get_image_from_URL(emoji.url)
             image_hash = hash(image)
-            self.add_emoji_to_map(emoji.id, image_hash, True)
-
-            if is_internal:
-                self.hash_to_internal_emoji[image_hash] = emoji.id
+            self.add_emoji_to_map(
+                emoji.id, image_hash, accessible=True, is_internal=is_internal
+            )
 
             return await self.upsert_emoji(
                 emoji_id=emoji.id,

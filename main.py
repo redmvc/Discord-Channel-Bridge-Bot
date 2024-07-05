@@ -1192,8 +1192,7 @@ async def copy_emoji_into_server(
                 accessible=True,
                 session=session,
             )
-            emoji_hash_map.map.add_emoji_to_map(emoji.id, image_hash, True)
-            emoji_hash_map.map.hash_to_internal_emoji[image_hash] = emoji.id
+            emoji_hash_map.map.add_emoji_to_map(emoji.id, image_hash, is_internal=True)
 
             if missing_emoji:
                 await commands.map_emoji_helper(
