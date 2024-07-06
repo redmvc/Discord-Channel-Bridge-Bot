@@ -82,15 +82,16 @@ context: str = cast(str, settings_root["context"])
 settings: Settings = cast(Settings, settings_root[context])
 
 # Variables for connection to the Discord client
-intents = discord.Intents()
-intents.emojis_and_stickers = True
-intents.guilds = True
-intents.members = True
-intents.message_content = True
-intents.messages = True
-intents.reactions = True
-intents.typing = True
-intents.webhooks = True
+intents = discord.Intents(
+    emojis_and_stickers=True,
+    guilds=True,
+    members=True,
+    message_content=True,
+    messages=True,
+    reactions=True,
+    typing=True,
+    webhooks=True,
+)
 client = discord.Client(intents=intents)
 command_tree = discord.app_commands.CommandTree(client)
 
