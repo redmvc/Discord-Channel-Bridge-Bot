@@ -12,21 +12,34 @@ from typing_extensions import NotRequired
 
 from validations import ArgumentError, HTTPResponseError, validate_types
 
+# discord.guild.GuildChannel isn't working in commands.py for some reason
+GuildChannel = (
+    discord.VoiceChannel
+    | discord.StageChannel
+    | discord.ForumChannel
+    | discord.TextChannel
+    | discord.CategoryChannel
+)
+
 
 class Settings(TypedDict):
     """
     An Typed Dictionary with the bot's settings. The `settings.json` file must contain a `"context"` entry whose value is another key in the file with the attributes below. For example:
 
-    ```json
-    {
-        "context": "production",
-        "production": {
-            "app_token": "...",
-            "db_dialect": "...",
-            ...
+    .. code-block:: json
+        {
+            "context": "production",
+            "production": {
+                "app_token": "...",
+                "db_dialect": "...",
+                ...
+            },
+            "testing": {
+                "app_token": "...",
+                "db_dialect": "...",
+                ...
+            }
         }
-    }
-    ```
 
     Attributes
     ----------
@@ -69,15 +82,16 @@ context: str = cast(str, settings_root["context"])
 settings: Settings = cast(Settings, settings_root[context])
 
 # Variables for connection to the Discord client
-intents = discord.Intents()
-intents.emojis_and_stickers = True
-intents.guilds = True
-intents.members = True
-intents.message_content = True
-intents.messages = True
-intents.reactions = True
-intents.typing = True
-intents.webhooks = True
+intents = discord.Intents(
+    emojis_and_stickers=True,
+    guilds=True,
+    members=True,
+    message_content=True,
+    messages=True,
+    reactions=True,
+    typing=True,
+    webhooks=True,
+)
 client = discord.Client(intents=intents)
 command_tree = discord.app_commands.CommandTree(client)
 
@@ -97,43 +111,9 @@ per_channel_whitelist: dict[int, set[int]] = {}
 _T = TypeVar("_T", bound=Any)
 
 
-async def mention_to_channel(
-    link_or_mention: str,
-) -> discord.guild.GuildChannel | discord.Thread | discord.abc.PrivateChannel | None:
-    """Return the channel referenced by a channel mention or a Discord link to a channel.
-
-    #### Args:
-        - `link_or_mention`: Either a mention of a Discord channel (`<#channel_id>`) or a Discord link to it (`https://discord.com/channels/server_id/channel_id`).
-
-    #### Returns:
-        - The channel whose ID is given by `channel_id`.
-    """
-    validate_types({"link_or_mention": (link_or_mention, str)})
-
-    if link_or_mention.startswith("https://discord.com/channels"):
-        try:
-            while link_or_mention.endswith("/"):
-                link_or_mention = link_or_mention[:-1]
-
-            channel_id = int(link_or_mention.rsplit("/")[-1])
-        except ValueError:
-            return None
-    else:
-        try:
-            channel_id = int(
-                link_or_mention.replace("<", "").replace(">", "").replace("#", "")
-            )
-        except ValueError:
-            return None
-
-    return await get_channel_from_id(channel_id)
-
-
 async def get_channel_from_id(
-    channel_or_id: (
-        discord.guild.GuildChannel | discord.Thread | discord.abc.PrivateChannel | int
-    ),
-) -> discord.guild.GuildChannel | discord.Thread | discord.abc.PrivateChannel | None:
+    channel_or_id: GuildChannel | discord.Thread | discord.abc.PrivateChannel | int,
+) -> GuildChannel | discord.Thread | discord.abc.PrivateChannel | None:
     """Ensure that this function's argument is a valid Discord channel, when it may instead be a channel ID.
 
     #### Args:
@@ -174,9 +154,7 @@ async def get_channel_from_id(
 
 
 def get_id_from_channel(
-    channel_or_id: (
-        discord.guild.GuildChannel | discord.Thread | discord.abc.PrivateChannel | int
-    ),
+    channel_or_id: GuildChannel | discord.Thread | discord.abc.PrivateChannel | int,
 ) -> int:
     """Returns the ID of the channel passed as argument, or the argument itself if it is already an ID.
 
@@ -211,7 +189,7 @@ def get_id_from_channel(
 
 
 async def get_channel_member(
-    channel: discord.abc.GuildChannel | discord.Thread, member_id: int
+    channel: GuildChannel | discord.Thread, member_id: int
 ) -> discord.Member | None:
     """Return a channel's member by their ID, or None if they can't be found.
 
@@ -221,7 +199,17 @@ async def get_channel_member(
     """
     validate_types(
         {
-            "channel": (channel, (discord.abc.GuildChannel, discord.Thread)),
+            "channel": (
+                channel,
+                (
+                    discord.VoiceChannel,
+                    discord.StageChannel,
+                    discord.ForumChannel,
+                    discord.TextChannel,
+                    discord.CategoryChannel,
+                    discord.Thread,
+                ),
+            ),
             "member_id": (member_id, int),
         }
     )
