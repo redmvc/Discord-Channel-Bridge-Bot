@@ -169,7 +169,7 @@ async def bridge(
         )
         return
 
-    target_channel = await globals.mention_to_channel(target)
+    target_channel = await mention_to_channel(target)
     if not isinstance(target_channel, (discord.TextChannel, discord.Thread)):
         # The argument passed needs to be a channel or thread
         await interaction.response.send_message(
@@ -414,6 +414,38 @@ async def auto_bridge_threads(
     await interaction.followup.send(response, ephemeral=True)
 
 
+async def mention_to_channel(
+    link_or_mention: str,
+) -> discord.guild.GuildChannel | discord.Thread | discord.abc.PrivateChannel | None:
+    """Return the channel referenced by a channel mention or a Discord link to a channel.
+
+    #### Args:
+        - `link_or_mention`: Either a mention of a Discord channel (`<#channel_id>`) or a Discord link to it (`https://discord.com/channels/server_id/channel_id`).
+
+    #### Returns:
+        - The channel whose ID is given by `channel_id`.
+    """
+    validate_types({"link_or_mention": (link_or_mention, str)})
+
+    if link_or_mention.startswith("https://discord.com/channels"):
+        try:
+            while link_or_mention.endswith("/"):
+                link_or_mention = link_or_mention[:-1]
+
+            channel_id = int(link_or_mention.rsplit("/")[-1])
+        except ValueError:
+            return None
+    else:
+        try:
+            channel_id = int(
+                link_or_mention.replace("<", "").replace(">", "").replace("#", "")
+            )
+        except ValueError:
+            return None
+
+    return await globals.get_channel_from_id(channel_id)
+
+
 @discord.app_commands.default_permissions(manage_webhooks=True)
 @discord.app_commands.guild_only()
 @globals.command_tree.command(
@@ -432,7 +464,7 @@ async def demolish(interaction: discord.Interaction, target: str):
         )
         return
 
-    target_channel = await globals.mention_to_channel(target)
+    target_channel = await mention_to_channel(target)
     if not isinstance(target_channel, (discord.TextChannel, discord.Thread)):
         # The argument passed needs to be a channel or thread
         await interaction.response.send_message(

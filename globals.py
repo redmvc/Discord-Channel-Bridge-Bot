@@ -97,38 +97,6 @@ per_channel_whitelist: dict[int, set[int]] = {}
 _T = TypeVar("_T", bound=Any)
 
 
-async def mention_to_channel(
-    link_or_mention: str,
-) -> discord.guild.GuildChannel | discord.Thread | discord.abc.PrivateChannel | None:
-    """Return the channel referenced by a channel mention or a Discord link to a channel.
-
-    #### Args:
-        - `link_or_mention`: Either a mention of a Discord channel (`<#channel_id>`) or a Discord link to it (`https://discord.com/channels/server_id/channel_id`).
-
-    #### Returns:
-        - The channel whose ID is given by `channel_id`.
-    """
-    validate_types({"link_or_mention": (link_or_mention, str)})
-
-    if link_or_mention.startswith("https://discord.com/channels"):
-        try:
-            while link_or_mention.endswith("/"):
-                link_or_mention = link_or_mention[:-1]
-
-            channel_id = int(link_or_mention.rsplit("/")[-1])
-        except ValueError:
-            return None
-    else:
-        try:
-            channel_id = int(
-                link_or_mention.replace("<", "").replace(">", "").replace("#", "")
-            )
-        except ValueError:
-            return None
-
-    return await get_channel_from_id(channel_id)
-
-
 async def get_channel_from_id(
     channel_or_id: (
         discord.guild.GuildChannel | discord.Thread | discord.abc.PrivateChannel | int
