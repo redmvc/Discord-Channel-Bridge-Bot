@@ -3,13 +3,14 @@ from __future__ import annotations
 import asyncio
 import io
 import json
+from hashlib import md5
 from typing import Any, Callable, Literal, SupportsInt, TypedDict, TypeVar, cast
 
 import aiohttp
 import discord
 from typing_extensions import NotRequired
 
-from validations import HTTPResponseError, validate_types
+from validations import ArgumentError, HTTPResponseError, validate_types
 
 
 class Settings(TypedDict):
@@ -88,9 +89,6 @@ auto_bridge_thread_channels: set[int] = set()
 
 # Server which can be used to store unknown emoji for mirroring reactions
 emoji_server: discord.Guild | None = None
-
-# Dictionary mapping external emoji to internal emoji
-emoji_mappings: dict[int, int] = {}
 
 # Dictionary listing all apps whitelisted per channel
 per_channel_whitelist: dict[int, set[int]] = {}
@@ -267,6 +265,83 @@ async def get_image_from_URL(url: str) -> bytes:
         raise Exception("Unknown problem occurred trying to fetch image.")
 
     return image_bytes.read()
+
+
+def get_emoji_information(
+    emoji: discord.PartialEmoji | discord.Emoji | None = None,
+    emoji_id: int | str | None = None,
+    emoji_name: str | None = None,
+) -> tuple[int, str, bool, str]:
+    """Return a tuple with emoji ID, emoji name, whether the emoji is animated, and the URL for its image.
+
+    #### Args:
+        - `emoji`: A Discord emoji. Defaults to None, in which case the values below will be used instead.
+        - `emoji_id`: The ID of an emoji. Defaults to None, in which case the value above will be used instead.
+        - `emoji_name`: The name of the emoji. Defaults to None, but must be included if `emoji_id` is. If it starts with `"a:"` the emoji will be marked as animated.
+
+    #### Raises:
+        - `ArgumentError`: The number of arguments passed is incorrect.
+        - `ValueError`: `emoji` argument was passed and had type `PartialEmoji` but it was not a custom emoji, or `emoji_id` argument was passed and had type `str` but it was not a valid numerical ID.
+    """
+    types_to_validate: dict[str, tuple] = {}
+    if emoji:
+        types_to_validate = {"emoji": (emoji, (discord.PartialEmoji, discord.Emoji))}
+    elif emoji_id:
+        if emoji_name:
+            types_to_validate = {
+                "emoji_id": (emoji_id, (int, str)),
+                "emoji_name": (emoji_name, str),
+            }
+        else:
+            raise ArgumentError(
+                "If emoji_id is passed as argument, emoji_name must also be."
+            )
+    else:
+        raise ArgumentError(
+            "At least one of emoji or emoji_id must be passed as argument."
+        )
+    validate_types(types_to_validate)
+
+    if emoji:
+        if not emoji.id:
+            raise ValueError("PartialEmoji passed as argument is not a custom emoji.")
+
+        emoji_id = emoji.id
+        emoji_name = emoji.name
+        emoji_animated = emoji.animated
+        emoji_url = emoji.url
+    else:
+        emoji_name = cast(str, emoji_name)
+
+        emoji_animated = emoji_name.startswith("a:")
+        if emoji_animated:
+            emoji_name = emoji_name[2:]
+        elif emoji_name.startswith(":"):
+            emoji_name = emoji_name[1:]
+
+        if emoji_animated:
+            ext = "gif"
+        else:
+            ext = "png"
+        emoji_url = f"https://cdn.discordapp.com/emojis/{emoji_id}.{ext}?v=1"
+
+    try:
+        emoji_int = int(cast(int | str, emoji_id))
+    except ValueError:
+        raise ValueError(
+            "emoji_int was passed as an argument and had type str but was not convertible to an ID."
+        )
+
+    return (emoji_int, emoji_name, emoji_animated, emoji_url)
+
+
+def hash_image(image: bytes) -> str:
+    """Return a string with a hash of an image.
+
+    #### Args:
+        - `image`: The image bytes object.
+    """
+    return md5(image).hexdigest()
 
 
 async def wait_until_ready() -> bool:
