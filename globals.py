@@ -12,6 +12,15 @@ from typing_extensions import NotRequired
 
 from validations import ArgumentError, HTTPResponseError, validate_types
 
+# discord.guild.GuildChannel isn't working in commands.py for some reason
+GuildChannel = (
+    discord.VoiceChannel
+    | discord.StageChannel
+    | discord.ForumChannel
+    | discord.TextChannel
+    | discord.CategoryChannel
+)
+
 
 class Settings(TypedDict):
     """
@@ -102,10 +111,8 @@ _T = TypeVar("_T", bound=Any)
 
 
 async def get_channel_from_id(
-    channel_or_id: (
-        discord.guild.GuildChannel | discord.Thread | discord.abc.PrivateChannel | int
-    ),
-) -> discord.guild.GuildChannel | discord.Thread | discord.abc.PrivateChannel | None:
+    channel_or_id: GuildChannel | discord.Thread | discord.abc.PrivateChannel | int,
+) -> GuildChannel | discord.Thread | discord.abc.PrivateChannel | None:
     """Ensure that this function's argument is a valid Discord channel, when it may instead be a channel ID.
 
     #### Args:
@@ -146,9 +153,7 @@ async def get_channel_from_id(
 
 
 def get_id_from_channel(
-    channel_or_id: (
-        discord.guild.GuildChannel | discord.Thread | discord.abc.PrivateChannel | int
-    ),
+    channel_or_id: GuildChannel | discord.Thread | discord.abc.PrivateChannel | int,
 ) -> int:
     """Returns the ID of the channel passed as argument, or the argument itself if it is already an ID.
 
@@ -183,7 +188,7 @@ def get_id_from_channel(
 
 
 async def get_channel_member(
-    channel: discord.abc.GuildChannel | discord.Thread, member_id: int
+    channel: GuildChannel | discord.Thread, member_id: int
 ) -> discord.Member | None:
     """Return a channel's member by their ID, or None if they can't be found.
 
@@ -193,7 +198,17 @@ async def get_channel_member(
     """
     validate_types(
         {
-            "channel": (channel, (discord.abc.GuildChannel, discord.Thread)),
+            "channel": (
+                channel,
+                (
+                    discord.VoiceChannel,
+                    discord.StageChannel,
+                    discord.ForumChannel,
+                    discord.TextChannel,
+                    discord.CategoryChannel,
+                    discord.Thread,
+                ),
+            ),
             "member_id": (member_id, int),
         }
     )
