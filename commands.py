@@ -1041,10 +1041,16 @@ async def hash_server_emoji(
             )
             return
 
-        message = "Are you sure you want to hash the emoji of this server? This may take a bit and make the bot unresponsive in the meantime."
+        message = f"Are you sure you want to hash all of the emoji in {server.name}? This may take a bit and make the bot unresponsive in the meantime."
+    elif len(globals.client.guilds) == 0:
+        await interaction.response.send_message(
+            "❌ This bot is not in any servers.",
+            ephemeral=True,
+        )
+        return
     else:
         server = None
-        message = "Are you **sure** you want to hash the emoji of all servers this bot is in? This may take multiple minutes and make the bot unresponsive in the meantime."
+        message = f"Are you **sure** you want to hash the emoji of all {len(globals.client.guilds)} servers this bot is in? This may take multiple minutes and make the bot unresponsive in the meantime."
 
     view = discord.ui.View()
     view.add_item(ConfirmHashServer(interaction, server))
