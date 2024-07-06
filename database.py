@@ -276,7 +276,9 @@ async def sql_retry(
 
 # Create the engine connecting to the database
 engine = create_engine(
-    f"{settings['db_dialect']}+{settings['db_driver']}://{settings['db_user']}:{settings['db_pwd']}@{settings['db_host']}:{settings['db_port']}/{settings['db_name']}"
+    f"{settings['db_dialect']}+{settings['db_driver']}://{settings['db_user']}:{settings['db_pwd']}@{settings['db_host']}:{settings['db_port']}/{settings['db_name']}",
+    pool_pre_ping=True,
+    pool_recycle=3600,
 )
 
 # Create all tables represented by the above classes, if they haven't already been created
