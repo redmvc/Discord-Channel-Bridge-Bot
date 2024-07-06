@@ -17,16 +17,20 @@ class Settings(TypedDict):
     """
     An Typed Dictionary with the bot's settings. The `settings.json` file must contain a `"context"` entry whose value is another key in the file with the attributes below. For example:
 
-    ```json
-    {
-        "context": "production",
-        "production": {
-            "app_token": "...",
-            "db_dialect": "...",
-            ...
+    .. code-block:: json
+        {
+            "context": "production",
+            "production": {
+                "app_token": "...",
+                "db_dialect": "...",
+                ...
+            },
+            "testing": {
+                "app_token": "...",
+                "db_dialect": "...",
+                ...
+            }
         }
-    }
-    ```
 
     Attributes
     ----------
