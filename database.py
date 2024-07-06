@@ -1,6 +1,6 @@
 from typing import Any, Callable, cast
 
-from sqlalchemy import Select as SQLSelect
+from sqlalchemy import Boolean, Select as SQLSelect
 from sqlalchemy import String, UniqueConstraint
 from sqlalchemy import Update as SQLUpdate
 from sqlalchemy import UpdateBase, create_engine
@@ -125,23 +125,27 @@ class DBAutoBridgeThreadChannels(DBBase):
     channel: Mapped[str] = mapped_column(String(32), nullable=False)
 
 
-class DBEmojiMap(DBBase):
+class DBEmoji(DBBase):
     """
-    An SQLAlchemy ORM class representing a database table matching external emoji we couldn't find with emoji we have stored in our emoji server.
+    An SQLAlchemy ORM class representing a database table storing information about emoji.
 
     #### Columns
-    - `external_emoji (VARCHAR(32))`: The ID of the external emoji which had been missing. Has `PRIMARY KEY`.
-    - `external_emoji_name (VARCHAR(32))`: The name of the external emoji on its original server.
-    - `external_emoji_server_name (VARCHAR(32))`: The name of the original server this emoji is from.
-    - `internal_emoji (VARCHAR(32))`: The ID of the internal emoji that we created to match it.
+    - `id (VARCHAR(32))`: The emoji ID, has `PRIMARY KEY`.
+    - `name (VARCHAR(32))`: The name of the emoji.
+    - `server_id (VARCHAR(32))`: The ID of the server this emoji belongs to.
+    - `animated (BOOL)`: Whether it's an animated emoji.
+    - `image_hash (VARCHAR(32))`: A hash of this emoji's image.
+    - `accessible (BOOL)`: Whether the bot has access to this emoji.
     """
 
-    __tablename__ = "emoji_mapping"
+    __tablename__ = "emoji"
 
-    external_emoji: Mapped[str] = mapped_column(String(32), primary_key=True)
-    external_emoji_name: Mapped[str] = mapped_column(String(32))
-    external_emoji_server_name: Mapped[str] = mapped_column(String(32))
-    internal_emoji: Mapped[str] = mapped_column(String(32), nullable=False)
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    name: Mapped[str] = mapped_column(String(32), nullable=True)
+    server_id: Mapped[str] = mapped_column(String(32), nullable=True)
+    animated: Mapped[bool] = mapped_column(Boolean, nullable=True)
+    image_hash: Mapped[str] = mapped_column(String(32), nullable=True)
+    accessible: Mapped[bool] = mapped_column(Boolean, nullable=False)
 
 
 class DBAppWhitelist(DBBase):
@@ -172,20 +176,17 @@ async def sql_upsert(
     insert_values: dict[str, Any],
     update_values: dict[str, Any],
 ) -> UpdateBase:
-    """Insert values into a table if a key is not duplicated or update them if it is.
+    """Return an `UpdateBase` for inserting values into a table if a key is not duplicated or updating them if it is.
 
     #### Args:
         - `table`: The table to insert into.
         - `insert_values`: A dictionary whose keys are the names of columns in the table being inserted into and whose values are the values to insert. Must include at least one unique key as well as all keys in `update_values`.
         - `update_values`: A dictionary whose keys are the names of columns in the table being inserted into and whose values are the values to update on duplicate keys. At least one unique key present in `insert_values` must be absent from this dictionary.
 
-    ### Raises:
+    #### Raises:
         - `ValueError`: `insert_values` does not have any keys not present in `update_values`.
         - `UnknownDBDialectError`: Invalid database dialect registered in `settings.json` file.
         - `SQLError`: SQL statement inferred from arguments was invalid or database connection failed.
-
-    #### Returns:
-        - `Insert`: The updated Insert command.
     """
     validate_types(
         {
@@ -257,8 +258,8 @@ async def sql_upsert(
 
 async def sql_retry(
     fun: Callable[..., _T],
-    num_retries: int = 3,
-    time_to_wait: float = 5,
+    num_retries: int = 5,
+    time_to_wait: float = 10,
 ) -> _T:
     """Run an SQL function and retry it every time an SQLError occurs up to a certain maximum number of tries. If it succeeds, return its result; otherwise, raise the error.
 
@@ -275,7 +276,9 @@ async def sql_retry(
 
 # Create the engine connecting to the database
 engine = create_engine(
-    f"{settings['db_dialect']}+{settings['db_driver']}://{settings['db_user']}:{settings['db_pwd']}@{settings['db_host']}:{settings['db_port']}/{settings['db_name']}"
+    f"{settings['db_dialect']}+{settings['db_driver']}://{settings['db_user']}:{settings['db_pwd']}@{settings['db_host']}:{settings['db_port']}/{settings['db_name']}",
+    pool_pre_ping=True,
+    pool_recycle=3600,
 )
 
 # Create all tables represented by the above classes, if they haven't already been created

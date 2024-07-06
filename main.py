@@ -15,13 +15,13 @@ from sqlalchemy.exc import StatementError as SQLError
 from sqlalchemy.orm import Session as SQLSession
 
 import commands
+import emoji_hash_map
 import globals
 from bridge import Bridge, bridges
 from database import (
     DBAppWhitelist,
     DBAutoBridgeThreadChannels,
     DBBridge,
-    DBEmojiMap,
     DBMessageMap,
     DBReactionMap,
     engine,
@@ -126,30 +126,8 @@ async def on_ready():
             )
             session.execute(delete_invalid_webhooks)
 
-        # Try to identify mapped emoji
-        select_mapped_emoji: SQLSelect = SQLSelect(DBEmojiMap)
-        mapped_emoji_query_result: ScalarResult[DBEmojiMap] = session.scalars(
-            select_mapped_emoji
-        )
-        emoji_not_found = set()
-        for emoji_map in mapped_emoji_query_result:
-            if emoji_map.internal_emoji in emoji_not_found:
-                continue
-
-            internal_emoji_id = int(emoji_map.internal_emoji)
-            if not globals.client.get_emoji(internal_emoji_id):
-                emoji_not_found.add(emoji_map.internal_emoji)
-            else:
-                # The emoji is registered
-                globals.emoji_mappings[int(emoji_map.external_emoji)] = (
-                    internal_emoji_id
-                )
-
-        if len(emoji_not_found) > 0:
-            delete_missing_internal_emoji = SQLDelete(DBEmojiMap).where(
-                DBEmojiMap.internal_emoji.in_(emoji_not_found)
-            )
-            session.execute(delete_missing_internal_emoji)
+        # Try to identify hashed emoji
+        emoji_hash_map.map = emoji_hash_map.EmojiHashMap(session)
 
         # Try to find all apps whitelisted per channel
         select_whitelisted_apps: SQLSelect = SQLSelect(DBAppWhitelist)
@@ -693,6 +671,12 @@ async def replace_missing_emoji(message_content: str) -> str:
 
     #### Args:
         - `message_content`: The content of the message to process.
+
+    #### Raises
+        - `HTTPResponseError`: HTTP request to fetch image returned a status other than 200.
+        - `InvalidURL`: URL generated from emoji was not valid.
+        - `RuntimeError`: Session connection failed.
+        - `ServerTimeoutError`: Connection to server timed out.
     """
     if not globals.emoji_server:
         # If we don't have an emoji server to store our own versions of emoji in then there's nothing we can do
@@ -709,20 +693,21 @@ async def replace_missing_emoji(message_content: str) -> str:
     for emoji_name, emoji_id_str in message_emoji:
         emoji_id = int(emoji_id_str)
         emoji = globals.client.get_emoji(emoji_id)
-        if emoji and emoji.available:
+        if emoji and emoji.is_usable():
             # I already have access to this emoji so it's fine
             continue
 
-        if globals.emoji_mappings.get(emoji_id) and (
-            emoji := globals.client.get_emoji(globals.emoji_mappings[emoji_id])
-        ):
+        await emoji_hash_map.map.ensure_hash_map(
+            emoji_id=emoji_id, emoji_name=emoji_name
+        )
+        if emoji := emoji_hash_map.map.get_accessible_emoji(emoji_id, skip_self=True):
             # I don't have access to this emoji but I have a matching one in my emoji mappings
             emoji_to_replace[f"<{emoji_name}:{emoji_id_str}>"] = str(emoji)
             continue
 
         try:
             emoji = await copy_emoji_into_server(
-                missing_emoji_name=emoji_name, missing_emoji_id=emoji_id_str
+                missing_emoji_id=emoji_id_str, missing_emoji_name=emoji_name
             )
             if emoji:
                 emoji_to_replace[f"<{emoji_name}:{emoji_id_str}>"] = str(emoji)
@@ -866,6 +851,12 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
 
     #### Args:
         - `payload`: The raw event payload data.
+
+    #### Raises
+        - `HTTPResponseError`: HTTP request to fetch image returned a status other than 200.
+        - `InvalidURL`: URL generated from emoji was not valid.
+        - `RuntimeError`: Session connection failed.
+        - `ServerTimeoutError`: Connection to server timed out.
     """
     if not await globals.wait_until_ready():
         return
@@ -882,18 +873,19 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
     fallback_emoji: discord.Emoji | str | None
     if payload.emoji.is_custom_emoji():
         # Custom emoji, I need to check whether it exists and is available to me
+        # I'll add this to my hash map if it's not there already
+        await emoji_hash_map.map.ensure_hash_map(emoji=payload.emoji)
+
         # is_custom_emoji() guarantees that payload.emoji.id is not None
         emoji_id = cast(int, payload.emoji.id)
         emoji_id_str = str(emoji_id)
 
         fallback_emoji = globals.client.get_emoji(emoji_id)
-        if not fallback_emoji or not fallback_emoji.available:
-            fallback_emoji = None
+        if not fallback_emoji or not fallback_emoji.is_usable():
             # Couldn't find the reactji, will try to see if I've got it mapped locally
-            mapped_emoji_id = globals.emoji_mappings.get(emoji_id)
-            if mapped_emoji_id:
-                # I already have this Emoji mapped locally
-                fallback_emoji = globals.client.get_emoji(mapped_emoji_id)
+            fallback_emoji = emoji_hash_map.map.get_accessible_emoji(
+                emoji_id, skip_self=True
+            )
 
         if not fallback_emoji:
             # I don't have the emoji mapped locally, I'll add it to my server and update my map
@@ -909,7 +901,11 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         emoji_id_str = fallback_emoji
 
     # Get the IDs of all emoji that match the current one
-    equivalent_emoji_ids = get_equivalent_emoji_ids(payload.emoji)
+    equivalent_emoji_ids = emoji_hash_map.map.get_matches(
+        payload.emoji, return_str=True
+    )
+    if not equivalent_emoji_ids:
+        equivalent_emoji_ids = frozenset(str(payload.emoji.id))
 
     # Now find the list of channels that can validly be reached via outbound chains from this channel
     reachable_channel_ids = bridges.get_reachable_channels(
@@ -931,26 +927,38 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
             bridged_message = await bridged_channel.fetch_message(target_message_id)
 
             # I'll try to check whether there are already reactions in the target message matching mine
-            existing_matching_emoji = next(
-                (
-                    emoji
-                    for reaction in bridged_message.reactions
-                    if (
-                        (emoji := reaction.emoji)
-                        and (
-                            (
-                                not (is_str := isinstance(emoji, str))
-                                and (
-                                    emoji.name in equivalent_emoji_ids
-                                    or str(emoji.id) in equivalent_emoji_ids
+            existing_matching_emoji = None
+            if fallback_emoji:
+                existing_matching_emoji = next(
+                    (
+                        reaction.emoji
+                        for reaction in bridged_message.reactions
+                        if reaction.emoji == fallback_emoji
+                    ),
+                    None,
+                )
+            if not existing_matching_emoji:
+                existing_matching_emoji = next(
+                    (
+                        emoji
+                        for reaction in bridged_message.reactions
+                        if (
+                            (emoji := reaction.emoji)
+                            and (
+                                (
+                                    not (is_str := isinstance(emoji, str))
+                                    and (
+                                        emoji.name in equivalent_emoji_ids
+                                        or str(emoji.id) in equivalent_emoji_ids
+                                    )
                                 )
+                                or (is_str and emoji in equivalent_emoji_ids)
                             )
-                            or (is_str and emoji in equivalent_emoji_ids)
                         )
-                    )
-                ),
-                None,
-            )
+                    ),
+                    None,
+                )
+
             if existing_matching_emoji:
                 bridged_emoji = existing_matching_emoji
             elif fallback_emoji:
@@ -1109,18 +1117,19 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
 async def copy_emoji_into_server(
     *,
     missing_emoji: discord.PartialEmoji | None = None,
+    missing_emoji_id: str | int | None = None,
     missing_emoji_name: str | None = None,
-    missing_emoji_id: str | None = None,
 ) -> discord.Emoji | None:
     """Try to create an emoji in the emoji server and, if successful, return it.
 
     #### Args:
         - `missing_emoji`: The emoji we are trying to copy into our emoji server. Defaults to None, in which case `missing_emoji_name` and `missing_emoji_id` are used instead.
-        - `missing_emoji_name`: The name of a missing emoji, optionally preceded by an `"a:"` in case it's animated. Defaults to None, in which case `missing_emoji` is used instead.
-        - `missing_emoji_id`: The stringified ID of a missing emoji. Defaults to None, in which case `missing_emoji` is used instead.
+        - `missing_emoji_id`: The ID of the missing emoji. Defaults to None, in which case `missing_emoji` is used instead.
+        - `missing_emoji_name`: The name of a missing emoji, optionally preceded by an `"a:"` in case it's animated. Defaults to None, but must be included if `missing_emoji_id` is.
 
     #### Raises:
-        - `ValueError`: Invalid number of arguments passed to function.
+        - `ArgumentError`: The number of arguments passed is incorrect.
+        - `ValueError`: `missing_emoji` argument was passed and had type `PartialEmoji` but it was not a custom emoji, or `missing_emoji_id` argument was passed and had type `str` but it was not a valid numerical ID.
         - `Forbidden`: Emoji server permissions not set correctly.
         - `HTTPResponseError`: HTTP request to fetch emoji image returned a status other than 200.
         - `InvalidURL`: URL generated from emoji ID was not valid.
@@ -1129,36 +1138,18 @@ async def copy_emoji_into_server(
     """
     if not globals.emoji_server:
         return None
+    emoji_server_id = globals.emoji_server.id
 
-    if missing_emoji and (missing_emoji_name or missing_emoji_id):
-        raise ValueError(
-            "Either missing_emoji or missing_emoji_name and missing_emoji_id must be passed as arguments, not both."
+    missing_emoji_id, missing_emoji_name, missing_emoji_animated, missing_emoji_url = (
+        globals.get_emoji_information(
+            missing_emoji, missing_emoji_id, missing_emoji_name
         )
-
-    if not missing_emoji and (not missing_emoji_name or not missing_emoji_id):
-        raise ValueError(
-            "At least one of missing_emoji or missing_emoji_name and missing_emoji_id must be passed as arguments."
-        )
-
-    if missing_emoji:
-        missing_emoji_id = str(missing_emoji.id)
-        missing_emoji_name = missing_emoji.name
-        missing_emoji_animated = missing_emoji.animated
-    else:
-        assert missing_emoji_name and missing_emoji_id
-        missing_emoji_animated = missing_emoji_name.startswith("a:")
-        if missing_emoji_animated:
-            missing_emoji_name = missing_emoji_name[2:]
-
-    if missing_emoji_animated:
-        ext = "gif"
-    else:
-        ext = "png"
-    image = await globals.get_image_from_URL(
-        f"https://cdn.discordapp.com/emojis/{missing_emoji_id}.{ext}?v=1"
     )
 
-    delete_existing_emoji_query = None
+    image = await globals.get_image_from_URL(missing_emoji_url)
+    image_hash = globals.hash_image(image)
+
+    emoji_to_delete_id = None
     try:
         emoji = await globals.emoji_server.create_custom_emoji(
             name=missing_emoji_name, image=image, reason="Bridging reaction."
@@ -1167,20 +1158,13 @@ async def copy_emoji_into_server(
         print("Emoji server permissions not set correctly.")
         raise e
     except discord.HTTPException as e:
-        if len(globals.emoji_server.emojis) == 0:
+        if len(globals.emoji_server.emojis) < 50:
             # Something weird happened, the error was not due to a full server
             raise e
 
         # Try to delete an emoji from the server and then add this again.
         emoji_to_delete = random.choice(globals.emoji_server.emojis)
-        globals.emoji_mappings = {
-            external_id: internal_id
-            for external_id, internal_id in globals.emoji_mappings.items()
-            if internal_id != emoji_to_delete.id
-        }
-        delete_existing_emoji_query = SQLDelete(DBEmojiMap).where(
-            DBEmojiMap.internal_emoji == str(emoji_to_delete.id)
-        )
+        emoji_to_delete_id = emoji_to_delete.id
         await emoji_to_delete.delete()
 
         try:
@@ -1192,25 +1176,44 @@ async def copy_emoji_into_server(
             raise e
 
     # Copied the emoji, going to update my table
+    session = None
     try:
         with SQLSession(engine) as session:
-            if delete_existing_emoji_query is not None:
-                await sql_retry(lambda: session.execute(delete_existing_emoji_query))
+            if emoji_to_delete_id is not None:
+                await emoji_hash_map.map.delete_emoji(emoji_to_delete_id, session)
+
+            await emoji_hash_map.map.add_emoji(
+                emoji=emoji,
+                emoji_server_id=emoji_server_id,
+                image_hash=image_hash,
+                is_internal=True,
+                session=session,
+            )
+
             if missing_emoji:
                 await commands.map_emoji_helper(
-                    external_emoji=missing_emoji, internal_emoji=emoji, session=session
+                    external_emoji=missing_emoji,
+                    internal_emoji=emoji,
+                    image_hash=image_hash,
+                    session=session,
                 )
             else:
                 await commands.map_emoji_helper(
-                    external_emoji=int(missing_emoji_id),
+                    external_emoji_id=missing_emoji_id,
                     external_emoji_name=missing_emoji_name,
                     internal_emoji=emoji,
+                    image_hash=image_hash,
                     session=session,
                 )
+
             session.commit()
     except SQLError as e:
         warn("Couldn't add emoji mapping to table.")
         print(e)
+
+        if session:
+            session.rollback()
+            session.close()
 
     return emoji
 
@@ -1318,7 +1321,9 @@ async def unreact(
         removed_emoji_id = (
             str(emoji_to_remove.id) if emoji_to_remove.id else emoji_to_remove.name
         )
-        equivalent_emoji_ids = get_equivalent_emoji_ids(emoji_to_remove)
+        equivalent_emoji_ids = emoji_hash_map.map.get_matches(
+            emoji_to_remove, return_str=True
+        )
 
     try:
         with SQLSession(engine) as session:
@@ -1336,7 +1341,10 @@ async def unreact(
                     map.target_channel,
                     map.target_emoji_id,
                     map.target_emoji_name,
-                    equivalent_emoji_ids or get_equivalent_emoji_ids(map.source_emoji),
+                    equivalent_emoji_ids
+                    or emoji_hash_map.map.get_matches(
+                        map.source_emoji, return_str=True
+                    ),
                 )
                 for map in bridged_reactions
             }
@@ -1368,7 +1376,10 @@ async def unreact(
                     map.target_channel,
                     map.target_emoji_id,
                     map.target_emoji_name,
-                    equivalent_emoji_ids or get_equivalent_emoji_ids(map.source_emoji),
+                    equivalent_emoji_ids
+                    or emoji_hash_map.map.get_matches(
+                        map.source_emoji, return_str=True
+                    ),
                 )
                 for map in remaining_reactions
             }
@@ -1448,54 +1459,6 @@ async def unreact(
 
         warn("Ran into an SQL error while trying to remove a reaction:\n" + str(e))
         return
-
-
-def get_equivalent_emoji_ids(
-    emoji: discord.PartialEmoji | int | str,
-) -> frozenset[str]:
-    """Return a set with the IDs of all emoji that match the argument (due to being mapped to it in the emoji server).
-
-    #### Args:
-        - `emoji`: The emoji to find equivalencies for.
-    """
-    validate_types({"emoji": (emoji, (discord.PartialEmoji, int, str))})
-
-    if isinstance(emoji, discord.PartialEmoji) and not emoji.is_custom_emoji():
-        return frozenset({emoji.name})
-
-    if not isinstance(emoji, discord.PartialEmoji):
-        # This should be an emoji ID
-        try:
-            emoji_id = int(emoji)
-        except ValueError:
-            # For some reason it's not, I'll just return it stringified then
-            # This can only happen if emoji is a string
-            return frozenset({cast(str, emoji)})
-    else:
-        # is_custom_emoji() guarantees that emoji.id is not None
-        emoji_id = cast(int, emoji.id)
-
-    # I'm going to go through every emoji in globals.emoji_mappings that can be reached from this emoji_id
-    emoji_to_check: set[int] = {emoji_id}
-    equivalent_emoji_ids: set[str] = set()
-    while len(emoji_to_check) > 0:
-        checking_emoji = emoji_to_check.pop()
-        if str(checking_emoji) in equivalent_emoji_ids:
-            continue
-
-        equivalent_emoji_ids.add(str(checking_emoji))
-
-        emoji_to_check = emoji_to_check.union(
-            {
-                external_emoji
-                for external_emoji, internal_emoji in globals.emoji_mappings.items()
-                if internal_emoji == checking_emoji
-            }
-        )
-        if globals.emoji_mappings.get(checking_emoji):
-            emoji_to_check.add(globals.emoji_mappings[checking_emoji])
-
-    return frozenset(equivalent_emoji_ids)
 
 
 @globals.client.event
