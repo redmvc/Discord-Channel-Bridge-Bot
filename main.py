@@ -1509,4 +1509,16 @@ async def on_thread_create(thread: discord.Thread):
         await bridge_message_helper(last_message)
 
 
+@globals.client.event
+async def on_guild_join(server: discord.Guild):
+    print(f"Just joined server '{server.name}'. Hashing emoji...")
+    await emoji_hash_map.map.load_server_emoji(server.id)
+    print("Emoji hashed!")
+
+
+@globals.client.event
+async def on_guild_remove(server: discord.Guild):
+    print(f"Just left server '{server.name}'.")
+
+
 globals.client.run(cast(str, globals.settings["app_token"]), reconnect=True)
