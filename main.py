@@ -230,21 +230,25 @@ async def on_ready():
 
 
 @globals.client.event
-async def on_raw_typing(payload: discord.RawTypingEvent):
+async def on_typing(
+    channel: discord.abc.Messageable, user: discord.User | discord.Member, _
+):
     """Make the bot start typing across bridges when a user on the source end of a bridge does so.
 
-    This function is called when someone begins typing a message. Unlike on_typing() this is called regardless of the channel and user being in the internal cache. Requires Intents.typing to be enabled.
-
     #### Args:
-        - `payload`: The raw event payload data.
+        - `channel`: The a user is typing in.
+        - `user`: The user that is typing in the channel.
     """
-    if not globals.is_ready:
+    if not (
+        globals.is_ready
+        and globals.rate_limiter.has_capacity()
+        and isinstance(channel, (discord.TextChannel, discord.Thread))
+        and globals.client.user
+        and globals.client.user.id != user.id
+    ):
         return
 
-    if not globals.client.user or globals.client.user.id == payload.user_id:
-        return
-
-    outbound_bridges = bridges.get_outbound_bridges(payload.channel_id)
+    outbound_bridges = bridges.get_outbound_bridges(channel.id)
     if not outbound_bridges:
         return
 
@@ -252,11 +256,12 @@ async def on_raw_typing(payload: discord.RawTypingEvent):
         target_channel = await bridge.target_channel
         await target_channel.typing()
 
-    channels_typing: list[Coroutine] = []
-    for _, bridge in outbound_bridges.items():
-        channels_typing.append(type_through_bridge(bridge))
+    async with globals.rate_limiter:
+        channels_typing: list[Coroutine] = []
+        for _, bridge in outbound_bridges.items():
+            channels_typing.append(type_through_bridge(bridge))
 
-    await asyncio.gather(*channels_typing)
+        await asyncio.gather(*channels_typing)
 
 
 @globals.client.event
@@ -1502,6 +1507,18 @@ async def on_thread_create(thread: discord.Thread):
         last_message = cast(discord.Thread, refreshed_thread).last_message
     if last_message and last_message.content != "":
         await bridge_message_helper(last_message)
+
+
+@globals.client.event
+async def on_guild_join(server: discord.Guild):
+    print(f"Just joined server '{server.name}'. Hashing emoji...")
+    await emoji_hash_map.map.load_server_emoji(server.id)
+    print("Emoji hashed!")
+
+
+@globals.client.event
+async def on_guild_remove(server: discord.Guild):
+    print(f"Just left server '{server.name}'.")
 
 
 globals.client.run(cast(str, globals.settings["app_token"]), reconnect=True)
