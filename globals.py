@@ -7,6 +7,7 @@ from hashlib import md5
 from typing import Any, Callable, Literal, SupportsInt, TypedDict, TypeVar, cast
 
 import aiohttp
+from aiolimiter import AsyncLimiter
 import discord
 from typing_extensions import NotRequired
 
@@ -106,6 +107,9 @@ emoji_server: discord.Guild | None = None
 
 # Dictionary listing all apps whitelisted per channel
 per_channel_whitelist: dict[int, set[int]] = {}
+
+# Helper to prevent us from being rate limited
+rate_limiter = AsyncLimiter(1, 10)
 
 # Type wildcard
 _T = TypeVar("_T", bound=Any)
