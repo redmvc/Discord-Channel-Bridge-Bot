@@ -372,24 +372,22 @@ class EmojiHashMap:
             - `image_hash`: The hash of the emoji's image.
             - `accessible`: Whether the emoji is accessible by the bot. Defaults to None, in which case it will be considered False.
         """
-        insert_dict = {
-            "id": str(emoji_id),
-            "name": emoji_name,
-            "animated": not not emoji_animated,
-            "image_hash": image_hash,
-            "accessible": not not accessible,
-        }
-        update_dict = {
-            "name": emoji_name,
-            "image_hash": image_hash,
-            "accessible": not not accessible,
-        }
         if emoji_server_id:
-            emoji_server_id = str(emoji_server_id)
-            insert_dict["server_id"] = emoji_server_id
-            update_dict["server_id"] = emoji_server_id
+            upsert_server_id = {"server_id": str(emoji_server_id)}
+        else:
+            upsert_server_id = {}
 
-        return await sql_upsert(DBEmoji, insert_dict, update_dict)
+        return await sql_upsert(
+            table=DBEmoji,
+            indices={"id"},
+            ignored_cols={"animated"},
+            id=str(emoji_id),
+            name=emoji_name,
+            animated=not not emoji_animated,
+            image_hash=image_hash,
+            accessible=not not accessible,
+            **upsert_server_id,
+        )
 
     async def delete_emoji(
         self, emoji_id: int, session: SQLSession | Literal[True] | None = None

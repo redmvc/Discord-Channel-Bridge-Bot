@@ -1153,13 +1153,11 @@ async def create_bridge_and_db(
 
         bridge = await create_bridge(source, target, webhook)
         insert_bridge_row = await sql_upsert(
-            DBBridge,
-            {
-                "source": str(globals.get_id_from_channel(source)),
-                "target": str(globals.get_id_from_channel(target)),
-                "webhook": str(bridge.webhook.id),
-            },
-            {"webhook": str(bridge.webhook.id)},
+            table=DBBridge,
+            indices={"source", "target"},
+            source=str(globals.get_id_from_channel(source)),
+            target=str(globals.get_id_from_channel(target)),
+            webhook=str(bridge.webhook.id),
         )
 
         def execute_query():
