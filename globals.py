@@ -358,8 +358,8 @@ async def run_retries(
 
     #### Args:
         - `fun`: The function to run.
-        - `num_retries`: The number of times to try the function again.
-        - `time_to_wait`: How long to wait between retries.
+        - `num_retries`: The number of times to try the function again. If set to 0 or less, will be set to 1.
+        - `time_to_wait`: Time in seconds to wait between retries; only used if `num_retries` is greater than 1. If set to 0 or less, will set `num_retries` to 1. Defaults to 5.
         - `exceptions_to_catch`: An exception type or a list of exception types to catch. Defaults to None, in which case all types will be caught.
 
     #### Returns:
@@ -379,6 +379,11 @@ async def run_retries(
         time_to_wait=(time_to_wait, (float, int)),
         **validate_exceptions_to_catch,
     )
+
+    if num_retries < 1:
+        num_retries = 1
+    elif num_retries > 1 and time_to_wait <= 0:
+        num_retries = 1
 
     for retry in range(num_retries):
         try:
