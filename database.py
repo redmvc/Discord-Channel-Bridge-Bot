@@ -185,7 +185,6 @@ async def sql_upsert(
 
     #### Raises:
         - `ValueError`: `insert_values` does not have any keys not present in `update_values`.
-        - `UnknownDBDialectError`: Invalid database dialect registered in `settings.json` file.
         - `SQLError`: SQL statement inferred from arguments was invalid or database connection failed.
     """
     validate_types(
