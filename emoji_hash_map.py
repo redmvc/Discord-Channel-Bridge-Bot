@@ -28,7 +28,7 @@ class EmojiHashMap:
             - `session`: A connection to the database. Defaults to None.
         """
         if session:
-            validate_types({"session": (session, SQLSession)})
+            validate_types(session=(session, SQLSession))
 
         self._emoji_to_hash: dict[int, str] = {}
         self._hash_to_emoji: dict[str, set[int]] = {}
@@ -121,19 +121,20 @@ class EmojiHashMap:
         #### Returns:
             - `tuple[int, str]`: A tuple with the emoji ID and the hash of its image.
         """
-        types_to_validate: dict[str, tuple] = {
-            "emoji_id": (emoji_id, (int, str)),
-            "image_hash": (image_hash, str),
-        }
+        optional_variables_to_validate: dict[str, tuple] = {}
         if is_internal:
-            types_to_validate["is_internal"] = (is_internal, bool)
+            optional_variables_to_validate["is_internal"] = (is_internal, bool)
             accessible = True
         else:
             if accessible:
-                types_to_validate["accessible"] = (accessible, bool)
+                optional_variables_to_validate["accessible"] = (accessible, bool)
             if server_id:
-                types_to_validate["server_id"] = (server_id, (int, str))
-        validate_types(types_to_validate)
+                optional_variables_to_validate["server_id"] = (server_id, (int, str))
+        validate_types(
+            emoji_id=(emoji_id, (int, str)),
+            image_hash=(image_hash, str),
+            **optional_variables_to_validate,
+        )
 
         if not is_internal and server_id:
             server_id = int(server_id)
@@ -224,7 +225,8 @@ class EmojiHashMap:
             types_to_validate["accessible"] = (accessible, bool)
         if session:
             types_to_validate["session"] = (session, SQLSession)
-        validate_types(types_to_validate)
+        if types_to_validate:
+            validate_types(**types_to_validate)
 
         if not image_hash:
             if not image:
@@ -298,7 +300,7 @@ class EmojiHashMap:
             - `tuple[int, str]`: A tuple with the emoji ID and the hash of its image.
         """
         if session:
-            validate_types({"session": (session, (SQLSession, bool))})
+            validate_types(session=(session, (SQLSession, bool)))
 
         if not emoji_id or not image_hash:
             emoji_id, emoji_name, _, emoji_url = globals.get_emoji_information(
@@ -397,10 +399,11 @@ class EmojiHashMap:
             - `emoji_id`: The ID of the emoji to delete.
             - `session`: A connection to the database, or True in case a new one should be created.
         """
-        types_to_validate: dict[str, tuple] = {"emoji_id": (emoji_id, int)}
         if session:
-            types_to_validate["session"] = (session, (SQLSession, bool))
-        validate_types(types_to_validate)
+            validate_session = {"session": (session, (SQLSession, bool))}
+        else:
+            validate_session = {}
+        validate_types(emoji_id=(emoji_id, int), **validate_session)
 
         if not self._emoji_to_hash.get(emoji_id):
             return
@@ -559,7 +562,7 @@ class EmojiHashMap:
             - `only_accessible`: If set to True will return only emoji that are accessible by the bot. Defaults to False.
             - `return_str`: If set to True will return a frozenset of stringified IDs. Defaults to False.
         """
-        validate_types({"emoji": (emoji, (discord.PartialEmoji, int, str))})
+        validate_types(emoji=(emoji, (discord.PartialEmoji, int, str)))
 
         if isinstance(emoji, discord.PartialEmoji):
             if not emoji.id:
@@ -593,7 +596,7 @@ class EmojiHashMap:
         #### Args:
             - `emoji_id`: The ID of the emoji to check.
         """
-        validate_types({"emoji_id": (emoji_id, int)})
+        validate_types(emoji_id=(emoji_id, int))
 
         if not self._emoji_to_hash.get(emoji_id):
             return None
@@ -613,7 +616,7 @@ class EmojiHashMap:
             - `emoji_id`: The ID of the emoji to get.
             - `skip_self`: Whether the function should ignore the attempt to get an emoji associated with the ID itself. Defaults to False.
         """
-        validate_types({"emoji_id": (emoji_id, int)})
+        validate_types(emoji_id=(emoji_id, int))
 
         if (
             not skip_self
@@ -697,7 +700,7 @@ class EmojiHashMap:
             - `ServerTimeoutError`: Connection to server timed out.
         """
         if session:
-            validate_types({"session": (session, SQLSession)})
+            validate_types(session=(session, SQLSession))
 
         emoji_id, emoji_name, _, _ = globals.get_emoji_information(
             emoji, emoji_id, emoji_name

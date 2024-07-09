@@ -335,7 +335,7 @@ async def bridge_message_helper(message: discord.Message):
         - `Forbidden`: The authorization token for one of the webhooks is incorrect.
         - `ValueError`: The length of embeds was invalid, there was no token associated with one of the webhooks or ephemeral was passed with the improper webhook type or there was no state attached with one of the webhooks when giving it a view.
     """
-    validate_types({"message": (message, discord.Message)})
+    validate_types(message=(message, discord.Message))
 
     outbound_bridges = bridges.get_outbound_bridges(message.channel.id)
     if not outbound_bridges:

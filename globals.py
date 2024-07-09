@@ -127,21 +127,19 @@ async def get_channel_from_id(
         - If the argument is a channel, returns it unchanged; otherwise, returns a channel with the ID passed.
     """
     validate_types(
-        {
-            "channel_or_id": (
-                channel_or_id,
-                (
-                    int,
-                    discord.TextChannel,
-                    discord.Thread,
-                    discord.VoiceChannel,
-                    discord.StageChannel,
-                    discord.ForumChannel,
-                    discord.CategoryChannel,
-                    discord.abc.PrivateChannel,
-                ),
-            )
-        }
+        channel_or_id=(
+            channel_or_id,
+            (
+                int,
+                discord.TextChannel,
+                discord.Thread,
+                discord.VoiceChannel,
+                discord.StageChannel,
+                discord.ForumChannel,
+                discord.CategoryChannel,
+                discord.abc.PrivateChannel,
+            ),
+        )
     )
 
     if isinstance(channel_or_id, int):
@@ -169,21 +167,19 @@ def get_id_from_channel(
         - `int`: The ID of the channel passed as argument.
     """
     validate_types(
-        {
-            "channel_or_id": (
-                channel_or_id,
-                (
-                    int,
-                    discord.TextChannel,
-                    discord.Thread,
-                    discord.VoiceChannel,
-                    discord.StageChannel,
-                    discord.ForumChannel,
-                    discord.CategoryChannel,
-                    discord.abc.PrivateChannel,
-                ),
-            )
-        }
+        channel_or_id=(
+            channel_or_id,
+            (
+                int,
+                discord.TextChannel,
+                discord.Thread,
+                discord.VoiceChannel,
+                discord.StageChannel,
+                discord.ForumChannel,
+                discord.CategoryChannel,
+                discord.abc.PrivateChannel,
+            ),
+        )
     )
 
     if isinstance(channel_or_id, int):
@@ -202,20 +198,18 @@ async def get_channel_member(
         - `member_id`: Their ID.
     """
     validate_types(
-        {
-            "channel": (
-                channel,
-                (
-                    discord.VoiceChannel,
-                    discord.StageChannel,
-                    discord.ForumChannel,
-                    discord.TextChannel,
-                    discord.CategoryChannel,
-                    discord.Thread,
-                ),
+        channel=(
+            channel,
+            (
+                discord.VoiceChannel,
+                discord.StageChannel,
+                discord.ForumChannel,
+                discord.TextChannel,
+                discord.CategoryChannel,
+                discord.Thread,
             ),
-            "member_id": (member_id, int),
-        }
+        ),
+        member_id=(member_id, int),
     )
 
     channel_member = channel.guild.get_member(member_id)
@@ -292,7 +286,7 @@ def get_emoji_information(
         raise ArgumentError(
             "At least one of emoji or emoji_id must be passed as argument."
         )
-    validate_types(types_to_validate)
+    validate_types(**types_to_validate)
 
     if emoji:
         if not emoji.id:
@@ -371,16 +365,20 @@ async def run_retries(
     #### Returns:
         - `_T`: The result of calling `fun()`.
     """
-    types_to_validate: dict[str, tuple] = {  # TODO validate callable?
-        "num_retries": (num_retries, int),
-        "time_to_wait": (time_to_wait, (float, int)),
-    }
+    validate_exceptions_to_catch: dict[str, tuple] = {}
     if exceptions_to_catch:
         if isinstance(exceptions_to_catch, type):
             exceptions_to_catch = (exceptions_to_catch,)
         else:
-            types_to_validate["exceptions_to_catch"] = (exceptions_to_catch, tuple)
-    validate_types(types_to_validate)
+            validate_exceptions_to_catch["exceptions_to_catch"] = (
+                exceptions_to_catch,
+                tuple,
+            )
+    validate_types(
+        num_retries=(num_retries, int),
+        time_to_wait=(time_to_wait, (float, int)),
+        **validate_exceptions_to_catch,
+    )
 
     for retry in range(num_retries):
         try:

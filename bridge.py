@@ -83,10 +83,8 @@ class Bridge:
             raise AttributeError("Bridge is not empty.")
 
         validate_types(
-            {
-                "source": (source, (discord.TextChannel, discord.Thread, int)),
-                "target": (target, (discord.TextChannel, discord.Thread, int)),
-            }
+            source=(source, (discord.TextChannel, discord.Thread, int)),
+            target=(target, (discord.TextChannel, discord.Thread, int)),
         )
         validate_channels(
             {
@@ -113,7 +111,7 @@ class Bridge:
         target_channel = await self.target_channel
 
         if webhook:
-            validate_types({"webhook": (webhook, discord.Webhook)})
+            validate_types(webhook=(webhook, discord.Webhook))
             validate_webhook(webhook, target_channel)
 
         # If I already have a webhook, I'll destroy it and replace it with a new one
@@ -160,7 +158,7 @@ class Bridge:
             - `Forbidden`: You do not have permissions to delete this webhook.
             - `ValueError`: This webhook does not have a token associated with it.
         """
-        validate_types({"reason": (reason, str)})
+        validate_types(reason=(reason, str))
 
         if self._webhook:
             try:
@@ -266,10 +264,8 @@ class Bridges:
             - `ValueError`: The webhook does not have a token associated with it.
         """
         validate_types(
-            {
-                "source": (source, (discord.TextChannel, discord.Thread, int)),
-                "target": (target, (discord.TextChannel, discord.Thread, int)),
-            }
+            source=(source, (discord.TextChannel, discord.Thread, int)),
+            target=(target, (discord.TextChannel, discord.Thread, int)),
         )
 
         source_id = globals.get_id_from_channel(source)
@@ -302,10 +298,8 @@ class Bridges:
             - `target`: Target channel or ID of same.
         """
         validate_types(
-            {
-                "source": (source, (discord.TextChannel, discord.Thread, int)),
-                "target": (target, (discord.TextChannel, discord.Thread, int)),
-            }
+            source=(source, (discord.TextChannel, discord.Thread, int)),
+            target=(target, (discord.TextChannel, discord.Thread, int)),
         )
 
         source_id = globals.get_id_from_channel(source)
@@ -330,10 +324,8 @@ class Bridges:
             - `target`: Target channel or ID of same.
         """
         validate_types(
-            {
-                "source": (source, (discord.TextChannel, discord.Thread, int)),
-                "target": (target, (discord.TextChannel, discord.Thread, int)),
-            }
+            source=(source, (discord.TextChannel, discord.Thread, int)),
+            target=(target, (discord.TextChannel, discord.Thread, int)),
         )
 
         return (
@@ -349,7 +341,7 @@ class Bridges:
         #### Args:
             - `source`: Source channel or ID of same.
         """
-        validate_types({"source": (source, (discord.TextChannel, discord.Thread, int))})
+        validate_types(source=(source, (discord.TextChannel, discord.Thread, int)))
 
         return self._outbound_bridges.get(globals.get_id_from_channel(source))
 
@@ -361,7 +353,7 @@ class Bridges:
         #### Args:
             - `target`: Target channel or ID of same.
         """
-        validate_types({"target": (target, (discord.TextChannel, discord.Thread, int))})
+        validate_types(target=(target, (discord.TextChannel, discord.Thread, int)))
 
         return self._inbound_bridges.get(globals.get_id_from_channel(target))
 
@@ -406,17 +398,19 @@ class Bridges:
         #### Raises:
             - `ValueError`: The `direction` variable has a value other than `"outbound"` and `"inbound"`.
         """
-        types_to_validate: dict[str, tuple] = {
-            "starting_channel": (
+        if include_webhooks is not None:
+            validate_include_webhooks = {"include_webhooks": (include_webhooks, bool)}
+        else:
+            validate_include_webhooks = {}
+        validate_types(
+            starting_channel=(
                 starting_channel,
                 (discord.TextChannel, discord.Thread, int),
             ),
-            "direction": (direction, str),
-            "include_starting": (include_starting, bool),
-        }
-        if include_webhooks is not None:
-            types_to_validate["include_webhooks"] = (include_webhooks, bool)
-        validate_types(types_to_validate)
+            direction=(direction, str),
+            include_starting=(include_starting, bool),
+            **validate_include_webhooks,
+        )
 
         if direction not in {"outbound", "inbound"}:
             raise ValueError(

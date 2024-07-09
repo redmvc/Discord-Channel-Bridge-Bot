@@ -29,16 +29,14 @@ def natural_language_concat(items: Sequence[str]) -> str:
 
 
 def validate_types(
-    arguments: dict[
-        str, tuple[Any, type | Type[int | str] | tuple[type | Type[int | str], ...]]
-    ]
+    **kwargs: tuple[Any, type | Type[int | str] | tuple[type | Type[int | str], ...]]
 ):
     """Raise `TypeError` if the arguments passed are not the right type.
 
     #### Args:
-        - `arguments`: A dictionary whose keys are argument names and whose values are tuple with the argument value and its intended type.
+        - `kwargs`: The arguments to validate and tuples with their values and types.
     """
-    for arg_name, (arg_value, valid_type) in arguments.items():
+    for arg_name, (arg_value, valid_type) in kwargs.items():
         if not isinstance(arg_value, valid_type):
             if isinstance(valid_type, type):
                 raise TypeError(

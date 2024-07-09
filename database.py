@@ -191,13 +191,13 @@ async def sql_upsert(
         - `ValueError`: `indices` is not a proper subset of `kwargs.keys()`.
         - `SQLError`: SQL statement inferred from arguments was invalid or database connection failed. This error can only be raised if the database dialect is not MySQL, PostgreSQL, nor SQLite.
     """
-    types_to_validate: dict[str, tuple] = {
-        "indices": (indices, Iterable),
-        "kwargs": (kwargs, dict),
-    }
     if ignored_cols:
-        types_to_validate["ignored_cols"] = (ignored_cols, Iterable)
-    validate_types(types_to_validate)
+        validate_ignored_cols = {"ignored_cols": (ignored_cols, Iterable)}
+    else:
+        validate_ignored_cols = {}
+    validate_types(
+        indices=(indices, Iterable), kwargs=(kwargs, dict), **validate_ignored_cols
+    )
 
     indices = set(indices)
     insert_values = kwargs
