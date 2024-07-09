@@ -82,15 +82,17 @@ class Bridge:
         if self._source_id and self._target_id:
             raise AttributeError("Bridge is not empty.")
 
-        validate_types(
-            source=(source, (discord.TextChannel, discord.Thread, int)),
-            target=(target, (discord.TextChannel, discord.Thread, int)),
-        )
         validate_channels(
-            {
-                "source": await globals.get_channel_from_id(source),
-                "target": await globals.get_channel_from_id(target),
-            }
+            source=(
+                await globals.get_channel_from_id(source)
+                if isinstance(source, int)
+                else source
+            ),
+            target=(
+                await globals.get_channel_from_id(target)
+                if isinstance(target, int)
+                else target
+            ),
         )
 
         self._source_id = globals.get_id_from_channel(source)

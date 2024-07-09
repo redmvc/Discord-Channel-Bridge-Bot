@@ -51,17 +51,16 @@ def validate_types(
 
 
 def validate_channels(
-    channels: dict[
-        str,
-        discord.guild.GuildChannel | discord.Thread | discord.abc.PrivateChannel | None,
-    ]
+    **kwargs: (
+        discord.guild.GuildChannel | discord.Thread | discord.abc.PrivateChannel | None
+    ),
 ):
     """Raise `ChannelTypeError` if the channels passed as arguments are not the right channel types.
 
     #### Args:
-        - `channels`: A dictionary whose keys are channel names and whose values are the channels.
+        - `kwargs`: The channels to validate.
     """
-    for channel_name, channel in channels.items():
+    for channel_name, channel in kwargs.items():
         if (
             not isinstance(channel, discord.Thread)
             or not isinstance(channel.parent, discord.TextChannel)
