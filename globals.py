@@ -236,7 +236,7 @@ async def get_image_from_URL(url: str) -> bytes:
     """
     image_bytes: io.BytesIO | None = None
     async with aiohttp.ClientSession(
-        headers={"User-Agent": "Discord Channel Bridge Bot/0.1"}
+        headers={"User-Agent": "Discord Channel Bridge Bot/1.0"}
     ) as session:
         async with session.get(url) as response:
             if response.status != 200:
