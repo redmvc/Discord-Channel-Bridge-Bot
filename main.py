@@ -51,138 +51,151 @@ async def on_ready():
     if globals.is_ready:
         return
 
-    with SQLSession(engine) as session:
-        # I am going to try to identify all existing bridges
-        invalid_channels: set[str] = set()
-        invalid_webhooks: set[str] = set()
-        create_bridges = []
+    session = None
+    try:
+        with SQLSession(engine) as session:
+            # I am going to try to identify all existing bridges
+            invalid_channels: set[str] = set()
+            invalid_webhooks: set[str] = set()
+            create_bridges = []
 
-        select_all_bridges: SQLSelect = SQLSelect(DBBridge)
-        bridge_query_result: ScalarResult[DBBridge] = session.scalars(
-            select_all_bridges
-        )
-        for bridge in bridge_query_result:
-            source_id_str = bridge.source
-            target_id_str = bridge.target
-            webhook_id_str = bridge.webhook
-
-            if webhook_id_str in invalid_webhooks:
-                continue
-
-            source_id = int(source_id_str)
-            source_channel = await globals.get_channel_from_id(int(source_id))
-            if not source_channel:
-                # If I don't have access to the source channel, delete bridges from and to it
-                invalid_channels.add(source_id_str)
-
-            target_id = int(target_id_str)
-            target_channel = await globals.get_channel_from_id(int(target_id))
-            if not target_channel:
-                # If I don't have access to the target channel, delete bridges from and to it
-                invalid_channels.add(target_id_str)
-
-            try:
-                webhook = await globals.client.fetch_webhook(int(webhook_id_str))
-
-                if not source_channel:
-                    # I have access to the target webhook but not to the source channel anymore so I'll delete the webhook
-                    await webhook.delete(reason="Source channel no longer available.")
-                    raise Exception
-                elif target_channel:
-                    # I have access to both the source and target channels and to the webhook
-                    create_bridges.append(
-                        commands.create_bridge(source_id, target_id, webhook)
-                    )
-            except Exception:
-                invalid_webhooks.add(webhook_id_str)
-
-                if source_channel and target_channel:
-                    # There *should* be a webhook there and I have access to the channels
-                    create_bridges.append(
-                        commands.create_bridge_and_db(source_id, target_id, session)
-                    )
-        await asyncio.gather(*create_bridges)
-
-        if len(invalid_channels) > 0:
-            delete_invalid_channels = SQLDelete(DBBridge).where(
-                sql_or(
-                    DBBridge.source.in_(invalid_channels),
-                    DBBridge.target.in_(invalid_channels),
-                )
+            select_all_bridges: SQLSelect = SQLSelect(DBBridge)
+            bridge_query_result: ScalarResult[DBBridge] = session.scalars(
+                select_all_bridges
             )
-            session.execute(delete_invalid_channels)
+            for bridge in bridge_query_result:
+                source_id_str = bridge.source
+                target_id_str = bridge.target
+                webhook_id_str = bridge.webhook
 
-            delete_invalid_messages = SQLDelete(DBMessageMap).where(
-                sql_or(
-                    DBMessageMap.source_channel.in_(invalid_channels),
-                    DBMessageMap.target_channel.in_(invalid_channels),
-                )
-            )
-            session.execute(delete_invalid_messages)
-
-        if len(invalid_webhooks) > 0:
-            delete_invalid_webhooks = SQLDelete(DBBridge).where(
-                DBBridge.webhook.in_(invalid_webhooks)
-            )
-            session.execute(delete_invalid_webhooks)
-
-        # Try to identify hashed emoji
-        emoji_hash_map.map = emoji_hash_map.EmojiHashMap(session)
-
-        # Try to find all apps whitelisted per channel
-        select_whitelisted_apps: SQLSelect = SQLSelect(DBAppWhitelist)
-        whitelisted_apps_query_result: ScalarResult[DBAppWhitelist] = session.scalars(
-            select_whitelisted_apps
-        )
-        accessible_channels = set()
-        inaccessible_channels = set()
-        for whitelisted_app in whitelisted_apps_query_result:
-            channel_id = int(whitelisted_app.channel)
-            if channel_id in inaccessible_channels:
-                continue
-
-            if channel_id not in accessible_channels:
-                channel = globals.client.get_channel(channel_id)
-                if not channel:
-                    try:
-                        channel = await globals.client.fetch_channel(channel_id)
-                    except Exception:
-                        channel = None
-
-                if channel:
-                    accessible_channels.add(channel_id)
-                else:
-                    inaccessible_channels.add(channel_id)
+                if webhook_id_str in invalid_webhooks:
                     continue
 
-            if not globals.per_channel_whitelist.get(channel_id):
-                globals.per_channel_whitelist[channel_id] = set()
+                source_id = int(source_id_str)
+                source_channel = await globals.get_channel_from_id(int(source_id))
+                if not source_channel:
+                    # If I don't have access to the source channel, delete bridges from and to it
+                    invalid_channels.add(source_id_str)
 
-            globals.per_channel_whitelist[channel_id].add(
-                int(whitelisted_app.application)
+                target_id = int(target_id_str)
+                target_channel = await globals.get_channel_from_id(int(target_id))
+                if not target_channel:
+                    # If I don't have access to the target channel, delete bridges from and to it
+                    invalid_channels.add(target_id_str)
+
+                try:
+                    webhook = await globals.client.fetch_webhook(int(webhook_id_str))
+
+                    if not source_channel:
+                        # I have access to the target webhook but not to the source channel anymore so I'll delete the webhook
+                        await webhook.delete(
+                            reason="Source channel no longer available."
+                        )
+                        raise Exception
+                    elif target_channel:
+                        # I have access to both the source and target channels and to the webhook
+                        create_bridges.append(
+                            commands.create_bridge(source_id, target_id, webhook)
+                        )
+                except Exception:
+                    invalid_webhooks.add(webhook_id_str)
+
+                    if source_channel and target_channel:
+                        # There *should* be a webhook there and I have access to the channels
+                        create_bridges.append(
+                            commands.create_bridge_and_db(source_id, target_id, session)
+                        )
+            await asyncio.gather(*create_bridges)
+
+            if len(invalid_channels) > 0:
+                delete_invalid_channels = SQLDelete(DBBridge).where(
+                    sql_or(
+                        DBBridge.source.in_(invalid_channels),
+                        DBBridge.target.in_(invalid_channels),
+                    )
+                )
+                session.execute(delete_invalid_channels)
+
+                delete_invalid_messages = SQLDelete(DBMessageMap).where(
+                    sql_or(
+                        DBMessageMap.source_channel.in_(invalid_channels),
+                        DBMessageMap.target_channel.in_(invalid_channels),
+                    )
+                )
+                session.execute(delete_invalid_messages)
+
+            if len(invalid_webhooks) > 0:
+                delete_invalid_webhooks = SQLDelete(DBBridge).where(
+                    DBBridge.webhook.in_(invalid_webhooks)
+                )
+                session.execute(delete_invalid_webhooks)
+
+            # Try to identify hashed emoji
+            emoji_hash_map.map = emoji_hash_map.EmojiHashMap(session)
+
+            # Try to find all apps whitelisted per channel
+            select_whitelisted_apps: SQLSelect = SQLSelect(DBAppWhitelist)
+            whitelisted_apps_query_result: ScalarResult[DBAppWhitelist] = (
+                session.scalars(select_whitelisted_apps)
             )
+            accessible_channels = set()
+            inaccessible_channels = set()
+            for whitelisted_app in whitelisted_apps_query_result:
+                channel_id = int(whitelisted_app.channel)
+                if channel_id in inaccessible_channels:
+                    continue
 
-        if len(inaccessible_channels) > 0:
-            delete_inaccessible_channels = SQLDelete(DBAppWhitelist).where(
-                DBAppWhitelist.channel.in_(inaccessible_channels)
+                if channel_id not in accessible_channels:
+                    channel = globals.client.get_channel(channel_id)
+                    if not channel:
+                        try:
+                            channel = await globals.client.fetch_channel(channel_id)
+                        except Exception:
+                            channel = None
+
+                    if channel:
+                        accessible_channels.add(channel_id)
+                    else:
+                        inaccessible_channels.add(channel_id)
+                        continue
+
+                if not globals.per_channel_whitelist.get(channel_id):
+                    globals.per_channel_whitelist[channel_id] = set()
+
+                globals.per_channel_whitelist[channel_id].add(
+                    int(whitelisted_app.application)
+                )
+
+            if len(inaccessible_channels) > 0:
+                delete_inaccessible_channels = SQLDelete(DBAppWhitelist).where(
+                    DBAppWhitelist.channel.in_(inaccessible_channels)
+                )
+                session.execute(delete_inaccessible_channels)
+
+            session.commit()
+
+            # Identify all automatically-thread-bridging channels
+            select_auto_bridge_thread_channels: SQLSelect = SQLSelect(
+                DBAutoBridgeThreadChannels
             )
-            session.execute(delete_inaccessible_channels)
+            auto_thread_query_result: ScalarResult[DBAutoBridgeThreadChannels] = (
+                session.scalars(select_auto_bridge_thread_channels)
+            )
+            globals.auto_bridge_thread_channels = (
+                globals.auto_bridge_thread_channels.union(
+                    {
+                        int(auto_bridge_thread_channel.channel)
+                        for auto_bridge_thread_channel in auto_thread_query_result
+                    }
+                )
+            )
+    except SQLError as e:
+        if session:
+            session.rollback()
+            session.close()
 
-        session.commit()
-
-        # Identify all automatically-thread-bridging channels
-        select_auto_bridge_thread_channels: SQLSelect = SQLSelect(
-            DBAutoBridgeThreadChannels
-        )
-        auto_thread_query_result: ScalarResult[DBAutoBridgeThreadChannels] = (
-            session.scalars(select_auto_bridge_thread_channels)
-        )
-        globals.auto_bridge_thread_channels = globals.auto_bridge_thread_channels.union(
-            {
-                int(auto_bridge_thread_channel.channel)
-                for auto_bridge_thread_channel in auto_thread_query_result
-            }
-        )
+        await globals.client.close()
+        raise e
 
     # Finally I'll check whether I have a registered emoji server and save it if so
     emoji_server_id_str = globals.settings.get("emoji_server_id")
@@ -1330,6 +1343,7 @@ async def unreact(
             emoji_to_remove, return_str=True
         )
 
+    session = None
     try:
         with SQLSession(engine) as session:
             # First I find all of the messages that got this reaction bridged to them

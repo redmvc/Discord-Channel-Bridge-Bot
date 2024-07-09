@@ -29,17 +29,18 @@ class EmojiHashMap:
         """
         if session:
             validate_types({"session": (session, SQLSession)})
-            close_after = False
-        else:
-            session = SQLSession(engine)
-            close_after = True
 
         self._emoji_to_hash: dict[int, str] = {}
         self._hash_to_emoji: dict[str, set[int]] = {}
         self._hash_to_available_emoji: dict[str, set[int]] = {}
         self._hash_to_internal_emoji: dict[str, int] = {}
 
+        close_after = False
         try:
+            if not session:
+                session = SQLSession(engine)
+                close_after = True
+
             select_hashed_emoji: SQLSelect = SQLSelect(DBEmoji)
             hashed_emoji_query_result: ScalarResult[DBEmoji] = session.scalars(
                 select_hashed_emoji
@@ -86,7 +87,7 @@ class EmojiHashMap:
                     .values(accessible=sql_not(DBEmoji.accessible))
                 )
         except SQLError as e:
-            if close_after:
+            if close_after and session:
                 session.rollback()
                 session.close()
 
@@ -225,18 +226,17 @@ class EmojiHashMap:
             types_to_validate["session"] = (session, SQLSession)
         validate_types(types_to_validate)
 
-        if session:
-            close_after = False
-        else:
-            session = SQLSession(engine)
-            close_after = True
-
         if not image_hash:
             if not image:
                 image = await globals.get_image_from_URL(emoji_url)
             image_hash = globals.hash_image(image)
 
+        close_after = False
         try:
+            if not session:
+                session = SQLSession(engine)
+                close_after = True
+
             upsert_emoji = await self.upsert_emoji(
                 emoji_id=emoji_id,
                 emoji_name=emoji_name,
@@ -247,13 +247,13 @@ class EmojiHashMap:
             )
             await sql_retry(lambda: session.execute(upsert_emoji))
         except SQLError as e:
-            if session and close_after:
+            if close_after and session:
                 session.rollback()
                 session.close()
 
             raise e
 
-        if session and close_after:
+        if close_after:
             session.commit()
             session.close()
 
@@ -322,13 +322,12 @@ class EmojiHashMap:
         )
 
         if session:
-            if isinstance(session, bool):
-                session = SQLSession(engine)
-                close_after = True
-            else:
-                close_after = False
-
+            close_after = False
             try:
+                if isinstance(session, bool):
+                    session = SQLSession(engine)
+                    close_after = True
+
                 await self._add_emoji_to_database(
                     emoji_id=emoji_id,
                     emoji_name=emoji_name,
@@ -340,7 +339,7 @@ class EmojiHashMap:
                     session=session,
                 )
             except SQLError as e:
-                if session and close_after:
+                if close_after and isinstance(session, SQLSession):
                     session.rollback()
                     session.close()
 
@@ -425,20 +424,19 @@ class EmojiHashMap:
             del self._hash_to_internal_emoji[image_hash]
 
         if session:
-            if isinstance(session, bool):
-                session = SQLSession(engine)
-                close_after = True
-            else:
-                close_after = False
-
+            close_after = False
             try:
+                if isinstance(session, bool):
+                    session = SQLSession(engine)
+                    close_after = True
+
                 await sql_retry(
                     lambda: session.execute(
                         SQLDelete(DBEmoji).where(DBEmoji.id == str(emoji_id))
                     )
                 )
             except SQLError as e:
-                if close_after and session:
+                if close_after and isinstance(session, SQLSession):
                     session.rollback()
                     session.close()
 
