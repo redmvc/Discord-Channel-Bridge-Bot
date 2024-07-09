@@ -1510,24 +1510,32 @@ async def stop_auto_bridging_threads_helper(
         else:
             channel_ids_to_remove = set(channel_ids_to_remove)
 
-    if not session:
-        session = SQLSession(engine)
-        close_after = True
-    else:
-        close_after = False
+    close_after = False
+    try:
+        if not session:
+            session = SQLSession(engine)
+            close_after = True
+        else:
+            close_after = False
 
-    def execute_query():
-        session.execute(
-            SQLDelete(DBAutoBridgeThreadChannels).where(
-                DBAutoBridgeThreadChannels.channel.in_(
-                    [str(id) for id in channel_ids_to_remove]
+        def execute_query():
+            session.execute(
+                SQLDelete(DBAutoBridgeThreadChannels).where(
+                    DBAutoBridgeThreadChannels.channel.in_(
+                        [str(id) for id in channel_ids_to_remove]
+                    )
                 )
             )
-        )
 
-    await sql_retry(execute_query)
+        await sql_retry(execute_query)
 
-    globals.auto_bridge_thread_channels -= channel_ids_to_remove
+        globals.auto_bridge_thread_channels -= channel_ids_to_remove
+    except SQLError as e:
+        if close_after and session:
+            session.rollback()
+            session.close()
+
+        raise e
 
     if close_after:
         session.commit()
