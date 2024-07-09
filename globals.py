@@ -201,12 +201,12 @@ async def get_channel_member(
         channel=(
             channel,
             (
+                discord.TextChannel,
+                discord.Thread,
                 discord.VoiceChannel,
                 discord.StageChannel,
                 discord.ForumChannel,
-                discord.TextChannel,
                 discord.CategoryChannel,
-                discord.Thread,
             ),
         ),
         member_id=(member_id, int),
