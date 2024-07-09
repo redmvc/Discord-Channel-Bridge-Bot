@@ -29,16 +29,14 @@ def natural_language_concat(items: Sequence[str]) -> str:
 
 
 def validate_types(
-    arguments: dict[
-        str, tuple[Any, type | Type[int | str] | tuple[type | Type[int | str], ...]]
-    ]
+    **kwargs: tuple[Any, type | Type[int | str] | tuple[type | Type[int | str], ...]]
 ):
     """Raise `TypeError` if the arguments passed are not the right type.
 
     #### Args:
-        - `arguments`: A dictionary whose keys are argument names and whose values are tuple with the argument value and its intended type.
+        - `kwargs`: The arguments to validate and tuples with their values and types.
     """
-    for arg_name, (arg_value, valid_type) in arguments.items():
+    for arg_name, (arg_value, valid_type) in kwargs.items():
         if not isinstance(arg_value, valid_type):
             if isinstance(valid_type, type):
                 raise TypeError(
@@ -53,17 +51,16 @@ def validate_types(
 
 
 def validate_channels(
-    channels: dict[
-        str,
-        discord.guild.GuildChannel | discord.Thread | discord.abc.PrivateChannel | None,
-    ]
+    **kwargs: (
+        discord.guild.GuildChannel | discord.Thread | discord.abc.PrivateChannel | None
+    ),
 ):
     """Raise `ChannelTypeError` if the channels passed as arguments are not the right channel types.
 
     #### Args:
-        - `channels`: A dictionary whose keys are channel names and whose values are the channels.
+        - `kwargs`: The channels to validate.
     """
-    for channel_name, channel in channels.items():
+    for channel_name, channel in kwargs.items():
         if (
             not isinstance(channel, discord.Thread)
             or not isinstance(channel.parent, discord.TextChannel)

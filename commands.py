@@ -425,7 +425,7 @@ async def mention_to_channel(
     #### Returns:
         - The channel whose ID is given by `channel_id`.
     """
-    validate_types({"link_or_mention": (link_or_mention, str)})
+    validate_types(link_or_mention=(link_or_mention, str))
 
     if link_or_mention.startswith("https://discord.com/channels"):
         try:
@@ -1139,8 +1139,13 @@ async def create_bridge_and_db(
     #### Returns:
         - `Bridge`: The created `Bridge`.
     """
+    types_to_validate: dict[str, tuple] = {}
     if webhook:
-        validate_types({"webhook": (webhook, discord.Webhook)})
+        types_to_validate["webhook"] = (webhook, discord.Webhook)
+    if session:
+        types_to_validate["session"] = (session, SQLSession)
+    if types_to_validate:
+        validate_types(**types_to_validate)
 
     bridge = None
     close_after = False
@@ -1148,18 +1153,14 @@ async def create_bridge_and_db(
         if not session:
             close_after = True
             session = SQLSession(engine)
-        else:
-            validate_types({"session": (session, SQLSession)})
 
         bridge = await create_bridge(source, target, webhook)
         insert_bridge_row = await sql_upsert(
-            DBBridge,
-            {
-                "source": str(globals.get_id_from_channel(source)),
-                "target": str(globals.get_id_from_channel(target)),
-                "webhook": str(bridge.webhook.id),
-            },
-            {"webhook": str(bridge.webhook.id)},
+            table=DBBridge,
+            indices={"source", "target"},
+            source=str(globals.get_id_from_channel(source)),
+            target=str(globals.get_id_from_channel(target)),
+            webhook=str(bridge.webhook.id),
         )
 
         def execute_query():
@@ -1264,13 +1265,15 @@ async def bridge_thread_helper(
     #### Asserts:
         - `isinstance(thread_to_bridge.parent, discord.TextChannel)`
     """
-    types_to_validate: dict = {
-        "thread_to_bridge": (thread_to_bridge, discord.Thread),
-        "user_id": (user_id, int),
-    }
     if interaction:
-        types_to_validate["interaction"] = (interaction, discord.Interaction)
-    validate_types(types_to_validate)
+        validate_interaction = {"interaction": (interaction, discord.Interaction)}
+    else:
+        validate_interaction = {}
+    validate_types(
+        thread_to_bridge=(thread_to_bridge, discord.Thread),
+        user_id=(user_id, int),
+        **validate_interaction,
+    )
 
     assert isinstance(thread_to_bridge.parent, discord.TextChannel)
 
@@ -1497,12 +1500,14 @@ async def stop_auto_bridging_threads_helper(
     #### Raises:
         - `SQLError`: Something went wrong accessing or modifying the database.
     """
-    types_to_validate: dict = {
-        "channel_ids_to_remove": (channel_ids_to_remove, (int, Iterable))
-    }
     if session:
-        types_to_validate["session"] = (session, SQLSession)
-    validate_types(types_to_validate)
+        validate_session = {"session": (session, SQLSession)}
+    else:
+        validate_session = {}
+    validate_types(
+        channel_ids_to_remove=(channel_ids_to_remove, (int, Iterable)),
+        **validate_session,
+    )
 
     if not isinstance(channel_ids_to_remove, set):
         if isinstance(channel_ids_to_remove, int):
@@ -1552,7 +1557,7 @@ async def validate_auto_bridge_thread_channels(
     #### Raises:
         - `SQLError`: Something went wrong accessing or modifying the database.
     """
-    validate_types({"channel_ids_to_check": (channel_ids_to_check, (int, Iterable))})
+    validate_types(channel_ids_to_check=(channel_ids_to_check, (int, Iterable)))
 
     if not isinstance(channel_ids_to_check, set):
         if isinstance(channel_ids_to_check, int):
@@ -1595,19 +1600,17 @@ async def map_emoji_helper(
 
     #### Raises:
         - `ValueError`: Incorrect number of arguments passed.
-        - `UnknownDBDialectError`: Invalid database dialect registered in `settings.json` file.
         - `SQLError`: SQL statement inferred from arguments was invalid or database connection failed.
         - `HTTPResponseError`: HTTP request to fetch image returned a status other than 200.
         - `InvalidURL`: URL generated from emoji was not valid.
         - `RuntimeError`: Session connection failed.
         - `ServerTimeoutError`: Connection to server timed out.
     """
-    types_to_validate: dict[str, tuple] = {
-        "internal_emoji": (internal_emoji, discord.Emoji),
-    }
     if session:
-        types_to_validate["session"] = (session, SQLSession)
-    validate_types(types_to_validate)
+        validate_session = {"session": (session, SQLSession)}
+    else:
+        validate_session = {}
+    validate_types(internal_emoji=(internal_emoji, discord.Emoji), **validate_session)
 
     external_emoji_id, external_emoji_name, external_emoji_animated, _ = (
         globals.get_emoji_information(
