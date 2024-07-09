@@ -330,20 +330,33 @@ def hash_image(image: bytes) -> str:
     return md5(image).hexdigest()
 
 
-async def wait_until_ready() -> bool:
-    """Returns True when the bot is ready or False if it times out."""
+async def wait_until_ready(
+    *, time_to_wait: float | int = 100, polling_rate: float | int = 1
+) -> bool:
+    """Return True when the bot is ready or False if it times out.
+
+    #### Args:
+        - `time_to_wait`: The amount of time in seconds to wait for the bot to get ready. Values less than 0 will be treated as 0. Defaults to 100.
+        - `polling_rate`: The amount of time in seconds to wait between checks for the variable. Values less than 0 will be treated as 0. Defaults to 1.
+    """
+    global is_ready
     if is_ready:
         return True
 
-    time_waited = 0
-    while not is_ready and time_waited < 100:
-        await asyncio.sleep(1)
-        time_waited += 1
+    validate_types(
+        time_to_wait=(time_to_wait, (int, float)),
+        polling_rate=(polling_rate, (int, float)),
+    )
 
-    if time_waited >= 100:
-        # somethin' real funky going on here
-        # I don't have error handling yet though
-        print("Taking forever to get ready.")
+    time_to_wait = max(time_to_wait, 0.0)
+    polling_rate = max(polling_rate, 0.0)
+    time_waited = 0.0
+    while not is_ready and time_waited < time_to_wait:
+        await asyncio.sleep(polling_rate)
+        time_waited += polling_rate
+
+    if time_waited >= time_to_wait:
+        warn("Taking forever to get ready.")
         return False
     return True
 
