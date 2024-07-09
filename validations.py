@@ -5,11 +5,11 @@ from typing import Any, Sequence, Type
 import discord
 
 
-class ChannelTypeError(Exception):
+class ChannelTypeError(ValueError):
     pass
 
 
-class WebhookChannelError(Exception):
+class WebhookChannelError(ValueError):
     pass
 
 
