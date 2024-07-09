@@ -297,7 +297,7 @@ def get_emoji_information(
         emoji_animated = emoji.animated
         emoji_url = emoji.url
     else:
-        emoji_name = cast(str, emoji_name)
+        assert emoji_id and isinstance(emoji_name, str)
 
         emoji_animated = emoji_name.startswith("a:")
         if emoji_animated:
@@ -312,13 +312,13 @@ def get_emoji_information(
         emoji_url = f"https://cdn.discordapp.com/emojis/{emoji_id}.{ext}?v=1"
 
     try:
-        emoji_int = int(cast(int | str, emoji_id))
+        emoji_id_int = int(emoji_id)
     except ValueError:
         raise ValueError(
-            "emoji_int was passed as an argument and had type str but was not convertible to an ID."
+            "emoji_id was passed as an argument and had type str but was not convertible to an ID."
         )
 
-    return (emoji_int, emoji_name, emoji_animated, emoji_url)
+    return (emoji_id_int, emoji_name, emoji_animated, emoji_url)
 
 
 def hash_image(image: bytes) -> str:
