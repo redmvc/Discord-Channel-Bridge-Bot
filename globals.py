@@ -125,7 +125,7 @@ async def get_channel_from_id(
         - `channel_or_id`: Either a Discord channel or an ID of same.
 
     #### Returns:
-        - If the argument is a channel, returns it unchanged; otherwise, returns a channel with the ID passed.
+        - If the argument is a channel, returns it unchanged; otherwise, returns a channel with the ID passed, or None if it couldn't be found.
     """
     validate_types(
         channel_or_id=(
@@ -262,11 +262,11 @@ def get_emoji_information(
 
     #### Args:
         - `emoji`: A Discord emoji. Defaults to None, in which case the values below will be used instead.
-        - `emoji_id`: The ID of an emoji. Defaults to None, in which case the value above will be used instead.
+        - `emoji_id`: The ID of an emoji. Will only be used if `emoji` is None. Defaults to None.
         - `emoji_name`: The name of the emoji. Defaults to None, but must be included if `emoji_id` is. If it starts with `"a:"` the emoji will be marked as animated.
 
     #### Raises:
-        - `ArgumentError`: The number of arguments passed is incorrect.
+        - `ArgumentError`: Neither `emoji` nor `emoji_id` were passed, or `emoji_id` was passed but not `emoji_name`.
         - `ValueError`: `emoji` argument was passed and had type `PartialEmoji` but it was not a custom emoji, or `emoji_id` argument was passed and had type `str` but it was not a valid numerical ID.
     """
     types_to_validate: dict[str, tuple] = {}
