@@ -1143,13 +1143,13 @@ async def create_bridge_and_db(
         validate_types({"webhook": (webhook, discord.Webhook)})
 
     bridge = None
+    close_after = False
     try:
         if not session:
             close_after = True
             session = SQLSession(engine)
         else:
             validate_types({"session": (session, SQLSession)})
-            close_after = False
 
         bridge = await create_bridge(source, target, webhook)
         insert_bridge_row = await sql_upsert(
@@ -1510,24 +1510,30 @@ async def stop_auto_bridging_threads_helper(
         else:
             channel_ids_to_remove = set(channel_ids_to_remove)
 
-    if not session:
-        session = SQLSession(engine)
-        close_after = True
-    else:
-        close_after = False
+    close_after = False
+    try:
+        if not session:
+            session = SQLSession(engine)
+            close_after = True
 
-    def execute_query():
-        session.execute(
-            SQLDelete(DBAutoBridgeThreadChannels).where(
-                DBAutoBridgeThreadChannels.channel.in_(
-                    [str(id) for id in channel_ids_to_remove]
+        def execute_query():
+            session.execute(
+                SQLDelete(DBAutoBridgeThreadChannels).where(
+                    DBAutoBridgeThreadChannels.channel.in_(
+                        [str(id) for id in channel_ids_to_remove]
+                    )
                 )
             )
-        )
 
-    await sql_retry(execute_query)
+        await sql_retry(execute_query)
 
-    globals.auto_bridge_thread_channels -= channel_ids_to_remove
+        globals.auto_bridge_thread_channels -= channel_ids_to_remove
+    except SQLError as e:
+        if close_after and session:
+            session.rollback()
+            session.close()
+
+        raise e
 
     if close_after:
         session.commit()
@@ -1615,13 +1621,11 @@ async def map_emoji_helper(
     else:
         external_emoji_server_id = None
 
-    if not session:
-        session = SQLSession(engine)
-        close_after = True
-    else:
-        close_after = False
-
+    close_after = False
     try:
+        if not session:
+            session = SQLSession(engine)
+            close_after = True
         if not image_hash:
             if external_emoji or full_emoji:
                 # Get the hash of the external emoji's image if we have access to it
@@ -1719,67 +1723,88 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
     append_users_to_reactions_list(message)
 
     # Then get the bridged ones
-    with SQLSession(engine) as session:
-        # We need to see whether this message is a bridged message and, if so, find its source
-        def get_source_message_map():
-            return session.scalars(
-                SQLSelect(DBMessageMap).where(
-                    DBMessageMap.target_message == str(message.id),
-                )
-            ).first()
-
-        source_message_map: DBMessageMap | None = await sql_retry(
-            get_source_message_map
-        )
-        if isinstance(source_message_map, DBMessageMap):
-            # This message was bridged, so find the original one and then find any other bridged messages from it
-            source_channel_id = int(source_message_map.source_channel)
-            source_message_id = int(source_message_map.source_message)
-
-            if source_channel_id in reachable_channel_ids:
-                # The only way this would not be true would be if the bridge that brought this message here in the first place had been destroyed
-                source_channel = await globals.get_channel_from_id(source_channel_id)
-                if isinstance(source_channel, (discord.TextChannel, discord.Thread)):
-                    source_message = await source_channel.fetch_message(
-                        source_message_id
-                    )
-                    append_users_to_reactions_list(source_message)
-        else:
-            # This message is (or might be) the source
-            source_message_id = message.id
-            source_channel_id = channel.id
-
-        # Then we find all messages bridged from the source
-        outbound_bridges = bridges.get_outbound_bridges(source_channel_id)
-        if outbound_bridges:
-
-            def get_bridged_messages():
+    session = None
+    try:
+        with SQLSession(engine) as session:
+            # We need to see whether this message is a bridged message and, if so, find its source
+            def get_source_message_map():
                 return session.scalars(
                     SQLSelect(DBMessageMap).where(
-                        DBMessageMap.source_message == str(source_message_id)
+                        DBMessageMap.target_message == str(message.id),
                     )
-                )
+                ).first()
 
-            bridged_messages: ScalarResult[DBMessageMap] = await sql_retry(
-                get_bridged_messages
+            source_message_map: DBMessageMap | None = await sql_retry(
+                get_source_message_map
             )
-            for message_row in bridged_messages:
-                target_channel_id = int(message_row.target_channel)
-                if (
-                    target_channel_id not in reachable_channel_ids
-                    or not outbound_bridges.get(target_channel_id)
-                ):
-                    continue
+            if isinstance(source_message_map, DBMessageMap):
+                # This message was bridged, so find the original one and then find any other bridged messages from it
+                source_channel_id = int(source_message_map.source_channel)
+                source_message_id = int(source_message_map.source_message)
 
-                bridged_channel = await globals.get_channel_from_id(target_channel_id)
-                if not isinstance(
-                    bridged_channel, (discord.TextChannel, discord.Thread)
-                ):
-                    continue
+                if source_channel_id in reachable_channel_ids:
+                    # The only way this would not be true would be if the bridge that brought this message here in the first place had been destroyed
+                    source_channel = await globals.get_channel_from_id(
+                        source_channel_id
+                    )
+                    if isinstance(
+                        source_channel, (discord.TextChannel, discord.Thread)
+                    ):
+                        source_message = await source_channel.fetch_message(
+                            source_message_id
+                        )
+                        append_users_to_reactions_list(source_message)
+            else:
+                # This message is (or might be) the source
+                source_message_id = message.id
+                source_channel_id = channel.id
 
-                target_message_id = int(message_row.target_message)
-                bridged_message = await bridged_channel.fetch_message(target_message_id)
-                append_users_to_reactions_list(bridged_message)
+            # Then we find all messages bridged from the source
+            outbound_bridges = bridges.get_outbound_bridges(source_channel_id)
+            if outbound_bridges:
+
+                def get_bridged_messages():
+                    return session.scalars(
+                        SQLSelect(DBMessageMap).where(
+                            DBMessageMap.source_message == str(source_message_id)
+                        )
+                    )
+
+                bridged_messages: ScalarResult[DBMessageMap] = await sql_retry(
+                    get_bridged_messages
+                )
+                for message_row in bridged_messages:
+                    target_channel_id = int(message_row.target_channel)
+                    if (
+                        target_channel_id not in reachable_channel_ids
+                        or not outbound_bridges.get(target_channel_id)
+                    ):
+                        continue
+
+                    bridged_channel = await globals.get_channel_from_id(
+                        target_channel_id
+                    )
+                    if not isinstance(
+                        bridged_channel, (discord.TextChannel, discord.Thread)
+                    ):
+                        continue
+
+                    target_message_id = int(message_row.target_message)
+                    bridged_message = await bridged_channel.fetch_message(
+                        target_message_id
+                    )
+                    append_users_to_reactions_list(bridged_message)
+    except SQLError as e:
+        if session:
+            session.rollback()
+            session.close()
+
+        await interaction.followup.send(
+            "❌ There was a problem accessing the database.",
+            ephemeral=True,
+        )
+        warn(e)
+        return
 
     # Now we resolve all of the async calls to get the final list of users per reaction
     async def get_list_of_reacting_users(
