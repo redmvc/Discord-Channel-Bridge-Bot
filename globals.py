@@ -80,7 +80,8 @@ class Settings(TypedDict):
 
 
 settings_root: dict[str, str | Settings] = json.load(open("settings.json"))
-context: str = cast(str, settings_root["context"])
+assert isinstance(settings_root["context"], str)
+context = settings_root["context"]
 settings: Settings = cast(Settings, settings_root[context])
 
 # Variables for connection to the Discord client

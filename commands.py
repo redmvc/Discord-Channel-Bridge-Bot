@@ -793,9 +793,9 @@ async def whitelist(interaction: discord.Interaction, apps: str):
         await interaction.response.send_message("❌ App IDs not valid.", ephemeral=True)
         return
 
-    channel_whitelist = globals.per_channel_whitelist.get(channel.id)
+    channel_whitelist: set[int] | None = globals.per_channel_whitelist.get(channel.id)
     if not channel_whitelist:
-        channel_whitelist = cast(set[int], set())
+        channel_whitelist = set()
 
     outbound_bridges = bridges.get_outbound_bridges(channel)
     if not outbound_bridges and not any(
@@ -1814,7 +1814,7 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
         list_of_reacters: list[Coroutine[Any, Any, set[int]]]
     ):
         gathered_users = await asyncio.gather(*list_of_reacters)
-        set_of_users: set[int] = cast(set[int], set.union(*gathered_users))
+        set_of_users: set[int] = set.union(*gathered_users)
         set_of_users.discard(bot_user_id)
         return set_of_users
 

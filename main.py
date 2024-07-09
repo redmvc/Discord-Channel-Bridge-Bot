@@ -1535,4 +1535,6 @@ async def on_guild_remove(server: discord.Guild):
     print(f"Just left server '{server.name}'.")
 
 
-globals.client.run(cast(str, globals.settings["app_token"]), reconnect=True)
+app_token = globals.settings.get("app_token")
+assert isinstance(app_token, str)
+globals.client.run(app_token, reconnect=True)
