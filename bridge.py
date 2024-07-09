@@ -52,36 +52,6 @@ class Bridge:
         #### Returns:
             - `Bridge`: The created Bridge.
         """
-
-        self = Bridge()
-        await self._add_source_and_target(source, target)
-        await self._add_webhook(webhook)
-        return self
-
-    def __init__(self) -> None:
-        """Construct a new empty Bridge. Should only be called from within class method Bridge.create()."""
-        self._source_id: int | None = None
-        self._target_id: int | None = None
-        self._webhook: discord.Webhook | None = None
-
-    async def _add_source_and_target(
-        self,
-        source: discord.TextChannel | discord.Thread | int,
-        target: discord.TextChannel | discord.Thread | int,
-    ) -> None:
-        """Add a source and target to an empty Bridge. Should only be called from within class method Bridge.create().
-
-        #### Args:
-            - `source`: Source channel or ID of same.
-            - `target`: Target channel or ID of same.
-
-        #### Raises:
-            - `AttributeError`: The Bridge isn't empty (i.e. it already has a source and a target).
-            - `ChannelTypeError`: The source or target channels are not text channels nor threads off a text channel.
-        """
-        if self._source_id and self._target_id:
-            raise AttributeError("Bridge is not empty.")
-
         validate_channels(
             source=(
                 await globals.get_channel_from_id(source)
@@ -95,8 +65,18 @@ class Bridge:
             ),
         )
 
+        self = Bridge()
         self._source_id = globals.get_id_from_channel(source)
         self._target_id = globals.get_id_from_channel(target)
+        await self._add_webhook(webhook)
+
+        return self
+
+    def __init__(self) -> None:
+        """Construct a new empty Bridge. Should only be called from within class method Bridge.create()."""
+        self._source_id: int | None = None
+        self._target_id: int | None = None
+        self._webhook: discord.Webhook | None = None
 
     async def _add_webhook(self, webhook: discord.Webhook | None = None) -> None:
         """Add an existing webhook to this Bridge or create a new one for it.
