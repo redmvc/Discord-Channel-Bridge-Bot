@@ -50,6 +50,21 @@ class DBBridge(DBBase):
     webhook: Mapped[str] = mapped_column(String(32))
 
 
+class DBWebhook(DBBase):
+    """
+    An SQLAlchemy ORM class representing a database table tracking webhooks managed by the bot in each channel.
+
+    #### Columns
+    - `channel (VARCHAR(32))`: The ID of the bridge's target channel or thread. Has `PRIMARY KEY`.
+    - `webhook (VARCHAR(32))`: The ID of the webhook attached to the target channel which bridges messages to it.
+    """
+
+    __tablename__ = "webhooks"
+
+    channel: Mapped[str] = mapped_column(String(32), primary_key=True)
+    webhook: Mapped[str] = mapped_column(String(32))
+
+
 class DBMessageMap(DBBase):
     """
     An SQLAlchemy ORM class representing a database table listing the mappings between bridged messages.
