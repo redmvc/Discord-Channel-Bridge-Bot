@@ -507,54 +507,12 @@ async def demolish(interaction: discord.Interaction, target: str):
 
     await interaction.response.defer(thinking=True, ephemeral=True)
 
-    demolishing = demolish_bridges(message_channel, target_channel)
-
-    message_channel_id = str(message_channel.id)
-    target_channel_id = str(target_channel.id)
-
-    session = None
     try:
-        with SQLSession(engine) as session:
-            delete_demolished_bridges = SQLDelete(DBBridge).where(
-                sql_or(
-                    sql_and(
-                        DBBridge.source == message_channel_id,
-                        DBBridge.target == target_channel_id,
-                    ),
-                    sql_and(
-                        DBBridge.source == target_channel_id,
-                        DBBridge.target == message_channel_id,
-                    ),
-                )
-            )
-            delete_demolished_messages = SQLDelete(DBMessageMap).where(
-                sql_or(
-                    sql_and(
-                        DBMessageMap.source_channel == message_channel_id,
-                        DBMessageMap.target_channel == target_channel_id,
-                    ),
-                    sql_and(
-                        DBMessageMap.source_channel == target_channel_id,
-                        DBMessageMap.target_channel == message_channel_id,
-                    ),
-                )
-            )
-
-            def execute_queries():
-                session.execute(delete_demolished_bridges)
-                session.execute(delete_demolished_messages)
-
-            await sql_retry(execute_queries)
-            await demolishing
-            await validate_auto_bridge_thread_channels(
-                {message_channel.id, target_channel.id}, session
-            )
-            session.commit()
+        await demolish_bridges(message_channel, target_channel)
+        await validate_auto_bridge_thread_channels(
+            {message_channel.id, target_channel.id}
+        )
     except Exception as e:
-        if session:
-            session.rollback()
-            session.close()
-
         if isinstance(e, SQLError):
             await interaction.followup.send(
                 "❌ There was an issue with the connection to the database; thread and bridge creation failed.",
@@ -688,41 +646,17 @@ async def demolish_all(
 
                 channels_affected = channels_affected.union(paired_channels)
 
-                channel_to_demolish_id_str = str(channel_to_demolish_id)
-                exceptions_list = [str(i) for i in exceptions]
-
-                delete_demolished_bridges = SQLDelete(DBBridge).where(
-                    sql_or(
-                        DBBridge.target == channel_to_demolish_id_str,
-                        sql_and(
-                            DBBridge.source == channel_to_demolish_id_str,
-                            DBBridge.target.not_in(exceptions_list),
-                        ),
-                    )
-                )
-
-                delete_demolished_messages = SQLDelete(DBMessageMap).where(
-                    sql_or(
-                        DBMessageMap.target_channel == channel_to_demolish_id_str,
-                        sql_and(
-                            DBMessageMap.source_channel == channel_to_demolish_id_str,
-                            DBMessageMap.target_channel.not_in(exceptions_list),
-                        ),
-                    )
-                )
-
-                def execute_queries():
-                    session.execute(delete_demolished_bridges)
-                    session.execute(delete_demolished_messages)
-
-                await sql_retry(execute_queries)
-
                 for paired_channel_id in paired_channels:
                     bridges_being_demolished.append(
-                        demolish_bridges(paired_channel_id, channel_to_demolish_id)
+                        demolish_bridges(
+                            paired_channel_id, channel_to_demolish_id, session
+                        )
                     )
 
-            await validate_auto_bridge_thread_channels(channels_affected, session)
+            await asyncio.gather(
+                *bridges_being_demolished,
+                validate_auto_bridge_thread_channels(channels_affected, session),
+            )
 
             session.commit()
     except Exception as e:
@@ -744,7 +678,6 @@ async def demolish_all(
 
         return
 
-    await asyncio.gather(*bridges_being_demolished)
     if len(exceptions) == 0:
         await interaction.followup.send(
             "✅ Bridges demolished!",
@@ -1122,18 +1055,71 @@ class ConfirmHashServer(discord.ui.Button):
 async def demolish_bridges(
     source: discord.TextChannel | discord.Thread | int,
     target: discord.TextChannel | discord.Thread | int,
+    session: SQLSession | None = None,
 ):
     """Destroy all Bridges between source and target channels, removing them from `bridges` and deleting their webhooks. This function does not alter the database entries in any way.
 
     #### Args:
         - `source`: One end of the Bridge, or ID of same.
         - `target`: The other end of the Bridge, or ID of same.
+        - `session`: A connection to the database. Defaults to None, in which case a new one will be created to be used.
 
     #### Raises:
         - `HTTPException`: Deleting the webhook failed.
         - `Forbidden`: You do not have permissions to delete the webhook.
         - `ValueError`: The webhook does not have a token associated with it.
     """
+    source_channel_id = globals.get_id_from_channel(source)
+    target_channel_id = globals.get_id_from_channel(target)
+
+    close_after = False
+    try:
+        if not session:
+            session = SQLSession(engine)
+            close_after = True
+
+        source_channel_id_str = str(source_channel_id)
+        target_channel_id_str = str(target_channel_id)
+        delete_demolished_bridges = SQLDelete(DBBridge).where(
+            sql_or(
+                sql_and(
+                    DBBridge.source == source_channel_id_str,
+                    DBBridge.target == target_channel_id_str,
+                ),
+                sql_and(
+                    DBBridge.source == target_channel_id_str,
+                    DBBridge.target == source_channel_id_str,
+                ),
+            )
+        )
+        delete_demolished_messages = SQLDelete(DBMessageMap).where(
+            sql_or(
+                sql_and(
+                    DBMessageMap.source_channel == source_channel_id_str,
+                    DBMessageMap.target_channel == target_channel_id_str,
+                ),
+                sql_and(
+                    DBMessageMap.source_channel == target_channel_id_str,
+                    DBMessageMap.target_channel == source_channel_id_str,
+                ),
+            )
+        )
+
+        def execute_queries():
+            session.execute(delete_demolished_bridges)
+            session.execute(delete_demolished_messages)
+
+        await sql_retry(execute_queries)
+    except Exception as e:
+        if close_after and session:
+            session.rollback()
+            session.close()
+
+        raise e
+
+    if close_after:
+        session.commit()
+        session.close()
 
     await asyncio.gather(
         demolish_bridge_one_sided(source, target),
