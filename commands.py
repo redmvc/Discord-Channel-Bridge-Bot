@@ -1154,7 +1154,7 @@ async def create_bridge_and_db(
             close_after = True
             session = SQLSession(engine)
 
-        bridge = await create_bridge(source, target, webhook)
+        bridge = await bridges.create_bridge(source, target, webhook)
         insert_bridge_row = await sql_upsert(
             table=DBBridge,
             indices={"source", "target"},
@@ -1182,31 +1182,6 @@ async def create_bridge_and_db(
         session.close()
 
     return bridge
-
-
-async def create_bridge(
-    source: discord.TextChannel | discord.Thread | int,
-    target: discord.TextChannel | discord.Thread | int,
-    webhook: discord.Webhook | None = None,
-) -> Bridge:
-    """Create a one-way Bridge from source channel to target channel in `bridges`, creating a webhook if necessary. This function does not alter the database entries in any way.
-
-    #### Args:
-        - `source`: Source channel for the Bridge, or ID of same.
-        - `target`: Target channel for the Bridge, or ID of same.
-        - `webhook`: Optionally, an already-existing webhook connecting these channels. Defaults to None.
-
-    #### Raises:
-        - `ChannelTypeError`: The source or target channels are not text channels nor threads off a text channel.
-        - `WebhookChannelError`: `webhook` is not attached to Bridge's target channel.
-        - `HTTPException`: Deleting an existing webhook or creating a new one failed.
-        - `Forbidden`: You do not have permissions to create or delete webhooks.
-
-    #### Returns:
-        - `Bridge`: The created `Bridge`.
-    """
-
-    return await bridges.create_bridge(source, target, webhook)
 
 
 async def demolish_bridges(

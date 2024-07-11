@@ -95,7 +95,7 @@ async def on_ready():
                     elif target_channel:
                         # I have access to both the source and target channels and to the webhook
                         create_bridges.append(
-                            commands.create_bridge(source_id, target_id, webhook)
+                            bridges.create_bridge(source_id, target_id, webhook)
                         )
                 except Exception:
                     invalid_webhooks.add(webhook_id_str)
