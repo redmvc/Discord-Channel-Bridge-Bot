@@ -273,7 +273,7 @@ class Bridges:
                 session.close()
 
             if isinstance(e, SQLError):
-                await bridges.demolish_bridge(source, target)
+                await bridges.demolish_bridges(source, target, one_sided=True)
 
             raise e
 
@@ -283,16 +283,19 @@ class Bridges:
 
         return bridge
 
-    async def demolish_bridge(
+    async def demolish_bridges(
         self,
         source: discord.TextChannel | discord.Thread | int,
         target: discord.TextChannel | discord.Thread | int,
+        *,
+        one_sided: bool = False,
     ) -> None:
-        """Destroy the Bridge from source channel to target channel, deleting its associated webhook.
+        """Destroy Bridges between source and target channel, deleting their associated webhooks.
 
         #### Args:
             - `source`: Source channel or ID of same.
             - `target`: Target channel or ID of same.
+            - `one_sided`: Whether to demolish only the bridge going from `source` to `target`, rather than both. Defaults to False.
 
         #### Raises:
             - `HTTPException`: Deleting the webhook failed.
@@ -306,21 +309,49 @@ class Bridges:
 
         source_id = globals.get_id_from_channel(source)
         target_id = globals.get_id_from_channel(target)
-
-        if not self._outbound_bridges.get(source_id) or not self._outbound_bridges[
-            source_id
-        ].get(target_id):
+        if (
+            not self._outbound_bridges.get(source_id)
+            or not self._outbound_bridges[source_id].get(target_id)
+        ) and (
+            one_sided
+            or (
+                not self._outbound_bridges.get(target_id)
+                or not self._outbound_bridges[target_id].get(source_id)
+            )
+        ):
+            # If the command is called one-sidedly, there should be a bridge from source to target
+            # otherwise, there should be at least one bridge between source and target
             return
 
-        await self._outbound_bridges[source_id][target_id]._destroy_webhook()
+        if self._outbound_bridges.get(source_id) and self._outbound_bridges[
+            source_id
+        ].get(target_id):
+            # If there is a bridge from source to target, destroy it
+            await self._outbound_bridges[source_id][target_id]._destroy_webhook()
 
-        del self._outbound_bridges[source_id][target_id]
-        if len(self._outbound_bridges[source_id]) == 0:
-            del self._outbound_bridges[source_id]
+            del self._outbound_bridges[source_id][target_id]
+            if len(self._outbound_bridges[source_id]) == 0:
+                del self._outbound_bridges[source_id]
 
-        del self._inbound_bridges[target_id][source_id]
-        if len(self._inbound_bridges[target_id]) == 0:
-            del self._inbound_bridges[target_id]
+            del self._inbound_bridges[target_id][source_id]
+            if len(self._inbound_bridges[target_id]) == 0:
+                del self._inbound_bridges[target_id]
+
+        if (
+            not one_sided
+            and self._outbound_bridges.get(target_id)
+            and self._outbound_bridges[target_id].get(source_id)
+        ):
+            # If the command was not called one-sidedly and there is a bridge from target to source, destroy it
+            await self._inbound_bridges[source_id][target_id]._destroy_webhook()
+
+            del self._inbound_bridges[source_id][target_id]
+            if len(self._inbound_bridges[source_id]) == 0:
+                del self._inbound_bridges[source_id]
+
+            del self._outbound_bridges[target_id][source_id]
+            if len(self._outbound_bridges[target_id]) == 0:
+                del self._outbound_bridges[target_id]
 
     def get_one_way_bridge(
         self,

@@ -1121,29 +1121,7 @@ async def demolish_bridges(
         session.commit()
         session.close()
 
-    await asyncio.gather(
-        demolish_bridge_one_sided(source, target),
-        demolish_bridge_one_sided(target, source),
-    )
-
-
-async def demolish_bridge_one_sided(
-    source: discord.TextChannel | discord.Thread | int,
-    target: discord.TextChannel | discord.Thread | int,
-):
-    """Destroy the Bridge going from source channel to target channel, removing it from `bridges` and deleting its webhook. This function does not alter the database entries in any way.
-
-    #### Args:
-        - `source`: One end of the Bridge, or ID of same.
-        - `target`: The other end of the Bridge, or ID of same.
-
-    #### Raises:
-        - `HTTPException`: Deleting the webhook failed.
-        - `Forbidden`: You do not have permissions to delete the webhook.
-        - `ValueError`: The webhook does not have a token associated with it.
-    """
-
-    await bridges.demolish_bridge(source, target)
+    await bridges.demolish_bridges(source, target)
 
 
 async def bridge_thread_helper(
