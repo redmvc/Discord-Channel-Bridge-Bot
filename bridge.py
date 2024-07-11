@@ -1,8 +1,11 @@
 from typing import Callable, Literal, cast, overload
 
 import discord
+from sqlalchemy.exc import StatementError as SQLError
+from sqlalchemy.orm import Session as SQLSession
 
 import globals
+from database import DBBridge, DBWebhook, engine, sql_retry, sql_upsert
 from validations import validate_channels, validate_types, validate_webhook
 
 
@@ -190,15 +193,21 @@ class Bridges:
 
     async def create_bridge(
         self,
+        *,
         source: discord.TextChannel | discord.Thread | int,
         target: discord.TextChannel | discord.Thread | int,
         webhook: discord.Webhook | None = None,
+        update_db: bool = True,
+        session: SQLSession | None = None,
     ) -> Bridge:
         """Create a new Bridge from source channel to target channel (and a new webhook if necessary) or update an existing Bridge with the webhook.
 
         #### Args:
             - `source`: Source channel or ID of same.
             - `target`: Target channel or ID of same.
+            - `webhook`: Optionally, an already-existing webhook connecting these channels. Defaults to None, in which case a new one will be created.
+            - `update_db`: Whether to update the database when creating the Bridge. Defaults to True.
+            - `session`: Optionally, a session with the connection to the database. Defaults to None, in which case creates and closes a new one locally. Only used if `update_db` is True.
 
         #### Raises:
             - `ChannelTypeError`: The source or target channels are not text channels nor threads off a text channel.
@@ -209,6 +218,9 @@ class Bridges:
         #### Returns:
             - `Bridge`: The created `Bridge`.
         """
+        if update_db and session:
+            validate_types(session=(session, SQLSession))
+
         source_id = globals.get_id_from_channel(source)
         target_id = globals.get_id_from_channel(target)
         if self._outbound_bridges.get(source_id) and self._outbound_bridges[
@@ -226,6 +238,48 @@ class Bridges:
             if not self._inbound_bridges.get(target_id):
                 self._inbound_bridges[target_id] = {}
             self._inbound_bridges[target_id][source_id] = bridge
+
+        if not update_db:
+            return bridge
+
+        close_after = False
+        try:
+            if not session:
+                close_after = True
+                session = SQLSession(engine)
+
+            target_id_str = str(globals.get_id_from_channel(target))
+            insert_bridge_row = await sql_upsert(
+                table=DBBridge,
+                indices={"source", "target"},
+                source=str(globals.get_id_from_channel(source)),
+                target=target_id_str,
+            )
+            insert_webhook_row = await sql_upsert(
+                table=DBWebhook,
+                indices={"channel"},
+                channel=target_id_str,
+                webhook=str(bridge.webhook.id),
+            )
+
+            def execute_query():
+                session.execute(insert_bridge_row)
+                session.execute(insert_webhook_row)
+
+            await sql_retry(execute_query)
+        except Exception as e:
+            if close_after and session:
+                session.rollback()
+                session.close()
+
+            if isinstance(e, SQLError):
+                await bridges.demolish_bridge(source, target)
+
+            raise e
+
+        if close_after:
+            session.commit()
+            session.close()
 
         return bridge
 

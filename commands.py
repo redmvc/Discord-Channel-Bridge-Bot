@@ -14,16 +14,14 @@ from sqlalchemy.orm import Session as SQLSession
 
 import emoji_hash_map
 import globals
-from bridge import Bridge, bridges
+from bridge import bridges
 from database import (
     DBAppWhitelist,
     DBAutoBridgeThreadChannels,
     DBBridge,
     DBMessageMap,
-    DBWebhook,
     engine,
     sql_retry,
-    sql_upsert,
 )
 from validations import validate_types
 
@@ -223,11 +221,15 @@ async def bridge(
             create_bridges = []
             if direction != "inbound":
                 create_bridges.append(
-                    create_bridge_and_db(message_channel, target_channel, session)
+                    bridges.create_bridge(
+                        source=message_channel, target=target_channel, session=session
+                    )
                 )
             if direction != "outbound":
                 create_bridges.append(
-                    create_bridge_and_db(target_channel, message_channel, session)
+                    bridges.create_bridge(
+                        source=target_channel, target=message_channel, session=session
+                    )
                 )
 
             await asyncio.gather(*create_bridges)
@@ -1117,81 +1119,6 @@ class ConfirmHashServer(discord.ui.Button):
         await interaction.followup.send("✅ Successfully hashed emoji!", ephemeral=True)
 
 
-async def create_bridge_and_db(
-    source: discord.TextChannel | discord.Thread | int,
-    target: discord.TextChannel | discord.Thread | int,
-    session: SQLSession | None = None,
-    webhook: discord.Webhook | None = None,
-) -> Bridge:
-    """Create a one-way Bridge from source channel to target channel in `bridges`, creating a webhook if necessary, then inserts a reference to this new bridge into the database.
-
-    #### Args:
-        - `source`: Source channel for the Bridge, or ID of same.
-        - `target`: Target channel for the Bridge, or ID of same.
-        - `webhook`: Optionally, an already-existing webhook connecting these channels. Defaults to None.
-        - `session`: Optionally, a session with the connection to the database. Defaults to None, in which case creates and closes a new one locally.
-
-    #### Raises:
-        - `ChannelTypeError`: The source or target channels are not text channels nor threads off a text channel.
-        - `WebhookChannelError`: `webhook` is not attached to Bridge's target channel.
-        - `HTTPException`: Deleting an existing webhook or creating a new one failed.
-        - `Forbidden`: You do not have permissions to create or delete webhooks.
-
-    #### Returns:
-        - `Bridge`: The created `Bridge`.
-    """
-    types_to_validate: dict[str, tuple] = {}
-    if webhook:
-        types_to_validate["webhook"] = (webhook, discord.Webhook)
-    if session:
-        types_to_validate["session"] = (session, SQLSession)
-    if types_to_validate:
-        validate_types(**types_to_validate)
-
-    bridge = None
-    close_after = False
-    try:
-        if not session:
-            close_after = True
-            session = SQLSession(engine)
-
-        bridge = await bridges.create_bridge(source, target, webhook)
-        target_id_str = str(globals.get_id_from_channel(target))
-        insert_bridge_row = await sql_upsert(
-            table=DBBridge,
-            indices={"source", "target"},
-            source=str(globals.get_id_from_channel(source)),
-            target=target_id_str,
-        )
-        insert_webhook_row = await sql_upsert(
-            table=DBWebhook,
-            indices={"channel"},
-            channel=target_id_str,
-            webhook=str(bridge.webhook.id),
-        )
-
-        def execute_query():
-            session.execute(insert_bridge_row)
-            session.execute(insert_webhook_row)
-
-        await sql_retry(execute_query)
-    except Exception as e:
-        if close_after and session:
-            session.rollback()
-            session.close()
-
-        if isinstance(e, SQLError) and bridge:
-            await bridges.demolish_bridge(source, target)
-
-        raise e
-
-    if close_after:
-        session.commit()
-        session.close()
-
-    return bridge
-
-
 async def demolish_bridges(
     source: discord.TextChannel | discord.Thread | int,
     target: discord.TextChannel | discord.Thread | int,
@@ -1412,11 +1339,15 @@ async def bridge_thread_helper(
 
                 threads_created[channel_id] = new_thread
                 create_bridges.append(
-                    create_bridge_and_db(thread_to_bridge, new_thread, session)
+                    bridges.create_bridge(
+                        source=thread_to_bridge, target=new_thread, session=session
+                    )
                 )
                 if inbound_bridges and inbound_bridges[channel_id]:
                     create_bridges.append(
-                        create_bridge_and_db(new_thread, thread_to_bridge, session)
+                        bridges.create_bridge(
+                            source=new_thread, target=thread_to_bridge, session=session
+                        )
                     )
                 succeeded_at_least_once = True
             await asyncio.gather(*(create_bridges + add_user_to_threads))

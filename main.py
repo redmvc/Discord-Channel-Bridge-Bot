@@ -142,7 +142,12 @@ async def on_ready():
                     # so I can add this channel to my list of Bridges
                     targets_with_sources.add(target_id_str)
                     async_create_bridges.append(
-                        bridges.create_bridge(source_id, target_id, webhook)
+                        bridges.create_bridge(
+                            source=source_id,
+                            target=target_id,
+                            webhook=webhook,
+                            update_db=False,
+                        )
                     )
 
             # Any target channels that don't have valid source channels attached to them should be deleted
