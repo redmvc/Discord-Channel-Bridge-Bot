@@ -1,11 +1,15 @@
 from typing import Callable, Literal, cast, overload
 
 import discord
+import sqlalchemy
+from sqlalchemy import Delete as SQLDelete
+from sqlalchemy import and_ as sql_and
+from sqlalchemy import or_ as sql_or
 from sqlalchemy.exc import StatementError as SQLError
 from sqlalchemy.orm import Session as SQLSession
 
 import globals
-from database import DBBridge, DBWebhook, engine, sql_retry, sql_upsert
+from database import DBBridge, DBMessageMap, DBWebhook, engine, sql_retry, sql_upsert
 from validations import validate_channels, validate_types, validate_webhook
 
 
@@ -273,7 +277,9 @@ class Bridges:
                 session.close()
 
             if isinstance(e, SQLError):
-                await bridges.demolish_bridges(source, target, one_sided=True)
+                await bridges.demolish_bridges(
+                    source, target, one_sided=True, update_db=False
+                )
 
             raise e
 
@@ -288,6 +294,8 @@ class Bridges:
         source: discord.TextChannel | discord.Thread | int,
         target: discord.TextChannel | discord.Thread | int,
         *,
+        update_db: bool = True,
+        session: SQLSession | None = None,
         one_sided: bool = False,
     ) -> None:
         """Destroy Bridges between source and target channel, deleting their associated webhooks.
@@ -295,6 +303,8 @@ class Bridges:
         #### Args:
             - `source`: Source channel or ID of same.
             - `target`: Target channel or ID of same.
+            - `update_db`: Whether to update the database when creating the Bridge. Defaults to True.
+            - `session`: A connection to the database. Defaults to None, in which case a new one will be created to be used. Only used if `update_db` is True.
             - `one_sided`: Whether to demolish only the bridge going from `source` to `target`, rather than both. Defaults to False.
 
         #### Raises:
@@ -302,11 +312,19 @@ class Bridges:
             - `Forbidden`: You do not have permissions to delete the webhook.
             - `ValueError`: The webhook does not have a token associated with it.
         """
+        if update_db and session:
+            validate_session = {"session": (session, SQLSession)}
+        else:
+            validate_session = {}
         validate_types(
             source=(source, (discord.TextChannel, discord.Thread, int)),
             target=(target, (discord.TextChannel, discord.Thread, int)),
+            **validate_session,
         )
+        one_sided = not not one_sided
 
+        # If the command is called one-sidedly, there should be a bridge from source to target
+        # otherwise, there should be at least one bridge between source and target
         source_id = globals.get_id_from_channel(source)
         target_id = globals.get_id_from_channel(target)
         if (
@@ -319,10 +337,9 @@ class Bridges:
                 or not self._outbound_bridges[target_id].get(source_id)
             )
         ):
-            # If the command is called one-sidedly, there should be a bridge from source to target
-            # otherwise, there should be at least one bridge between source and target
             return
 
+        # First we delete the Bridges from memory
         if self._outbound_bridges.get(source_id) and self._outbound_bridges[
             source_id
         ].get(target_id):
@@ -352,6 +369,63 @@ class Bridges:
             del self._outbound_bridges[target_id][source_id]
             if len(self._outbound_bridges[target_id]) == 0:
                 del self._outbound_bridges[target_id]
+
+        # Return if we're not meant to update the DB
+        if not update_db:
+            return
+
+        # Update the DB
+        close_after = False
+        try:
+            if not session:
+                session = SQLSession(engine)
+                close_after = True
+
+            source_id_str = str(source_id)
+            target_id_str = str(target_id)
+
+            delete_demolished_bridges = SQLDelete(DBBridge).where(
+                sql_or(
+                    sql_and(
+                        DBBridge.source == source_id_str,
+                        DBBridge.target == target_id_str,
+                    ),
+                    sql_and(
+                        sqlalchemy.sql.expression.literal(not one_sided),
+                        DBBridge.source == target_id_str,
+                        DBBridge.target == source_id_str,
+                    ),
+                )
+            )
+            delete_demolished_messages = SQLDelete(DBMessageMap).where(
+                sql_or(
+                    sql_and(
+                        DBMessageMap.source_channel == source_id_str,
+                        DBMessageMap.target_channel == target_id_str,
+                    ),
+                    sql_and(
+                        sqlalchemy.sql.expression.literal(not one_sided),
+                        DBMessageMap.source_channel == target_id_str,
+                        DBMessageMap.target_channel == source_id_str,
+                    ),
+                )
+            )
+
+            def execute_queries():
+                session.execute(delete_demolished_bridges)
+                session.execute(delete_demolished_messages)
+
+            await sql_retry(execute_queries)
+        except Exception as e:
+            if close_after and session:
+                session.rollback()
+                session.close()
+
+            raise e
+
+        if close_after:
+            session.commit()
+            session.close()
 
     def get_one_way_bridge(
         self,
