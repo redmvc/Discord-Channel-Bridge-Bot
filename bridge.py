@@ -449,3 +449,4 @@ class Bridges:
 
 
 bridges = Bridges()
+per_channel_webhooks: dict[int, discord.Webhook] = {}
