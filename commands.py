@@ -1810,27 +1810,35 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
         return
 
     # Now we resolve all of the async calls to get the final list of users per reaction
-    async def get_list_of_reacting_users(
-        list_of_reacters: list[Coroutine[Any, Any, set[int]]]
-    ):
-        gathered_users = await asyncio.gather(*list_of_reacters)
-        set_of_users: set[int] = set.union(*gathered_users)
-        set_of_users.discard(bot_user_id)
-        return set_of_users
+    try:
 
-    list_of_reacting_users_async = [
-        get_list_of_reacting_users(list_of_reacters)
-        for _, list_of_reacters in all_reactions_async.items()
-    ]
-    list_of_reacting_users = await asyncio.gather(*list_of_reacting_users_async)
+        async def get_list_of_reacting_users(
+            list_of_reacters: list[Coroutine[Any, Any, set[int]]]
+        ):
+            gathered_users = await asyncio.gather(*list_of_reacters)
+            set_of_users: set[int] = set.union(*gathered_users)
+            set_of_users.discard(bot_user_id)
+            return set_of_users
 
-    all_reactions = {
-        reaction_id: users
-        for reaction_id, users in zip(
-            all_reactions_async.keys(), list_of_reacting_users
+        list_of_reacting_users_async = [
+            get_list_of_reacting_users(list_of_reacters)
+            for _, list_of_reacters in all_reactions_async.items()
+        ]
+        list_of_reacting_users = await asyncio.gather(*list_of_reacting_users_async)
+
+        all_reactions = {
+            reaction_id: users
+            for reaction_id, users in zip(
+                all_reactions_async.keys(), list_of_reacting_users
+            )
+            if len(users) > 0
+        }
+    except discord.errors.HTTPException:
+        await interaction.followup.send(
+            "❌ There was a problem requesting the reactions from the Discord API. Please make sure that the bot has access to the channel you are trying to run this command from and try again in a few minutes.",
+            ephemeral=True,
         )
-        if len(users) > 0
-    }
+        return
 
     if len(all_reactions) == 0:
         await interaction.followup.send(
