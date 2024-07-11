@@ -33,7 +33,6 @@ class DBBridge(DBBase):
     - `id (INT)`: The id number of a bridge, has `PRIMARY KEY` and `AUTO_INCREMENT`.
     - `source (VARCHAR(32))`: The ID of the bridge's source channel or thread.
     - `target (VARCHAR(32))`: The ID of the bridge's target channel or thread.
-    - `webhook (VARCHAR(32))`: The ID of the webhook attached to the target channel which bridges messages to it.
 
     #### Constraints
     - `unique_source_target (UNIQUE(source, target))`: A combination of source and target channel or thread IDs has to be unique.
@@ -47,7 +46,6 @@ class DBBridge(DBBase):
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     source: Mapped[str] = mapped_column(String(32), nullable=False)
     target: Mapped[str] = mapped_column(String(32), nullable=False)
-    webhook: Mapped[str] = mapped_column(String(32))
 
 
 class DBWebhook(DBBase):

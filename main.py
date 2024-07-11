@@ -17,13 +17,14 @@ from sqlalchemy.orm import Session as SQLSession
 import commands
 import emoji_hash_map
 import globals
-from bridge import Bridge, bridges
+from bridge import Bridge, bridges, per_channel_webhooks
 from database import (
     DBAppWhitelist,
     DBAutoBridgeThreadChannels,
     DBBridge,
     DBMessageMap,
     DBReactionMap,
+    DBWebhook,
     engine,
     sql_retry,
 )
@@ -54,79 +55,165 @@ async def on_ready():
     session = None
     try:
         with SQLSession(engine) as session:
-            # I am going to try to identify all existing bridges
-            invalid_channels: set[str] = set()
-            invalid_webhooks: set[str] = set()
-            create_bridges = []
+            # I am going to try to identify all existing bridges and webhooks and add them to my tracking
+            # and also delete the ones that aren't valid or accessible
+            invalid_channel_ids: set[str] = set()
+            invalid_webhook_ids: set[str] = set()
 
+            select_all_webhooks: SQLSelect = SQLSelect(DBWebhook)
+            webhook_query_result: ScalarResult[DBWebhook] = session.scalars(
+                select_all_webhooks
+            )
+            for channel_webhook in webhook_query_result:
+                channel_id = int(channel_webhook.channel)
+                webhook_id = int(channel_webhook.webhook)
+
+                channel = await globals.get_channel_from_id(channel_id)
+                if not channel:
+                    # If I don't have access to the channel, delete bridges from and to it
+                    invalid_channel_ids.add(channel_webhook.channel)
+                    invalid_webhook_ids.add(channel_webhook.webhook)
+                    continue
+
+                try:
+                    webhook = await globals.client.fetch_webhook(webhook_id)
+                except Exception:
+                    # If I have access to the channel but not the webhook I remove that channel from targets
+                    invalid_channel_ids.add(channel_webhook.channel)
+                    invalid_webhook_ids.add(channel_webhook.webhook)
+                    continue
+
+                # Webhook and channel are valid
+                per_channel_webhooks[channel_id] = webhook
+
+            # I will make a list of all target channels that have at least one source and delete the ones that don't
+            all_target_channels: set[str] = set()
+            targets_with_sources: set[str] = set()
+
+            async_create_bridges: list[Coroutine[Any, Any, Bridge]] = []
             select_all_bridges: SQLSelect = SQLSelect(DBBridge)
             bridge_query_result: ScalarResult[DBBridge] = session.scalars(
                 select_all_bridges
             )
             for bridge in bridge_query_result:
-                source_id_str = bridge.source
                 target_id_str = bridge.target
-                webhook_id_str = bridge.webhook
-
-                if webhook_id_str in invalid_webhooks:
+                if target_id_str in invalid_channel_ids:
                     continue
 
+                target_id = int(target_id_str)
+                if per_channel_webhooks.get(target_id):
+                    webhook = per_channel_webhooks[target_id]
+                else:
+                    # This target channel is not in my list of webhooks fetched from earlier, destroy this bridge
+                    invalid_channel_ids.add(target_id_str)
+                    continue
+
+                webhook_id_str = str(webhook.id)
+                if webhook_id_str in invalid_webhook_ids:
+                    # This should almost certainly never happen, unless for some reason the same webhook ID is attached to multiple channels
+                    invalid_channel_ids.add(target_id_str)
+                    continue
+
+                if target_id not in per_channel_webhooks:
+                    # I only need to check if the target channel exists if I haven't already done this before
+                    target_channel = await globals.get_channel_from_id(target_id)
+                    if not target_channel:
+                        # If I don't have access to the target channel, delete bridges from and to it
+                        invalid_channel_ids.add(target_id_str)
+                        invalid_webhook_ids.add(webhook_id_str)
+                        target_channel_exists = False
+                    else:
+                        all_target_channels.add(target_id_str)
+                        target_channel_exists = True
+                else:
+                    target_channel_exists = True
+
+                source_id_str = bridge.source
                 source_id = int(source_id_str)
-                source_channel = await globals.get_channel_from_id(int(source_id))
+                source_channel = await globals.get_channel_from_id(source_id)
                 if not source_channel:
                     # If I don't have access to the source channel, delete bridges from and to it
-                    invalid_channels.add(source_id_str)
-
-                target_id = int(target_id_str)
-                target_channel = await globals.get_channel_from_id(int(target_id))
-                if not target_channel:
-                    # If I don't have access to the target channel, delete bridges from and to it
-                    invalid_channels.add(target_id_str)
-
-                try:
-                    webhook = await globals.client.fetch_webhook(int(webhook_id_str))
-
-                    if not source_channel:
-                        # I have access to the target webhook but not to the source channel anymore so I'll delete the webhook
-                        await webhook.delete(
-                            reason="Source channel no longer available."
-                        )
-                        raise Exception
-                    elif target_channel:
-                        # I have access to both the source and target channels and to the webhook
-                        create_bridges.append(
-                            bridges.create_bridge(source_id, target_id, webhook)
-                        )
-                except Exception:
-                    invalid_webhooks.add(webhook_id_str)
-
-                    if source_channel and target_channel:
-                        # There *should* be a webhook there and I have access to the channels
-                        create_bridges.append(
-                            commands.create_bridge_and_db(source_id, target_id, session)
-                        )
-            await asyncio.gather(*create_bridges)
-
-            if len(invalid_channels) > 0:
-                delete_invalid_channels = SQLDelete(DBBridge).where(
-                    sql_or(
-                        DBBridge.source.in_(invalid_channels),
-                        DBBridge.target.in_(invalid_channels),
+                    invalid_channel_ids.add(source_id_str)
+                    if per_channel_webhooks.get(source_id):
+                        # If this source channel has a webhook attached to it, I'll mark it for deletion
+                        invalid_webhook_ids.add(str(per_channel_webhooks[source_id].id))
+                elif target_channel_exists:
+                    # I have access to both the source and target channels and to the webhook
+                    # so I can add this channel to my list of Bridges
+                    targets_with_sources.add(target_id_str)
+                    async_create_bridges.append(
+                        bridges.create_bridge(source_id, target_id, webhook)
                     )
-                )
-                session.execute(delete_invalid_channels)
 
-                delete_invalid_messages = SQLDelete(DBMessageMap).where(
-                    sql_or(
-                        DBMessageMap.source_channel.in_(invalid_channels),
-                        DBMessageMap.target_channel.in_(invalid_channels),
+            # Any target channels that don't have valid source channels attached to them should be deleted
+            invalid_channel_ids = invalid_channel_ids.union(
+                all_target_channels - targets_with_sources
+            )
+
+            # I'm going to delete all webhooks attached to invalid channels or to channels that aren't target channels
+            async def delete_webhook(channel_id: int):
+                await per_channel_webhooks[channel_id].delete(
+                    reason="Source channel no longer available."
+                )
+                del per_channel_webhooks[channel_id]
+
+            channel_ids_with_webhooks_to_delete = {
+                channel_id
+                for channel_id_str in invalid_channel_ids
+                if (channel_id := int(channel_id_str))
+                and per_channel_webhooks.get(channel_id)
+            }.union(
+                {
+                    channel_id
+                    for channel_id, webhook in per_channel_webhooks.items()
+                    if str(channel_id) not in targets_with_sources
+                    or str(webhook.id) in invalid_webhook_ids
+                }
+            )
+            async_delete_webhooks = [
+                delete_webhook(channel_id)
+                for channel_id in channel_ids_with_webhooks_to_delete
+            ]
+
+            # Gather bridge creation and webhook deletion
+            await asyncio.gather(*async_create_bridges, *async_delete_webhooks)
+
+            # And update the database with any necessary deletions
+            if (
+                len(invalid_channel_ids) > 0
+                or len(channel_ids_with_webhooks_to_delete) > 0
+                or len(invalid_webhook_ids) > 0
+            ):
+                # First fetch the full list of channel IDs to delete
+                channel_ids_to_delete = invalid_channel_ids.union(
+                    {
+                        str(channel_id)
+                        for channel_id in channel_ids_with_webhooks_to_delete
+                    }
+                )
+
+                if len(channel_ids_to_delete) > 0:
+                    delete_invalid_bridges = SQLDelete(DBBridge).where(
+                        sql_or(
+                            DBBridge.source.in_(channel_ids_to_delete),
+                            DBBridge.target.in_(channel_ids_to_delete),
+                        )
                     )
-                )
-                session.execute(delete_invalid_messages)
+                    session.execute(delete_invalid_bridges)
 
-            if len(invalid_webhooks) > 0:
-                delete_invalid_webhooks = SQLDelete(DBBridge).where(
-                    DBBridge.webhook.in_(invalid_webhooks)
+                    delete_invalid_messages = SQLDelete(DBMessageMap).where(
+                        sql_or(
+                            DBMessageMap.source_channel.in_(channel_ids_to_delete),
+                            DBMessageMap.target_channel.in_(channel_ids_to_delete),
+                        )
+                    )
+                    session.execute(delete_invalid_messages)
+
+                delete_invalid_webhooks = SQLDelete(DBWebhook).where(
+                    sql_or(
+                        DBWebhook.channel.in_(channel_ids_to_delete),
+                        DBWebhook.webhook.in_(invalid_webhook_ids),
+                    )
                 )
                 session.execute(delete_invalid_webhooks)
 

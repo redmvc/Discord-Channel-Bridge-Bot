@@ -20,6 +20,7 @@ from database import (
     DBAutoBridgeThreadChannels,
     DBBridge,
     DBMessageMap,
+    DBWebhook,
     engine,
     sql_retry,
     sql_upsert,
@@ -1155,16 +1156,23 @@ async def create_bridge_and_db(
             session = SQLSession(engine)
 
         bridge = await bridges.create_bridge(source, target, webhook)
+        target_id_str = str(globals.get_id_from_channel(target))
         insert_bridge_row = await sql_upsert(
             table=DBBridge,
             indices={"source", "target"},
             source=str(globals.get_id_from_channel(source)),
-            target=str(globals.get_id_from_channel(target)),
+            target=target_id_str,
+        )
+        insert_webhook_row = await sql_upsert(
+            table=DBWebhook,
+            indices={"channel"},
+            channel=target_id_str,
             webhook=str(bridge.webhook.id),
         )
 
         def execute_query():
             session.execute(insert_bridge_row)
+            session.execute(insert_webhook_row)
 
         await sql_retry(execute_query)
     except Exception as e:
