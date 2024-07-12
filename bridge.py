@@ -67,18 +67,17 @@ class Bridge:
         #### Returns:
             - `Bridge`: The created Bridge.
         """
-        target_channel = (
-            await globals.get_channel_from_id(target)
-            if isinstance(target, int)
-            else target
-        )
         validate_channels(
             source=(
                 await globals.get_channel_from_id(source)
                 if isinstance(source, int)
                 else source
             ),
-            target=target_channel,
+            target=(
+                await globals.get_channel_from_id(target)
+                if isinstance(target, int)
+                else target
+            ),
         )
 
         self = Bridge()
@@ -171,7 +170,11 @@ class Bridges:
         if webhook:
             types_to_validate["webhook"] = (webhook, discord.Webhook)
         if len(types_to_validate) > 0:
-            validate_types(**types_to_validate)
+            validate_types(
+                source=(source, (discord.TextChannel, discord.Thread, int)),
+                target=(target, (discord.TextChannel, discord.Thread, int)),
+                **types_to_validate,
+            )
 
         # First I create the Bridge in memory
         source_id = globals.get_id_from_channel(source)
@@ -244,11 +247,11 @@ class Bridges:
                 close_after = True
                 session = SQLSession(engine)
 
-            target_id_str = str(globals.get_id_from_channel(target))
+            target_id_str = str(target_id)
             insert_bridge_row = await sql_insert_ignore_duplicate(
                 table=DBBridge,
                 indices={"source", "target"},
-                source=str(globals.get_id_from_channel(source)),
+                source=str(source_id),
                 target=target_id_str,
             )
             insert_webhook_row = await sql_upsert(
