@@ -4,11 +4,12 @@ import asyncio
 import io
 import json
 from hashlib import md5
+from logging import warn
 from typing import Any, Callable, Literal, SupportsInt, TypedDict, TypeVar, cast
 
 import aiohttp
-from aiolimiter import AsyncLimiter
 import discord
+from aiolimiter import AsyncLimiter
 from typing_extensions import NotRequired
 
 from validations import ArgumentError, HTTPResponseError, validate_types
@@ -79,7 +80,8 @@ class Settings(TypedDict):
 
 
 settings_root: dict[str, str | Settings] = json.load(open("settings.json"))
-context: str = cast(str, settings_root["context"])
+assert isinstance(settings_root["context"], str)
+context = settings_root["context"]
 settings: Settings = cast(Settings, settings_root[context])
 
 # Variables for connection to the Discord client
@@ -124,24 +126,22 @@ async def get_channel_from_id(
         - `channel_or_id`: Either a Discord channel or an ID of same.
 
     #### Returns:
-        - If the argument is a channel, returns it unchanged; otherwise, returns a channel with the ID passed.
+        - If the argument is a channel, returns it unchanged; otherwise, returns a channel with the ID passed, or None if it couldn't be found.
     """
     validate_types(
-        {
-            "channel_or_id": (
-                channel_or_id,
-                (
-                    int,
-                    discord.TextChannel,
-                    discord.Thread,
-                    discord.VoiceChannel,
-                    discord.StageChannel,
-                    discord.ForumChannel,
-                    discord.CategoryChannel,
-                    discord.abc.PrivateChannel,
-                ),
-            )
-        }
+        channel_or_id=(
+            channel_or_id,
+            (
+                int,
+                discord.TextChannel,
+                discord.Thread,
+                discord.VoiceChannel,
+                discord.StageChannel,
+                discord.ForumChannel,
+                discord.CategoryChannel,
+                discord.abc.PrivateChannel,
+            ),
+        )
     )
 
     if isinstance(channel_or_id, int):
@@ -168,28 +168,25 @@ def get_id_from_channel(
     #### Returns:
         - `int`: The ID of the channel passed as argument.
     """
-    validate_types(
-        {
-            "channel_or_id": (
-                channel_or_id,
-                (
-                    int,
-                    discord.TextChannel,
-                    discord.Thread,
-                    discord.VoiceChannel,
-                    discord.StageChannel,
-                    discord.ForumChannel,
-                    discord.CategoryChannel,
-                    discord.abc.PrivateChannel,
-                ),
-            )
-        }
-    )
-
     if isinstance(channel_or_id, int):
         return channel_or_id
-    else:
-        return channel_or_id.id
+
+    validate_types(
+        channel_or_id=(
+            channel_or_id,
+            (
+                discord.TextChannel,
+                discord.Thread,
+                discord.VoiceChannel,
+                discord.StageChannel,
+                discord.ForumChannel,
+                discord.CategoryChannel,
+                discord.abc.PrivateChannel,
+            ),
+        )
+    )
+
+    return channel_or_id.id
 
 
 async def get_channel_member(
@@ -202,20 +199,18 @@ async def get_channel_member(
         - `member_id`: Their ID.
     """
     validate_types(
-        {
-            "channel": (
-                channel,
-                (
-                    discord.VoiceChannel,
-                    discord.StageChannel,
-                    discord.ForumChannel,
-                    discord.TextChannel,
-                    discord.CategoryChannel,
-                    discord.Thread,
-                ),
+        channel=(
+            channel,
+            (
+                discord.TextChannel,
+                discord.Thread,
+                discord.VoiceChannel,
+                discord.StageChannel,
+                discord.ForumChannel,
+                discord.CategoryChannel,
             ),
-            "member_id": (member_id, int),
-        }
+        ),
+        member_id=(member_id, int),
     )
 
     channel_member = channel.guild.get_member(member_id)
@@ -242,7 +237,7 @@ async def get_image_from_URL(url: str) -> bytes:
     """
     image_bytes: io.BytesIO | None = None
     async with aiohttp.ClientSession(
-        headers={"User-Agent": "Discord Channel Bridge Bot/0.1"}
+        headers={"User-Agent": "Discord Channel Bridge Bot/1.0"}
     ) as session:
         async with session.get(url) as response:
             if response.status != 200:
@@ -268,11 +263,11 @@ def get_emoji_information(
 
     #### Args:
         - `emoji`: A Discord emoji. Defaults to None, in which case the values below will be used instead.
-        - `emoji_id`: The ID of an emoji. Defaults to None, in which case the value above will be used instead.
+        - `emoji_id`: The ID of an emoji. Will only be used if `emoji` is None. Defaults to None.
         - `emoji_name`: The name of the emoji. Defaults to None, but must be included if `emoji_id` is. If it starts with `"a:"` the emoji will be marked as animated.
 
     #### Raises:
-        - `ArgumentError`: The number of arguments passed is incorrect.
+        - `ArgumentError`: Neither `emoji` nor `emoji_id` were passed, or `emoji_id` was passed but not `emoji_name`.
         - `ValueError`: `emoji` argument was passed and had type `PartialEmoji` but it was not a custom emoji, or `emoji_id` argument was passed and had type `str` but it was not a valid numerical ID.
     """
     types_to_validate: dict[str, tuple] = {}
@@ -292,7 +287,7 @@ def get_emoji_information(
         raise ArgumentError(
             "At least one of emoji or emoji_id must be passed as argument."
         )
-    validate_types(types_to_validate)
+    validate_types(**types_to_validate)
 
     if emoji:
         if not emoji.id:
@@ -303,7 +298,7 @@ def get_emoji_information(
         emoji_animated = emoji.animated
         emoji_url = emoji.url
     else:
-        emoji_name = cast(str, emoji_name)
+        assert emoji_id and isinstance(emoji_name, str)
 
         emoji_animated = emoji_name.startswith("a:")
         if emoji_animated:
@@ -318,13 +313,13 @@ def get_emoji_information(
         emoji_url = f"https://cdn.discordapp.com/emojis/{emoji_id}.{ext}?v=1"
 
     try:
-        emoji_int = int(cast(int | str, emoji_id))
+        emoji_id_int = int(emoji_id)
     except ValueError:
         raise ValueError(
-            "emoji_int was passed as an argument and had type str but was not convertible to an ID."
+            "emoji_id was passed as an argument and had type str but was not convertible to an ID."
         )
 
-    return (emoji_int, emoji_name, emoji_animated, emoji_url)
+    return (emoji_id_int, emoji_name, emoji_animated, emoji_url)
 
 
 def hash_image(image: bytes) -> str:
@@ -336,20 +331,33 @@ def hash_image(image: bytes) -> str:
     return md5(image).hexdigest()
 
 
-async def wait_until_ready() -> bool:
-    """Returns True when the bot is ready or False if it times out."""
+async def wait_until_ready(
+    *, time_to_wait: float | int = 100, polling_rate: float | int = 1
+) -> bool:
+    """Return True when the bot is ready or False if it times out.
+
+    #### Args:
+        - `time_to_wait`: The amount of time in seconds to wait for the bot to get ready. Values less than 0 will be treated as 0. Defaults to 100.
+        - `polling_rate`: The amount of time in seconds to wait between checks for the variable. Values less than 0 will be treated as 0. Defaults to 1.
+    """
+    global is_ready
     if is_ready:
         return True
 
-    time_waited = 0
-    while not is_ready and time_waited < 100:
-        await asyncio.sleep(1)
-        time_waited += 1
+    validate_types(
+        time_to_wait=(time_to_wait, (int, float)),
+        polling_rate=(polling_rate, (int, float)),
+    )
 
-    if time_waited >= 100:
-        # somethin' real funky going on here
-        # I don't have error handling yet though
-        print("Taking forever to get ready.")
+    time_to_wait = max(time_to_wait, 0.0)
+    polling_rate = max(polling_rate, 0.0)
+    time_waited = 0.0
+    while not is_ready and time_waited < time_to_wait:
+        await asyncio.sleep(polling_rate)
+        time_waited += polling_rate
+
+    if time_waited >= time_to_wait:
+        warn("Taking forever to get ready.")
         return False
     return True
 
@@ -364,23 +372,32 @@ async def run_retries(
 
     #### Args:
         - `fun`: The function to run.
-        - `num_retries`: The number of times to try the function again.
-        - `time_to_wait`: How long to wait between retries.
+        - `num_retries`: The number of times to try the function again. If set to 0 or less, will be set to 1.
+        - `time_to_wait`: Time in seconds to wait between retries; only used if `num_retries` is greater than 1. If set to 0 or less, will set `num_retries` to 1. Defaults to 5.
         - `exceptions_to_catch`: An exception type or a list of exception types to catch. Defaults to None, in which case all types will be caught.
 
     #### Returns:
         - `_T`: The result of calling `fun()`.
     """
-    types_to_validate: dict[str, tuple] = {  # TODO validate callable?
-        "num_retries": (num_retries, int),
-        "time_to_wait": (time_to_wait, (float, int)),
-    }
+    validate_exceptions_to_catch: dict[str, tuple] = {}
     if exceptions_to_catch:
         if isinstance(exceptions_to_catch, type):
             exceptions_to_catch = (exceptions_to_catch,)
         else:
-            types_to_validate["exceptions_to_catch"] = (exceptions_to_catch, tuple)
-    validate_types(types_to_validate)
+            validate_exceptions_to_catch["exceptions_to_catch"] = (
+                exceptions_to_catch,
+                tuple,
+            )
+    validate_types(
+        num_retries=(num_retries, int),
+        time_to_wait=(time_to_wait, (float, int)),
+        **validate_exceptions_to_catch,
+    )
+
+    if num_retries < 1:
+        num_retries = 1
+    elif num_retries > 1 and time_to_wait <= 0:
+        num_retries = 1
 
     for retry in range(num_retries):
         try:
