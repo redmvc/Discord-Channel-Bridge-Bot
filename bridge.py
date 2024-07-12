@@ -171,7 +171,11 @@ class Bridges:
         if webhook:
             types_to_validate["webhook"] = (webhook, discord.Webhook)
         if len(types_to_validate) > 0:
-            validate_types(**types_to_validate)
+            validate_types(
+                source=(source, (discord.TextChannel, discord.Thread, int)),
+                target=(target, (discord.TextChannel, discord.Thread, int)),
+                **types_to_validate,
+            )
 
         # First I create the Bridge in memory
         source_id = globals.get_id_from_channel(source)

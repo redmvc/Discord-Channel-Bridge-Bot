@@ -171,22 +171,10 @@ def get_id_from_channel(
     if isinstance(channel_or_id, int):
         return channel_or_id
 
-    validate_types(
-        channel_or_id=(
-            channel_or_id,
-            (
-                discord.TextChannel,
-                discord.Thread,
-                discord.VoiceChannel,
-                discord.StageChannel,
-                discord.ForumChannel,
-                discord.CategoryChannel,
-                discord.abc.PrivateChannel,
-            ),
-        )
-    )
+    if channel_or_id.id:
+        return channel_or_id.id
 
-    return channel_or_id.id
+    raise ValueError("Argument passed was not a valid channel nor an ID.")
 
 
 async def get_channel_member(
