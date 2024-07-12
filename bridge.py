@@ -244,11 +244,11 @@ class Bridges:
                 close_after = True
                 session = SQLSession(engine)
 
-            target_id_str = str(globals.get_id_from_channel(target))
+            target_id_str = str(target_id)
             insert_bridge_row = await sql_insert_ignore_duplicate(
                 table=DBBridge,
                 indices={"source", "target"},
-                source=str(globals.get_id_from_channel(source)),
+                source=str(source_id),
                 target=target_id_str,
             )
             insert_webhook_row = await sql_upsert(
