@@ -7,22 +7,18 @@ import discord
 from sqlalchemy import Delete as SQLDelete
 from sqlalchemy import ScalarResult
 from sqlalchemy import Select as SQLSelect
-from sqlalchemy import and_ as sql_and
-from sqlalchemy import or_ as sql_or
 from sqlalchemy.exc import StatementError as SQLError
 from sqlalchemy.orm import Session as SQLSession
 
 import emoji_hash_map
 import globals
-from bridge import Bridge, bridges
+from bridge import bridges
 from database import (
     DBAppWhitelist,
     DBAutoBridgeThreadChannels,
-    DBBridge,
     DBMessageMap,
     engine,
     sql_retry,
-    sql_upsert,
 )
 from validations import validate_types
 
@@ -222,11 +218,15 @@ async def bridge(
             create_bridges = []
             if direction != "inbound":
                 create_bridges.append(
-                    create_bridge_and_db(message_channel, target_channel, session)
+                    bridges.create_bridge(
+                        source=message_channel, target=target_channel, session=session
+                    )
                 )
             if direction != "outbound":
                 create_bridges.append(
-                    create_bridge_and_db(target_channel, message_channel, session)
+                    bridges.create_bridge(
+                        source=target_channel, target=message_channel, session=session
+                    )
                 )
 
             await asyncio.gather(*create_bridges)
@@ -504,54 +504,17 @@ async def demolish(interaction: discord.Interaction, target: str):
 
     await interaction.response.defer(thinking=True, ephemeral=True)
 
-    demolishing = demolish_bridges(message_channel, target_channel)
-
-    message_channel_id = str(message_channel.id)
-    target_channel_id = str(target_channel.id)
-
-    session = None
     try:
         with SQLSession(engine) as session:
-            delete_demolished_bridges = SQLDelete(DBBridge).where(
-                sql_or(
-                    sql_and(
-                        DBBridge.source == message_channel_id,
-                        DBBridge.target == target_channel_id,
-                    ),
-                    sql_and(
-                        DBBridge.source == target_channel_id,
-                        DBBridge.target == message_channel_id,
-                    ),
-                )
+            await bridges.demolish_bridges(
+                message_channel, target_channel, session=session
             )
-            delete_demolished_messages = SQLDelete(DBMessageMap).where(
-                sql_or(
-                    sql_and(
-                        DBMessageMap.source_channel == message_channel_id,
-                        DBMessageMap.target_channel == target_channel_id,
-                    ),
-                    sql_and(
-                        DBMessageMap.source_channel == target_channel_id,
-                        DBMessageMap.target_channel == message_channel_id,
-                    ),
-                )
-            )
-
-            def execute_queries():
-                session.execute(delete_demolished_bridges)
-                session.execute(delete_demolished_messages)
-
-            await sql_retry(execute_queries)
-            await demolishing
             await validate_auto_bridge_thread_channels(
                 {message_channel.id, target_channel.id}, session
             )
+
             session.commit()
     except Exception as e:
-        if session:
-            session.rollback()
-            session.close()
-
         if isinstance(e, SQLError):
             await interaction.followup.send(
                 "❌ There was an issue with the connection to the database; thread and bridge creation failed.",
@@ -685,40 +648,14 @@ async def demolish_all(
 
                 channels_affected = channels_affected.union(paired_channels)
 
-                channel_to_demolish_id_str = str(channel_to_demolish_id)
-                exceptions_list = [str(i) for i in exceptions]
-
-                delete_demolished_bridges = SQLDelete(DBBridge).where(
-                    sql_or(
-                        DBBridge.target == channel_to_demolish_id_str,
-                        sql_and(
-                            DBBridge.source == channel_to_demolish_id_str,
-                            DBBridge.target.not_in(exceptions_list),
-                        ),
-                    )
-                )
-
-                delete_demolished_messages = SQLDelete(DBMessageMap).where(
-                    sql_or(
-                        DBMessageMap.target_channel == channel_to_demolish_id_str,
-                        sql_and(
-                            DBMessageMap.source_channel == channel_to_demolish_id_str,
-                            DBMessageMap.target_channel.not_in(exceptions_list),
-                        ),
-                    )
-                )
-
-                def execute_queries():
-                    session.execute(delete_demolished_bridges)
-                    session.execute(delete_demolished_messages)
-
-                await sql_retry(execute_queries)
-
                 for paired_channel_id in paired_channels:
                     bridges_being_demolished.append(
-                        demolish_bridges(paired_channel_id, channel_to_demolish_id)
+                        bridges.demolish_bridges(
+                            paired_channel_id, channel_to_demolish_id, session=session
+                        )
                     )
 
+            await asyncio.gather(*bridges_being_demolished)
             await validate_auto_bridge_thread_channels(channels_affected, session)
 
             session.commit()
@@ -741,7 +678,6 @@ async def demolish_all(
 
         return
 
-    await asyncio.gather(*bridges_being_demolished)
     if len(exceptions) == 0:
         await interaction.followup.send(
             "✅ Bridges demolished!",
@@ -1116,140 +1052,6 @@ class ConfirmHashServer(discord.ui.Button):
         await interaction.followup.send("✅ Successfully hashed emoji!", ephemeral=True)
 
 
-async def create_bridge_and_db(
-    source: discord.TextChannel | discord.Thread | int,
-    target: discord.TextChannel | discord.Thread | int,
-    session: SQLSession | None = None,
-    webhook: discord.Webhook | None = None,
-) -> Bridge:
-    """Create a one-way Bridge from source channel to target channel in `bridges`, creating a webhook if necessary, then inserts a reference to this new bridge into the database.
-
-    #### Args:
-        - `source`: Source channel for the Bridge, or ID of same.
-        - `target`: Target channel for the Bridge, or ID of same.
-        - `webhook`: Optionally, an already-existing webhook connecting these channels. Defaults to None.
-        - `session`: Optionally, a session with the connection to the database. Defaults to None, in which case creates and closes a new one locally.
-
-    #### Raises:
-        - `ChannelTypeError`: The source or target channels are not text channels nor threads off a text channel.
-        - `WebhookChannelError`: `webhook` is not attached to Bridge's target channel.
-        - `HTTPException`: Deleting an existing webhook or creating a new one failed.
-        - `Forbidden`: You do not have permissions to create or delete webhooks.
-
-    #### Returns:
-        - `Bridge`: The created `Bridge`.
-    """
-    types_to_validate: dict[str, tuple] = {}
-    if webhook:
-        types_to_validate["webhook"] = (webhook, discord.Webhook)
-    if session:
-        types_to_validate["session"] = (session, SQLSession)
-    if types_to_validate:
-        validate_types(**types_to_validate)
-
-    bridge = None
-    close_after = False
-    try:
-        if not session:
-            close_after = True
-            session = SQLSession(engine)
-
-        bridge = await create_bridge(source, target, webhook)
-        insert_bridge_row = await sql_upsert(
-            table=DBBridge,
-            indices={"source", "target"},
-            source=str(globals.get_id_from_channel(source)),
-            target=str(globals.get_id_from_channel(target)),
-            webhook=str(bridge.webhook.id),
-        )
-
-        def execute_query():
-            session.execute(insert_bridge_row)
-
-        await sql_retry(execute_query)
-    except Exception as e:
-        if close_after and session:
-            session.rollback()
-            session.close()
-
-        if isinstance(e, SQLError) and bridge:
-            await bridges.demolish_bridge(source, target)
-
-        raise e
-
-    if close_after:
-        session.commit()
-        session.close()
-
-    return bridge
-
-
-async def create_bridge(
-    source: discord.TextChannel | discord.Thread | int,
-    target: discord.TextChannel | discord.Thread | int,
-    webhook: discord.Webhook | None = None,
-) -> Bridge:
-    """Create a one-way Bridge from source channel to target channel in `bridges`, creating a webhook if necessary. This function does not alter the database entries in any way.
-
-    #### Args:
-        - `source`: Source channel for the Bridge, or ID of same.
-        - `target`: Target channel for the Bridge, or ID of same.
-        - `webhook`: Optionally, an already-existing webhook connecting these channels. Defaults to None.
-
-    #### Raises:
-        - `ChannelTypeError`: The source or target channels are not text channels nor threads off a text channel.
-        - `WebhookChannelError`: `webhook` is not attached to Bridge's target channel.
-        - `HTTPException`: Deleting an existing webhook or creating a new one failed.
-        - `Forbidden`: You do not have permissions to create or delete webhooks.
-
-    #### Returns:
-        - `Bridge`: The created `Bridge`.
-    """
-
-    return await bridges.create_bridge(source, target, webhook)
-
-
-async def demolish_bridges(
-    source: discord.TextChannel | discord.Thread | int,
-    target: discord.TextChannel | discord.Thread | int,
-):
-    """Destroy all Bridges between source and target channels, removing them from `bridges` and deleting their webhooks. This function does not alter the database entries in any way.
-
-    #### Args:
-        - `source`: One end of the Bridge, or ID of same.
-        - `target`: The other end of the Bridge, or ID of same.
-
-    #### Raises:
-        - `HTTPException`: Deleting the webhook failed.
-        - `Forbidden`: You do not have permissions to delete the webhook.
-        - `ValueError`: The webhook does not have a token associated with it.
-    """
-
-    await asyncio.gather(
-        demolish_bridge_one_sided(source, target),
-        demolish_bridge_one_sided(target, source),
-    )
-
-
-async def demolish_bridge_one_sided(
-    source: discord.TextChannel | discord.Thread | int,
-    target: discord.TextChannel | discord.Thread | int,
-):
-    """Destroy the Bridge going from source channel to target channel, removing it from `bridges` and deleting its webhook. This function does not alter the database entries in any way.
-
-    #### Args:
-        - `source`: One end of the Bridge, or ID of same.
-        - `target`: The other end of the Bridge, or ID of same.
-
-    #### Raises:
-        - `HTTPException`: Deleting the webhook failed.
-        - `Forbidden`: You do not have permissions to delete the webhook.
-        - `ValueError`: The webhook does not have a token associated with it.
-    """
-
-    await bridges.demolish_bridge(source, target)
-
-
 async def bridge_thread_helper(
     thread_to_bridge: discord.Thread,
     user_id: int,
@@ -1429,11 +1231,15 @@ async def bridge_thread_helper(
 
                 threads_created[channel_id] = new_thread
                 create_bridges.append(
-                    create_bridge_and_db(thread_to_bridge, new_thread, session)
+                    bridges.create_bridge(
+                        source=thread_to_bridge, target=new_thread, session=session
+                    )
                 )
                 if inbound_bridges and inbound_bridges[channel_id]:
                     create_bridges.append(
-                        create_bridge_and_db(new_thread, thread_to_bridge, session)
+                        bridges.create_bridge(
+                            source=new_thread, target=thread_to_bridge, session=session
+                        )
                     )
                 succeeded_at_least_once = True
             await asyncio.gather(*(create_bridges + add_user_to_threads))
