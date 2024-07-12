@@ -60,44 +60,24 @@ class Bridge:
         #### Returns:
             - `Bridge`: The created Bridge.
         """
+        target_channel = (
+            await globals.get_channel_from_id(target)
+            if isinstance(target, int)
+            else target
+        )
         validate_channels(
             source=(
                 await globals.get_channel_from_id(source)
                 if isinstance(source, int)
                 else source
             ),
-            target=(
-                await globals.get_channel_from_id(target)
-                if isinstance(target, int)
-                else target
-            ),
+            target=target_channel,
         )
+        assert isinstance(target_channel, (discord.TextChannel, discord.Thread))
 
         self = Bridge()
         self._source_id = globals.get_id_from_channel(source)
         self._target_id = globals.get_id_from_channel(target)
-        await self._add_webhook(webhook)
-
-        return self
-
-    def __init__(self) -> None:
-        """Construct a new empty Bridge. Should only be called from within class method Bridge.create()."""
-        self._source_id: int | None = None
-        self._target_id: int | None = None
-
-    async def _add_webhook(self, webhook: discord.Webhook | None = None) -> None:
-        """Add an existing webhook to this Bridge or create a new one for it.
-
-        #### Args:
-            - `webhook`: The webhook to add. Defaults to None, in which case a new one will be created.
-
-        #### Raises:
-            - `WebhookChannelError`: `webhook` is not attached to Bridge's target channel.
-            - `HTTPException`: Deleting the existing webhook or creating a new webhook failed.
-            - `Forbidden`: You do not have permissions to delete the existing webhook or create a new one.
-            - `ValueError`: Existing webhook does not have a token associated with it.
-        """
-        target_channel = await self.target_channel
 
         if webhook:
             validate_types(webhook=(webhook, discord.Webhook))
@@ -113,9 +93,8 @@ class Bridge:
                     await webhook.delete()
                 except Exception:
                     pass
-                return
-
-            bridges.webhooks[self.target_id] = webhook
+            else:
+                bridges.webhooks[self.target_id] = webhook
         elif not bridges.webhooks.get(self.target_id):
             # Target channel does not already have a webhook, create one
             if isinstance(target_channel, discord.Thread):
@@ -127,6 +106,13 @@ class Bridge:
             bridges.webhooks[self.target_id] = await webhook_channel.create_webhook(
                 name=f":bridge: ({self._source_id} {self._target_id})"
             )
+
+        return self
+
+    def __init__(self) -> None:
+        """Construct a new empty Bridge. Should only be called from within class method Bridge.create()."""
+        self._source_id: int | None = None
+        self._target_id: int | None = None
 
     @property
     def source_id(self) -> int:
