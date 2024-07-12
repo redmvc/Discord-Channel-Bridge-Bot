@@ -1,5 +1,5 @@
 import asyncio
-from typing import Callable, Literal, cast, overload
+from typing import Any, Callable, Coroutine, Literal, cast, overload
 
 import discord
 import sqlalchemy
@@ -67,18 +67,17 @@ class Bridge:
         #### Returns:
             - `Bridge`: The created Bridge.
         """
-        target_channel = (
-            await globals.get_channel_from_id(target)
-            if isinstance(target, int)
-            else target
-        )
         validate_channels(
             source=(
                 await globals.get_channel_from_id(source)
                 if isinstance(source, int)
                 else source
             ),
-            target=target_channel,
+            target=(
+                await globals.get_channel_from_id(target)
+                if isinstance(target, int)
+                else target
+            ),
         )
 
         self = Bridge()
@@ -117,8 +116,8 @@ class Bridge:
         )
 
     @property
-    def webhook(self) -> discord.Webhook:
-        webhook = bridges.webhooks.get(self.target_id)
+    async def webhook(self) -> discord.Webhook:
+        webhook = await bridges.webhooks.get_webhook(self.target_id)
         assert webhook
         return webhook
 
@@ -129,14 +128,14 @@ class Bridges:
 
     Attributes
     ----------
-    webhook : dict[int, discord.Webhook]
+    webhooks : Webhooks
         The webhooks associated with each target channel.
     """
 
     def __init__(self) -> None:
         self._outbound_bridges: dict[int, dict[int, Bridge]] = {}
         self._inbound_bridges: dict[int, dict[int, Bridge]] = {}
-        self.webhooks: dict[int, discord.Webhook] = {}
+        self.webhooks = Webhooks()
 
     async def create_bridge(
         self,
@@ -171,7 +170,16 @@ class Bridges:
         if webhook:
             types_to_validate["webhook"] = (webhook, discord.Webhook)
         if len(types_to_validate) > 0:
-            validate_types(**types_to_validate)
+            validate_types(
+                source=(source, (discord.TextChannel, discord.Thread, int)),
+                target=(target, (discord.TextChannel, discord.Thread, int)),
+                **types_to_validate,
+            )
+
+        target_channel = await globals.get_channel_from_id(target)
+        source_channel = await globals.get_channel_from_id(target)
+        validate_channels(target_channel=target_channel, source_channel=source_channel)
+        target_channel = cast(discord.TextChannel | discord.Thread, target_channel)
 
         # First I create the Bridge in memory
         source_id = globals.get_id_from_channel(source)
@@ -183,10 +191,11 @@ class Bridges:
             bridge = self._outbound_bridges[source_id][target_id]
 
             if webhook:
-                if not self.webhooks.get(target_id):
+                existing_webhook = await self.webhooks.get_webhook(target_id)
+                if not existing_webhook:
                     # I don't already have a webhook registered for the target channel, I'll add one now
-                    self.webhooks[target_id] = webhook
-                elif self.webhooks[target_id].id != webhook.id:
+                    await self.webhooks.add_webhook(target_id, webhook)
+                elif existing_webhook.id != webhook.id:
                     # I already have a webhook registered for the target channel and it is not this one, I'll delete this one
                     try:
                         await webhook.delete()
@@ -204,15 +213,10 @@ class Bridges:
                 self._inbound_bridges[target_id] = {}
             self._inbound_bridges[target_id][source_id] = bridge
 
-            target_channel = await globals.get_channel_from_id(target)
-            assert isinstance(target_channel, (discord.TextChannel, discord.Thread))
-
+            existing_webhook = await self.webhooks.get_webhook(target_id)
             if webhook:
                 validate_webhook(webhook, target_channel)
-                if (
-                    self.webhooks.get(target_id)
-                    and self.webhooks[target_id].id != webhook.id
-                ):
+                if existing_webhook and existing_webhook.id != webhook.id:
                     # If I already have a webhook, I'll destroy the one being passed
                     try:
                         await webhook.delete()
@@ -220,18 +224,10 @@ class Bridges:
                         pass
                 else:
                     # Otherwise, I'll register the one being passed to my target channel
-                    self.webhooks[target_id] = webhook
-            elif not self.webhooks.get(target_id):
+                    await self.webhooks.add_webhook(target, webhook)
+            elif not existing_webhook:
                 # Target channel does not already have a webhook, create one
-                if isinstance(target_channel, discord.Thread):
-                    webhook_channel = target_channel.parent
-                else:
-                    webhook_channel = target_channel
-
-                assert isinstance(webhook_channel, discord.TextChannel)
-                self.webhooks[target_id] = await webhook_channel.create_webhook(
-                    name=f":bridge: ({source_id} {target_id})"
-                )
+                await self.webhooks.add_webhook(target_channel)
 
         # If I don't need to update the database I end here
         if not update_db:
@@ -244,18 +240,20 @@ class Bridges:
                 close_after = True
                 session = SQLSession(engine)
 
-            target_id_str = str(globals.get_id_from_channel(target))
+            target_id_str = str(target_id)
             insert_bridge_row = await sql_insert_ignore_duplicate(
                 table=DBBridge,
                 indices={"source", "target"},
-                source=str(globals.get_id_from_channel(source)),
+                source=str(source_id),
                 target=target_id_str,
             )
+
+            bridge_webhook = await bridge.webhook
             insert_webhook_row = await sql_upsert(
                 table=DBWebhook,
                 indices={"channel"},
                 channel=target_id_str,
-                webhook=str(bridge.webhook.id),
+                webhook=str(bridge_webhook.id),
             )
 
             def execute_query():
@@ -359,27 +357,19 @@ class Bridges:
                 del self._outbound_bridges[target_id]
 
         # If any channels no longer have bridges pointing to them, delete their webhooks
-        async def delete_webhook(channel_id: int):
-            webhook = self.webhooks[channel_id]
-            try:
-                await webhook.delete()
-            except Exception:
-                pass
+        async_delete_webhooks: list[Coroutine[Any, Any, int | None]] = []
+        if not self._inbound_bridges.get(source_id):
+            async_delete_webhooks.append(self.webhooks.delete_channel(source_id))
+        if not self._inbound_bridges.get(target_id):
+            async_delete_webhooks.append(self.webhooks.delete_channel(target_id))
 
-            del self.webhooks[channel_id]
-
-        async_delete_webhooks = []
         webhooks_deleted: set[str] = set()
-        if not self._inbound_bridges.get(source_id) and self.webhooks.get(source_id):
-            webhooks_deleted.add(str(self.webhooks[source_id].id))
-            async_delete_webhooks.append(delete_webhook(source_id))
-
-        if not self._inbound_bridges.get(target_id) and self.webhooks.get(target_id):
-            webhooks_deleted.add(str(self.webhooks[target_id].id))
-            async_delete_webhooks.append(delete_webhook(target_id))
-
         if len(async_delete_webhooks) > 0:
-            await asyncio.gather(*async_delete_webhooks)
+            webhooks_deleted = {
+                str(deleted_webhook_id)
+                for deleted_webhook_id in await asyncio.gather(*async_delete_webhooks)
+                if deleted_webhook_id
+            }
 
         # Return if we're not meant to update the DB
         if not update_db:
@@ -518,28 +508,26 @@ class Bridges:
         return self._inbound_bridges.get(globals.get_id_from_channel(target))
 
     @overload
-    def get_reachable_channels(
+    async def get_reachable_channels(
         self,
         starting_channel: discord.TextChannel | discord.Thread | int,
         direction: Literal["outbound", "inbound"],
         *,
         include_webhooks: Literal[True],
         include_starting: bool = False,
-    ) -> dict[int, discord.Webhook]:
-        ...
+    ) -> dict[int, discord.Webhook]: ...
 
     @overload
-    def get_reachable_channels(
+    async def get_reachable_channels(
         self,
         starting_channel: discord.TextChannel | discord.Thread | int,
         direction: Literal["outbound", "inbound"],
         *,
         include_webhooks: Literal[False] | None = None,
         include_starting: bool = False,
-    ) -> set[int]:
-        ...
+    ) -> set[int]: ...
 
-    def get_reachable_channels(
+    async def get_reachable_channels(
         self,
         starting_channel: discord.TextChannel | discord.Thread | int,
         direction: Literal["outbound", "inbound"],
@@ -608,7 +596,7 @@ class Bridges:
             newly_reachable_ids = set(bridges_to_check.keys())
             if isinstance(reachable_channel_ids, dict):
                 reachable_channel_ids = {
-                    channel_id: bridge.webhook
+                    channel_id: await bridge.webhook
                     for channel_id, bridge in bridges_to_check.items()
                 } | reachable_channel_ids
             else:
@@ -624,6 +612,171 @@ class Bridges:
                 reachable_channel_ids.discard(starting_channel_id)
 
         return reachable_channel_ids
+
+
+class Webhooks:
+    """A class for keeping track of all webhooks available."""
+
+    def __init__(self) -> None:
+        # A list of webhooks by ID
+        self._webhooks: dict[int, discord.Webhook] = {}
+
+        # All channels using a given webhook
+        self._channels_per_webhook: dict[int, set[int]] = {}
+
+        # The webhook used by a given channel
+        self._webhook_by_channel: dict[int, int] = {}
+
+        # The webhook used by a parent channel
+        self._webhook_by_parent: dict[int, int] = {}
+
+    async def add_webhook(
+        self,
+        channel_or_id: discord.TextChannel | discord.Thread | int,
+        webhook: discord.Webhook | None = None,
+    ) -> discord.Webhook:
+        """Add a webhook to my list of webhooks. If no webhook is provided and the channel is not a thread whose parent already has a webhook, a new webhook is created.
+
+        #### Args:
+            - `channel_or_id`: The channel or ID of a channel to add a webhook to.
+            - `webhook`: The webhook to add, or None to try to find one or create one. Defaults to None.
+        """
+        if webhook:
+            validate_webhook = {"webhook": (webhook, discord.Webhook)}
+        else:
+            validate_webhook = {}
+        validate_types(
+            channel_or_id=(channel_or_id, (discord.TextChannel, discord.Thread, int)),
+            **validate_webhook,
+        )
+        channel_id = globals.get_id_from_channel(channel_or_id)
+
+        if existing_webhook := self._webhooks.get(channel_id):
+            # if I already have a webhook associated with this channel I'm gucci
+            return existing_webhook
+
+        if not webhook or not webhook.channel_id:
+            # Webhook wasn't given or wasn't valid
+            channel = await globals.get_channel_from_id(channel_or_id)
+            validate_channels(channel=channel)
+
+            webhook_owner = channel
+            if isinstance(channel, discord.Thread) and isinstance(
+                channel.parent, discord.TextChannel
+            ):
+                # Try to get the webhook associated with the parent channel
+                webhook_owner = channel.parent
+                if (webhook_id := self._webhook_by_channel.get(webhook_owner.id)) or (
+                    webhook_id := self._webhook_by_parent.get(webhook_owner.id)
+                ):
+                    webhook = self._webhooks.get(webhook_id)
+            elif webhook_id := self._webhook_by_parent.get(channel_id):
+                # I am the parent of some thread that had already created a webhook
+                webhook = self._webhooks.get(webhook_id)
+
+            if not webhook or not webhook.channel_id:
+                # Webhook still doesn't exist, going to create it
+                webhook = await cast(discord.TextChannel, webhook_owner).create_webhook(
+                    name="Channel Bridge Bot"
+                )
+
+        assert webhook.channel_id
+        webhook_id = webhook.id
+
+        if not self._webhooks.get(webhook_id):
+            self._webhooks[webhook_id] = webhook
+            self._channels_per_webhook[webhook_id] = set()
+            self._webhook_by_parent[webhook.channel_id] = webhook_id
+        self._channels_per_webhook[webhook_id].add(channel_id)
+        self._webhook_by_channel[channel_id] = webhook_id
+
+        return webhook
+
+    async def get_webhook(
+        self, channel_or_id: discord.TextChannel | discord.Thread | int
+    ) -> discord.Webhook | None:
+        """Return a webhook associated with a channel (or a thread's parent) or None if there isn't one.
+
+        #### Args:
+            - `channel_or_id`: The channel or ID to find a webhook for.
+        """
+        validate_types(
+            channel_or_id=(channel_or_id, (discord.TextChannel, discord.Thread, int))
+        )
+
+        channel_id = globals.get_id_from_channel(channel_or_id)
+        if (webhook_id := self._webhook_by_channel.get(channel_id)) and (
+            webhook := self._webhooks.get(webhook_id)
+        ):
+            return webhook
+
+        if (webhook_id := self._webhook_by_parent.get(channel_id)) and (
+            webhook := self._webhooks.get(webhook_id)
+        ):
+            # This thread is the owner of a webhook added by a thread
+            return await self.add_webhook(channel_id, webhook)
+
+        channel = await globals.get_channel_from_id(channel_or_id)
+        if (
+            isinstance(channel, discord.Thread)
+            and isinstance(channel.parent, discord.TextChannel)
+            and (
+                (webhook_id := self._webhook_by_channel.get(channel.parent.id))
+                or (webhook_id := self._webhook_by_parent.get(channel.parent.id))
+            )
+            and (webhook := self._webhooks.get(webhook_id))
+        ):
+            # This thread's parent has a webhook
+            return await self.add_webhook(channel_id, webhook)
+
+        # The channel doesn't have its own webhook associated, nor is it a thread so we can't find its parent
+        return None
+
+    async def delete_channel(
+        self, channel_or_id: discord.TextChannel | discord.Thread | int
+    ) -> int | None:
+        """Delete a channel from the list of webhooks and, if there are no longer any channels associated with its webhook, delete it and return its ID.
+
+        #### Args:
+            - `channel_or_id`: The channel or ID to delete.
+        """
+        validate_types(
+            channel_or_id=(channel_or_id, (discord.TextChannel, discord.Thread, int))
+        )
+        channel_id = globals.get_id_from_channel(channel_or_id)
+
+        webhook_id = self._webhook_by_channel.get(channel_id)
+        if not webhook_id:
+            return None
+
+        del self._webhook_by_channel[channel_id]
+        try:
+            if self._channels_per_webhook.get(webhook_id):
+                self._channels_per_webhook[webhook_id].remove(channel_id)
+            else:
+                self._channels_per_webhook[webhook_id] = set()
+        except KeyError:
+            pass
+
+        if (channels := self._channels_per_webhook.get(webhook_id)) and len(
+            channels
+        ) > 0:
+            # There are still channels associated with this webhook
+            return None
+
+        webhook = self._webhooks.get(webhook_id)
+        if not webhook:
+            # The webhook doesn't exist somehow
+            return webhook_id
+
+        await webhook.delete(reason="Bridge demolition.")
+
+        assert webhook.channel_id
+        del self._channels_per_webhook[webhook_id]
+        del self._webhook_by_parent[webhook.channel_id]
+        del self._webhooks[webhook_id]
+
+        return webhook_id
 
 
 bridges = Bridges()

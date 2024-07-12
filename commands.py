@@ -354,7 +354,8 @@ async def auto_bridge_threads(
             continue
 
         for target_id, bridge in bridge_list.items():
-            if target_id == bridge.webhook.channel_id:
+            bridge_webhook = await bridge.webhook
+            if target_id == bridge_webhook.channel_id:
                 at_least_one_channel = True
                 break
 
@@ -1063,9 +1064,6 @@ async def bridge_thread_helper(
         - `thread_to_bridge`: The thread to bridge.
         - `user_id`: ID of the user that created the thread.
         - `interaction`: The interaction that called this function, if any. Defaults to None.
-
-    #### Asserts:
-        - `isinstance(thread_to_bridge.parent, discord.TextChannel)`
     """
     if interaction:
         validate_interaction = {"interaction": (interaction, discord.Interaction)}
@@ -1073,14 +1071,14 @@ async def bridge_thread_helper(
         validate_interaction = {}
     validate_types(
         thread_to_bridge=(thread_to_bridge, discord.Thread),
+        threat_to_bridge_parent=(thread_to_bridge.parent, discord.TextChannel),
         user_id=(user_id, int),
         **validate_interaction,
     )
+    thread_parent = cast(discord.TextChannel, thread_to_bridge.parent)
 
-    assert isinstance(thread_to_bridge.parent, discord.TextChannel)
-
-    outbound_bridges = bridges.get_outbound_bridges(thread_to_bridge.parent.id)
-    inbound_bridges = bridges.get_inbound_bridges(thread_to_bridge.parent.id)
+    outbound_bridges = bridges.get_outbound_bridges(thread_parent.id)
+    inbound_bridges = bridges.get_inbound_bridges(thread_parent.id)
     if not outbound_bridges:
         if interaction:
             await interaction.response.send_message(
@@ -1092,7 +1090,8 @@ async def bridge_thread_helper(
     # I need to check that the current channel is bridged to at least one other channel (as opposed to only threads)
     at_least_one_channel = False
     for target_id, bridge in outbound_bridges.items():
-        if target_id == bridge.webhook.channel_id:
+        bridge_webhook = await bridge.webhook
+        if target_id == bridge_webhook.channel_id:
             at_least_one_channel = True
             break
 
@@ -1114,7 +1113,7 @@ async def bridge_thread_helper(
             matching_starting_messages: dict[int, int] = {}
             try:
                 # I don't need to store it I just need to know whether it exists
-                await thread_to_bridge.parent.fetch_message(thread_to_bridge.id)
+                await thread_parent.fetch_message(thread_to_bridge.id)
 
                 def get_source_starting_message():
                     return session.scalars(
@@ -1132,7 +1131,7 @@ async def bridge_thread_helper(
                     source_message_id = int(source_starting_message.source_message)
                     matching_starting_messages[source_channel_id] = source_message_id
                 else:
-                    source_channel_id = thread_to_bridge.parent.id
+                    source_channel_id = thread_parent.id
                     source_message_id = thread_to_bridge.id
 
                 def get_target_starting_messages():
@@ -1199,14 +1198,14 @@ async def bridge_thread_helper(
                         # That message doesn't already have a thread, so I can create it
                         new_thread = await matching_starting_message.create_thread(
                             name=thread_to_bridge.name,
-                            reason=f"Bridged from {thread_to_bridge.guild.name}#{thread_to_bridge.parent.name}#{thread_to_bridge.name}",
+                            reason=f"Bridged from {thread_to_bridge.guild.name}#{thread_parent.name}#{thread_to_bridge.name}",
                         )
 
                 if not new_thread:
                     # Haven't created a thread yet, try to create it from the channel
                     new_thread = await channel.create_thread(
                         name=thread_to_bridge.name,
-                        reason=f"Bridged from {thread_to_bridge.guild.name}#{thread_to_bridge.parent.name}#{thread_to_bridge.name}",
+                        reason=f"Bridged from {thread_to_bridge.guild.name}#{thread_parent.name}#{thread_to_bridge.name}",
                         type=discord.ChannelType.public_thread,
                     )
 
@@ -1489,7 +1488,7 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
     await interaction.response.defer(thinking=True, ephemeral=True)
 
     # Now find the list of channels that can validly reach this one via inbound chains
-    reachable_channel_ids = bridges.get_reachable_channels(channel.id, "inbound")
+    reachable_channel_ids = await bridges.get_reachable_channels(channel.id, "inbound")
 
     # This variable is where I'll gather the list of users per reaction
     # The key of each entry is a reaction emoji ID
