@@ -359,21 +359,24 @@ class Bridges:
                 del self._outbound_bridges[target_id]
 
         # If any channels no longer have bridges pointing to them, delete their webhooks
-        async def delete_webhook(webhook: discord.Webhook):
+        async def delete_webhook(channel_id: int):
+            webhook = self.webhooks[channel_id]
             try:
                 await webhook.delete()
             except Exception:
                 pass
 
+            del self.webhooks[channel_id]
+
         async_delete_webhooks = []
         webhooks_deleted: set[str] = set()
         if not self._inbound_bridges.get(source_id) and self.webhooks.get(source_id):
             webhooks_deleted.add(str(self.webhooks[source_id].id))
-            async_delete_webhooks.append(delete_webhook(self.webhooks[source_id]))
+            async_delete_webhooks.append(delete_webhook(source_id))
 
         if not self._inbound_bridges.get(target_id) and self.webhooks.get(target_id):
             webhooks_deleted.add(str(self.webhooks[target_id].id))
-            async_delete_webhooks.append(delete_webhook(self.webhooks[target_id]))
+            async_delete_webhooks.append(delete_webhook(target_id))
 
         if len(async_delete_webhooks) > 0:
             await asyncio.gather(*async_delete_webhooks)
