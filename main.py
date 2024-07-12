@@ -64,6 +64,7 @@ async def on_ready():
             webhook_query_result: ScalarResult[DBWebhook] = session.scalars(
                 select_all_webhooks
             )
+            add_webhook_async = []
             for channel_webhook in webhook_query_result:
                 channel_id = int(channel_webhook.channel)
                 webhook_id = int(channel_webhook.webhook)
@@ -72,7 +73,11 @@ async def on_ready():
                 if not channel:
                     # If I don't have access to the channel, delete bridges from and to it
                     invalid_channel_ids.add(channel_webhook.channel)
-                    invalid_webhook_ids.add(channel_webhook.webhook)
+                    continue
+
+                if channel_webhook.webhook in invalid_webhook_ids:
+                    # If I noticed that I can't fetch this webhook I add its channel to the list of invalid channels
+                    invalid_channel_ids.add(channel_webhook.channel)
                     continue
 
                 try:
@@ -84,7 +89,10 @@ async def on_ready():
                     continue
 
                 # Webhook and channel are valid
-                bridges.webhooks[channel_id] = webhook
+                add_webhook_async.append(
+                    bridges.webhooks.add_webhook(channel_id, webhook)
+                )
+            asyncio.gather(*add_webhook_async)
 
             # I will make a list of all target channels that have at least one source and delete the ones that don't
             all_target_channels: set[str] = set()
@@ -101,32 +109,22 @@ async def on_ready():
                     continue
 
                 target_id = int(target_id_str)
-                if bridges.webhooks.get(target_id):
-                    webhook = bridges.webhooks[target_id]
-                else:
+                target_webhook = await bridges.webhooks.get_webhook(target_id)
+                if not target_webhook:
                     # This target channel is not in my list of webhooks fetched from earlier, destroy this bridge
                     invalid_channel_ids.add(target_id_str)
                     continue
 
-                webhook_id_str = str(webhook.id)
+                webhook_id_str = str(target_webhook.id)
                 if webhook_id_str in invalid_webhook_ids:
-                    # This should almost certainly never happen, unless for some reason the same webhook ID is attached to multiple channels
+                    # This should almost certainly never happen
                     invalid_channel_ids.add(target_id_str)
+                    if deleted_webhook_id := await bridges.webhooks.delete_channel(
+                        target_id
+                    ):
+                        # After deleting this channel there were no longer any channels attached to this webhook
+                        invalid_webhook_ids.add(str(deleted_webhook_id))
                     continue
-
-                if target_id not in bridges.webhooks:
-                    # I only need to check if the target channel exists if I haven't already done this before
-                    target_channel = await globals.get_channel_from_id(target_id)
-                    if not target_channel:
-                        # If I don't have access to the target channel, delete bridges from and to it
-                        invalid_channel_ids.add(target_id_str)
-                        invalid_webhook_ids.add(webhook_id_str)
-                        target_channel_exists = False
-                    else:
-                        all_target_channels.add(target_id_str)
-                        target_channel_exists = True
-                else:
-                    target_channel_exists = True
 
                 source_id_str = bridge.source
                 source_id = int(source_id_str)
@@ -134,10 +132,12 @@ async def on_ready():
                 if not source_channel:
                     # If I don't have access to the source channel, delete bridges from and to it
                     invalid_channel_ids.add(source_id_str)
-                    if bridges.webhooks.get(source_id):
-                        # If this source channel has a webhook attached to it, I'll mark it for deletion
-                        invalid_webhook_ids.add(str(bridges.webhooks[source_id].id))
-                elif target_channel_exists:
+                    if deleted_webhook_id := await bridges.webhooks.delete_channel(
+                        source_id
+                    ):
+                        # After deleting this channel there were no longer any channels attached to this webhook
+                        invalid_webhook_ids.add(str(deleted_webhook_id))
+                else:
                     # I have access to both the source and target channels and to the webhook
                     # so I can add this channel to my list of Bridges
                     targets_with_sources.add(target_id_str)
@@ -145,7 +145,7 @@ async def on_ready():
                         bridges.create_bridge(
                             source=source_id,
                             target=target_id,
-                            webhook=webhook,
+                            webhook=target_webhook,
                             update_db=False,
                         )
                     )
@@ -156,32 +156,24 @@ async def on_ready():
             )
 
             # I'm going to delete all webhooks attached to invalid channels or to channels that aren't target channels
-            async def delete_webhook(channel_id: int):
-                await bridges.webhooks[channel_id].delete(
-                    reason="Source channel no longer available."
-                )
-                del bridges.webhooks[channel_id]
-
             channel_ids_with_webhooks_to_delete = {
                 channel_id
                 for channel_id_str in invalid_channel_ids
                 if (channel_id := int(channel_id_str))
-                and bridges.webhooks.get(channel_id)
+                and (await bridges.webhooks.get_webhook(channel_id))
             }.union(
                 {
                     channel_id
-                    for channel_id, webhook in bridges.webhooks.items()
+                    for channel_id, webhook_id in bridges.webhooks._webhook_by_channel.items()
                     if str(channel_id) not in targets_with_sources
-                    or str(webhook.id) in invalid_webhook_ids
+                    or str(webhook_id) in invalid_webhook_ids
                 }
             )
-            async_delete_webhooks = [
-                delete_webhook(channel_id)
-                for channel_id in channel_ids_with_webhooks_to_delete
-            ]
+            for channel_id in channel_ids_with_webhooks_to_delete:
+                await bridges.webhooks.delete_channel(channel_id)
 
             # Gather bridge creation and webhook deletion
-            await asyncio.gather(*async_create_bridges, *async_delete_webhooks)
+            await asyncio.gather(*async_create_bridges)
 
             # And update the database with any necessary deletions
             if (
@@ -440,7 +432,7 @@ async def bridge_message_helper(message: discord.Message):
     message_content = await replace_missing_emoji(message.content)
 
     # Get all channels reachable from this one via an unbroken sequence of outbound bridges as well as their webhooks
-    reachable_channels = bridges.get_reachable_channels(
+    reachable_channels = await bridges.get_reachable_channels(
         message.channel.id,
         "outbound",
         include_webhooks=True,
@@ -691,7 +683,7 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
     updated_message_content = await replace_missing_emoji(updated_message_content)
 
     # Get all channels reachable from this one via an unbroken sequence of outbound bridges as well as their webhooks
-    reachable_channels = bridges.get_reachable_channels(
+    reachable_channels = await bridges.get_reachable_channels(
         payload.channel_id,
         "outbound",
         include_webhooks=True,
@@ -853,7 +845,7 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
         return
 
     # Get all channels reachable from this one via an unbroken sequence of outbound bridges as well as their webhooks
-    reachable_channels = bridges.get_reachable_channels(
+    reachable_channels = await bridges.get_reachable_channels(
         payload.channel_id,
         "outbound",
         include_webhooks=True,
@@ -1021,7 +1013,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         equivalent_emoji_ids = frozenset(str(payload.emoji.id))
 
     # Now find the list of channels that can validly be reached via outbound chains from this channel
-    reachable_channel_ids = bridges.get_reachable_channels(
+    reachable_channel_ids = await bridges.get_reachable_channels(
         payload.channel_id, "outbound"
     )
 
