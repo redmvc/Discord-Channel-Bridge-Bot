@@ -170,21 +170,6 @@ async def get_channel_member(
         - `channel`: The channel to look for a member in.
         - `member_id`: Their ID.
     """
-    validate_types(
-        channel=(
-            channel,
-            (
-                discord.TextChannel,
-                discord.Thread,
-                discord.VoiceChannel,
-                discord.StageChannel,
-                discord.ForumChannel,
-                discord.CategoryChannel,
-            ),
-        ),
-        member_id=(member_id, int),
-    )
-
     channel_member = channel.guild.get_member(member_id)
     if not channel_member:
         try:
