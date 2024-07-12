@@ -67,18 +67,17 @@ class Bridge:
         #### Returns:
             - `Bridge`: The created Bridge.
         """
-        target_channel = (
-            await globals.get_channel_from_id(target)
-            if isinstance(target, int)
-            else target
-        )
         validate_channels(
             source=(
                 await globals.get_channel_from_id(source)
                 if isinstance(source, int)
                 else source
             ),
-            target=target_channel,
+            target=(
+                await globals.get_channel_from_id(target)
+                if isinstance(target, int)
+                else target
+            ),
         )
 
         self = Bridge()

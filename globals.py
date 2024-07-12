@@ -128,22 +128,6 @@ async def get_channel_from_id(
     #### Returns:
         - If the argument is a channel, returns it unchanged; otherwise, returns a channel with the ID passed, or None if it couldn't be found.
     """
-    validate_types(
-        channel_or_id=(
-            channel_or_id,
-            (
-                int,
-                discord.TextChannel,
-                discord.Thread,
-                discord.VoiceChannel,
-                discord.StageChannel,
-                discord.ForumChannel,
-                discord.CategoryChannel,
-                discord.abc.PrivateChannel,
-            ),
-        )
-    )
-
     if isinstance(channel_or_id, int):
         channel = client.get_channel(channel_or_id)
         if not channel:
