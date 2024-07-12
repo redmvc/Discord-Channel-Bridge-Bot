@@ -176,6 +176,11 @@ class Bridges:
                 **types_to_validate,
             )
 
+        target_channel = await globals.get_channel_from_id(target)
+        source_channel = await globals.get_channel_from_id(target)
+        validate_channels(target_channel=target_channel, source_channel=source_channel)
+        target_channel = cast(discord.TextChannel | discord.Thread, target_channel)
+
         # First I create the Bridge in memory
         source_id = globals.get_id_from_channel(source)
         target_id = globals.get_id_from_channel(target)
@@ -206,9 +211,6 @@ class Bridges:
             if not self._inbound_bridges.get(target_id):
                 self._inbound_bridges[target_id] = {}
             self._inbound_bridges[target_id][source_id] = bridge
-
-            target_channel = await globals.get_channel_from_id(target)
-            assert isinstance(target_channel, (discord.TextChannel, discord.Thread))
 
             if webhook:
                 validate_webhook(webhook, target_channel)
