@@ -354,7 +354,8 @@ async def auto_bridge_threads(
             continue
 
         for target_id, bridge in bridge_list.items():
-            if target_id == bridge.webhook.channel_id:
+            bridge_webhook = await bridge.webhook
+            if target_id == bridge_webhook.channel_id:
                 at_least_one_channel = True
                 break
 
@@ -1089,7 +1090,8 @@ async def bridge_thread_helper(
     # I need to check that the current channel is bridged to at least one other channel (as opposed to only threads)
     at_least_one_channel = False
     for target_id, bridge in outbound_bridges.items():
-        if target_id == bridge.webhook.channel_id:
+        bridge_webhook = await bridge.webhook
+        if target_id == bridge_webhook.channel_id:
             at_least_one_channel = True
             break
 
@@ -1486,7 +1488,7 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
     await interaction.response.defer(thinking=True, ephemeral=True)
 
     # Now find the list of channels that can validly reach this one via inbound chains
-    reachable_channel_ids = bridges.get_reachable_channels(channel.id, "inbound")
+    reachable_channel_ids = await bridges.get_reachable_channels(channel.id, "inbound")
 
     # This variable is where I'll gather the list of users per reaction
     # The key of each entry is a reaction emoji ID
