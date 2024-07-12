@@ -626,4 +626,164 @@ class Bridges:
         return reachable_channel_ids
 
 
+class Webhooks:
+    """A class for keeping track of all webhooks available."""
+
+    def __init__(self) -> None:
+        # A list of webhooks by ID
+        self._webhooks: dict[int, discord.Webhook] = {}
+
+        # All channels using a given webhook
+        self._channels_per_webhook: dict[int, set[int]] = {}
+
+        # The webhook used by a given channel
+        self._webhook_by_channel: dict[int, int] = {}
+
+        # The webhook used by a parent channel
+        self._webhook_by_parent: dict[int, int] = {}
+
+    async def add_webhook(
+        self,
+        channel_or_id: discord.TextChannel | discord.Thread | int,
+        webhook: discord.Webhook | None = None,
+    ) -> discord.Webhook:
+        """Add a webhook to my list of webhooks. If no webhook is provided and the channel is not a thread whose parent already has a webhook, a new webhook is created.
+
+        #### Args:
+            - `channel_or_id`: The channel or ID of a channel to add a webhook to.
+            - `webhook`: The webhook to add, or None to try to find one or create one. Defaults to None.
+        """
+        validate_types(
+            channel_or_id=(channel_or_id, (discord.TextChannel, discord.Thread, int))
+        )
+        channel_id = globals.get_id_from_channel(channel_or_id)
+
+        if existing_webhook := self._webhooks.get(channel_id):
+            # if I already have a webhook associated with this channel I'm gucci
+            return existing_webhook
+
+        if not webhook or not webhook.channel_id:
+            # Webhook wasn't given or wasn't valid
+            channel = await globals.get_channel_from_id(channel_or_id)
+            validate_channels(channel=channel)
+
+            webhook_owner = channel
+            if isinstance(channel, discord.Thread) and isinstance(
+                channel.parent, discord.TextChannel
+            ):
+                # Try to get the webhook associated with the parent channel
+                webhook_owner = channel.parent
+                if (webhook_id := self._webhook_by_channel.get(webhook_owner.id)) or (
+                    webhook_id := self._webhook_by_parent.get(webhook_owner.id)
+                ):
+                    webhook = self._webhooks.get(webhook_id)
+            elif webhook_id := self._webhook_by_parent.get(channel_id):
+                # I am the parent of some thread that had already created a webhook
+                webhook = self._webhooks.get(webhook_id)
+
+            if not webhook or not webhook.channel_id:
+                # Webhook still doesn't exist, going to create it
+                webhook = await cast(discord.TextChannel, webhook_owner).create_webhook(
+                    name="Channel Bridge Bot"
+                )
+
+        assert webhook.channel_id
+        webhook_id = webhook.id
+
+        if not self._webhooks.get(webhook_id):
+            self._webhooks[webhook_id] = webhook
+            self._channels_per_webhook[webhook_id] = set()
+            self._webhook_by_parent[webhook.channel_id] = webhook_id
+        self._channels_per_webhook[webhook_id].add(channel_id)
+        self._webhook_by_channel[channel_id] = webhook_id
+
+        return webhook
+
+    async def get_webhook(
+        self, channel_or_id: discord.TextChannel | discord.Thread | int
+    ) -> discord.Webhook | None:
+        """Return a webhook associated with a channel (or a thread's parent) or None if there isn't one.
+
+        #### Args:
+            - `channel_or_id`: The channel or ID to find a webhook for.
+        """
+        validate_types(
+            channel_or_id=(channel_or_id, (discord.TextChannel, discord.Thread, int))
+        )
+
+        channel_id = globals.get_id_from_channel(channel_or_id)
+        if (webhook_id := self._webhook_by_channel.get(channel_id)) and (
+            webhook := self._webhooks.get(webhook_id)
+        ):
+            return webhook
+
+        if (webhook_id := self._webhook_by_parent.get(channel_id)) and (
+            webhook := self._webhooks.get(webhook_id)
+        ):
+            # This thread is the owner of a webhook added by a thread
+            return await self.add_webhook(channel_id, webhook)
+
+        channel = await globals.get_channel_from_id(channel_or_id)
+        if (
+            isinstance(channel, discord.Thread)
+            and isinstance(channel.parent, discord.TextChannel)
+            and (
+                (webhook_id := self._webhook_by_channel.get(channel.parent.id))
+                or (webhook_id := self._webhook_by_parent.get(channel.parent.id))
+            )
+            and (webhook := self._webhooks.get(webhook_id))
+        ):
+            # This thread's parent has a webhook
+            return await self.add_webhook(channel_id, webhook)
+
+        # The channel doesn't have its own webhook associated, nor is it a thread so we can't find its parent
+        return None
+
+    async def delete_channel(
+        self, channel_or_id: discord.TextChannel | discord.Thread | int
+    ) -> int | None:
+        """Delete a channel from the list of webhooks and, if there are no longer any channels associated with its webhook, delete it and return the webhook ID.
+
+        #### Args:
+            - `channel_or_id`: The channel or ID to delete.
+        """
+        validate_types(
+            channel_or_id=(channel_or_id, (discord.TextChannel, discord.Thread, int))
+        )
+        channel_id = globals.get_id_from_channel(channel_or_id)
+
+        webhook_id = self._webhook_by_channel.get(channel_id)
+        if not webhook_id:
+            return None
+
+        del self._webhook_by_channel[channel_id]
+        try:
+            if self._channels_per_webhook.get(webhook_id):
+                self._channels_per_webhook[webhook_id].remove(channel_id)
+            else:
+                self._channels_per_webhook[webhook_id] = set()
+        except KeyError:
+            pass
+
+        if (channels := self._channels_per_webhook.get(webhook_id)) and len(
+            channels
+        ) > 0:
+            # There are still channels associated with this webhook
+            return None
+
+        webhook = self._webhooks.get(webhook_id)
+        if not webhook:
+            # The webhook doesn't exist somehow
+            return webhook_id
+
+        await webhook.delete(reason="Bridge demolition.")
+
+        assert webhook.channel_id
+        del self._channels_per_webhook[webhook_id]
+        del self._webhook_by_parent[webhook.channel_id]
+        del self._webhooks[webhook_id]
+
+        return webhook_id
+
+
 bridges = Bridges()
