@@ -103,13 +103,21 @@ class Bridge:
             validate_types(webhook=(webhook, discord.Webhook))
             validate_webhook(webhook, target_channel)
 
-        # If I already have a webhook, I'll destroy it and replace it with a new one
-        if bridges.webhooks.get(self.target_id):
-            await bridges.webhooks[self.target_id].delete()
-
         if webhook:
+            if (
+                bridges.webhooks.get(self.target_id)
+                and bridges.webhooks[self.target_id].id != webhook.id
+            ):
+                # If I already have a webhook, I'll destroy the one being passed and ignore the new one
+                try:
+                    await webhook.delete()
+                except Exception:
+                    pass
+                return
+
             bridges.webhooks[self.target_id] = webhook
-        else:
+        elif not bridges.webhooks.get(self.target_id):
+            # Target channel does not already have a webhook, create one
             if isinstance(target_channel, discord.Thread):
                 webhook_channel = target_channel.parent
             else:
@@ -119,23 +127,6 @@ class Bridge:
             bridges.webhooks[self.target_id] = await webhook_channel.create_webhook(
                 name=f":bridge: ({self._source_id} {self._target_id})"
             )
-
-    async def update_webhook(self, webhook: discord.Webhook | None = None) -> None:
-        """Replace this Bridge's webhook, destroying the existing one if possible.
-
-        #### Args:
-            - `webhook`: The webhook to replace this Bridge's webhook with. Defaults to None, in which case this function does nothing.
-
-        #### Raises:
-            - `WebhookChannelError`: `webhook` is not attached to Bridge's target channel.
-            - `HTTPException`: Deleting the existing webhook failed.
-            - `Forbidden`: You do not have permissions to delete the existing webhook.
-            - `ValueError`: Existing webhook does not have a token associated with it.
-        """
-        if not webhook:
-            return
-
-        await self._add_webhook(webhook)
 
     @property
     def source_id(self) -> int:
@@ -218,8 +209,19 @@ class Bridges:
         if self._outbound_bridges.get(source_id) and self._outbound_bridges[
             source_id
         ].get(target_id):
+            # This bridge already exists, I won't create a new one
             bridge = self._outbound_bridges[source_id][target_id]
-            await bridge.update_webhook(webhook)
+
+            if webhook:
+                if not self.webhooks.get(target_id):
+                    # I don't already have a webhook registered for the target channel, I'll add one now
+                    self.webhooks[target_id] = webhook
+                elif self.webhooks[target_id].id != webhook.id:
+                    # I already have a webhook registered for the target channel and it is not this one, I'll delete this one
+                    try:
+                        await webhook.delete()
+                    except Exception:
+                        pass
         else:
             bridge = await Bridge.create(source_id, target_id, webhook)
 
