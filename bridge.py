@@ -355,9 +355,12 @@ class Bridges:
                 del self._outbound_bridges[target_id]
 
         delete_webhooks = []
+        webhooks_deleted: set[str] = set()
         if not self._inbound_bridges.get(source_id) and self.webhooks.get(source_id):
+            webhooks_deleted.add(str(self.webhooks[source_id].id))
             delete_webhooks.append(self.webhooks[source_id].delete())
         if not self._inbound_bridges.get(target_id) and self.webhooks.get(target_id):
+            webhooks_deleted.add(str(self.webhooks[target_id].id))
             delete_webhooks.append(self.webhooks[target_id].delete())
         if len(delete_webhooks) > 0:
             await asyncio.gather(*delete_webhooks)
@@ -375,7 +378,6 @@ class Bridges:
 
             source_id_str = str(source_id)
             target_id_str = str(target_id)
-
             delete_demolished_bridges = SQLDelete(DBBridge).where(
                 sql_or(
                     sql_and(
@@ -403,9 +405,18 @@ class Bridges:
                 )
             )
 
+            if len(webhooks_deleted) > 0:
+                delete_invalid_webhooks = SQLDelete(DBWebhook).where(
+                    DBWebhook.webhook.in_(webhooks_deleted)
+                )
+            else:
+                delete_invalid_webhooks = None
+
             def execute_queries():
                 session.execute(delete_demolished_bridges)
                 session.execute(delete_demolished_messages)
+                if delete_invalid_webhooks is not None:
+                    session.execute(delete_invalid_webhooks)
 
             await sql_retry(execute_queries)
         except Exception as e:
