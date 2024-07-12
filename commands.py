@@ -655,10 +655,8 @@ async def demolish_all(
                         )
                     )
 
-            await asyncio.gather(
-                *bridges_being_demolished,
-                validate_auto_bridge_thread_channels(channels_affected, session),
-            )
+            await asyncio.gather(*bridges_being_demolished)
+            await validate_auto_bridge_thread_channels(channels_affected, session)
 
             session.commit()
     except Exception as e:
