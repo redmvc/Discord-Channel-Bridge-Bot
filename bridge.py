@@ -1,3 +1,4 @@
+import asyncio
 from typing import Callable, Literal, cast, overload
 
 import discord
@@ -83,7 +84,6 @@ class Bridge:
         """Construct a new empty Bridge. Should only be called from within class method Bridge.create()."""
         self._source_id: int | None = None
         self._target_id: int | None = None
-        self._webhook: discord.Webhook | None = None
 
     async def _add_webhook(self, webhook: discord.Webhook | None = None) -> None:
         """Add an existing webhook to this Bridge or create a new one for it.
@@ -104,10 +104,11 @@ class Bridge:
             validate_webhook(webhook, target_channel)
 
         # If I already have a webhook, I'll destroy it and replace it with a new one
-        await self._destroy_webhook("Recycling webhook.")
+        if per_channel_webhooks.get(self.target_id):
+            await per_channel_webhooks[self.target_id].delete()
 
         if webhook:
-            self._webhook = webhook
+            per_channel_webhooks[self.target_id] = webhook
         else:
             if isinstance(target_channel, discord.Thread):
                 webhook_channel = target_channel.parent
@@ -115,7 +116,7 @@ class Bridge:
                 webhook_channel = target_channel
 
             assert isinstance(webhook_channel, discord.TextChannel)
-            self._webhook = await webhook_channel.create_webhook(
+            per_channel_webhooks[self.target_id] = await webhook_channel.create_webhook(
                 name=f":bridge: ({self._source_id} {self._target_id})"
             )
 
@@ -135,26 +136,6 @@ class Bridge:
             return
 
         await self._add_webhook(webhook)
-
-    async def _destroy_webhook(self, reason: str = "User request."):
-        """Destroys the Bridge's webhook if it exists.
-
-        #### Args:
-            - `reason`: The reason to be stored in the Discord logs. Defaults to "User request.".
-
-        #### Raises:
-            - `HTTPException`: Deleting the webhook failed.
-            - `Forbidden`: You do not have permissions to delete this webhook.
-            - `ValueError`: This webhook does not have a token associated with it.
-        """
-        validate_types(reason=(reason, str))
-
-        if self._webhook:
-            try:
-                await self._webhook.delete(reason=reason)
-            except discord.NotFound:
-                pass
-            self._webhook = None
 
     @property
     def source_id(self) -> int:
@@ -182,8 +163,9 @@ class Bridge:
 
     @property
     def webhook(self) -> discord.Webhook:
-        assert self._webhook
-        return self._webhook
+        webhook = per_channel_webhooks.get(self.target_id)
+        assert webhook
+        return webhook
 
 
 class Bridges:
@@ -344,8 +326,6 @@ class Bridges:
             source_id
         ].get(target_id):
             # If there is a bridge from source to target, destroy it
-            await self._outbound_bridges[source_id][target_id]._destroy_webhook()
-
             del self._outbound_bridges[source_id][target_id]
             if len(self._outbound_bridges[source_id]) == 0:
                 del self._outbound_bridges[source_id]
@@ -360,8 +340,6 @@ class Bridges:
             and self._outbound_bridges[target_id].get(source_id)
         ):
             # If the command was not called one-sidedly and there is a bridge from target to source, destroy it
-            await self._inbound_bridges[source_id][target_id]._destroy_webhook()
-
             del self._inbound_bridges[source_id][target_id]
             if len(self._inbound_bridges[source_id]) == 0:
                 del self._inbound_bridges[source_id]
@@ -369,6 +347,18 @@ class Bridges:
             del self._outbound_bridges[target_id][source_id]
             if len(self._outbound_bridges[target_id]) == 0:
                 del self._outbound_bridges[target_id]
+
+        delete_webhooks = []
+        if not self._inbound_bridges.get(source_id) and per_channel_webhooks.get(
+            source_id
+        ):
+            delete_webhooks.append(per_channel_webhooks[source_id].delete())
+        if not self._inbound_bridges.get(target_id) and per_channel_webhooks.get(
+            target_id
+        ):
+            delete_webhooks.append(per_channel_webhooks[target_id].delete())
+        if len(delete_webhooks) > 0:
+            await asyncio.gather(*delete_webhooks)
 
         # Return if we're not meant to update the DB
         if not update_db:
