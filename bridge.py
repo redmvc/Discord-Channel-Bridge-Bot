@@ -104,11 +104,11 @@ class Bridge:
             validate_webhook(webhook, target_channel)
 
         # If I already have a webhook, I'll destroy it and replace it with a new one
-        if per_channel_webhooks.get(self.target_id):
-            await per_channel_webhooks[self.target_id].delete()
+        if bridges.webhooks.get(self.target_id):
+            await bridges.webhooks[self.target_id].delete()
 
         if webhook:
-            per_channel_webhooks[self.target_id] = webhook
+            bridges.webhooks[self.target_id] = webhook
         else:
             if isinstance(target_channel, discord.Thread):
                 webhook_channel = target_channel.parent
@@ -116,7 +116,7 @@ class Bridge:
                 webhook_channel = target_channel
 
             assert isinstance(webhook_channel, discord.TextChannel)
-            per_channel_webhooks[self.target_id] = await webhook_channel.create_webhook(
+            bridges.webhooks[self.target_id] = await webhook_channel.create_webhook(
                 name=f":bridge: ({self._source_id} {self._target_id})"
             )
 
@@ -163,7 +163,7 @@ class Bridge:
 
     @property
     def webhook(self) -> discord.Webhook:
-        webhook = per_channel_webhooks.get(self.target_id)
+        webhook = bridges.webhooks.get(self.target_id)
         assert webhook
         return webhook
 
@@ -171,11 +171,17 @@ class Bridge:
 class Bridges:
     """
     A list of all bridges created.
+
+    Attributes
+    ----------
+    webhook : dict[int, discord.Webhook]
+        The webhooks associated with each target channel.
     """
 
     def __init__(self) -> None:
         self._outbound_bridges: dict[int, dict[int, Bridge]] = {}
         self._inbound_bridges: dict[int, dict[int, Bridge]] = {}
+        self.webhooks: dict[int, discord.Webhook] = {}
 
     async def create_bridge(
         self,
@@ -349,14 +355,10 @@ class Bridges:
                 del self._outbound_bridges[target_id]
 
         delete_webhooks = []
-        if not self._inbound_bridges.get(source_id) and per_channel_webhooks.get(
-            source_id
-        ):
-            delete_webhooks.append(per_channel_webhooks[source_id].delete())
-        if not self._inbound_bridges.get(target_id) and per_channel_webhooks.get(
-            target_id
-        ):
-            delete_webhooks.append(per_channel_webhooks[target_id].delete())
+        if not self._inbound_bridges.get(source_id) and self.webhooks.get(source_id):
+            delete_webhooks.append(self.webhooks[source_id].delete())
+        if not self._inbound_bridges.get(target_id) and self.webhooks.get(target_id):
+            delete_webhooks.append(self.webhooks[target_id].delete())
         if len(delete_webhooks) > 0:
             await asyncio.gather(*delete_webhooks)
 
@@ -598,4 +600,3 @@ class Bridges:
 
 
 bridges = Bridges()
-per_channel_webhooks: dict[int, discord.Webhook] = {}
