@@ -41,7 +41,6 @@ class Bridge:
         cls,
         source: discord.TextChannel | discord.Thread | int,
         target: discord.TextChannel | discord.Thread | int,
-        webhook: discord.Webhook | None = None,
     ):
         """Create an outbound Bridge from source channel to target channel.
 
@@ -73,39 +72,10 @@ class Bridge:
             ),
             target=target_channel,
         )
-        assert isinstance(target_channel, (discord.TextChannel, discord.Thread))
 
         self = Bridge()
         self._source_id = globals.get_id_from_channel(source)
         self._target_id = globals.get_id_from_channel(target)
-
-        if webhook:
-            validate_types(webhook=(webhook, discord.Webhook))
-            validate_webhook(webhook, target_channel)
-
-        if webhook:
-            if (
-                bridges.webhooks.get(self.target_id)
-                and bridges.webhooks[self.target_id].id != webhook.id
-            ):
-                # If I already have a webhook, I'll destroy the one being passed and ignore the new one
-                try:
-                    await webhook.delete()
-                except Exception:
-                    pass
-            else:
-                bridges.webhooks[self.target_id] = webhook
-        elif not bridges.webhooks.get(self.target_id):
-            # Target channel does not already have a webhook, create one
-            if isinstance(target_channel, discord.Thread):
-                webhook_channel = target_channel.parent
-            else:
-                webhook_channel = target_channel
-
-            assert isinstance(webhook_channel, discord.TextChannel)
-            bridges.webhooks[self.target_id] = await webhook_channel.create_webhook(
-                name=f":bridge: ({self._source_id} {self._target_id})"
-            )
 
         return self
 
@@ -169,7 +139,7 @@ class Bridges:
         update_db: bool = True,
         session: SQLSession | None = None,
     ) -> Bridge:
-        """Create a new Bridge from source channel to target channel (and a new webhook if necessary) or update an existing Bridge with the webhook.
+        """Create a new Bridge from source channel to target channel (and a new webhook if necessary).
 
         #### Args:
             - `source`: Source channel or ID of same.
@@ -187,9 +157,15 @@ class Bridges:
         #### Returns:
             - `Bridge`: The created `Bridge`.
         """
+        types_to_validate: dict[str, tuple] = {}
         if update_db and session:
-            validate_types(session=(session, SQLSession))
+            types_to_validate["session"] = (session, SQLSession)
+        if webhook:
+            types_to_validate["webhook"] = (webhook, discord.Webhook)
+        if len(types_to_validate) > 0:
+            validate_types(**types_to_validate)
 
+        # First I create the Bridge in memory
         source_id = globals.get_id_from_channel(source)
         target_id = globals.get_id_from_channel(target)
         if self._outbound_bridges.get(source_id) and self._outbound_bridges[
@@ -209,7 +185,8 @@ class Bridges:
                     except Exception:
                         pass
         else:
-            bridge = await Bridge.create(source_id, target_id, webhook)
+            # Need to create a new bridge
+            bridge = await Bridge.create(source_id, target_id)
 
             if not self._outbound_bridges.get(source_id):
                 self._outbound_bridges[source_id] = {}
@@ -219,9 +196,40 @@ class Bridges:
                 self._inbound_bridges[target_id] = {}
             self._inbound_bridges[target_id][source_id] = bridge
 
+            target_channel = await globals.get_channel_from_id(target)
+            assert isinstance(target_channel, (discord.TextChannel, discord.Thread))
+
+            if webhook:
+                validate_webhook(webhook, target_channel)
+                if (
+                    self.webhooks.get(target_id)
+                    and self.webhooks[target_id].id != webhook.id
+                ):
+                    # If I already have a webhook, I'll destroy the one being passed
+                    try:
+                        await webhook.delete()
+                    except Exception:
+                        pass
+                else:
+                    # Otherwise, I'll register the one being passed to my target channel
+                    self.webhooks[target_id] = webhook
+            elif not self.webhooks.get(target_id):
+                # Target channel does not already have a webhook, create one
+                if isinstance(target_channel, discord.Thread):
+                    webhook_channel = target_channel.parent
+                else:
+                    webhook_channel = target_channel
+
+                assert isinstance(webhook_channel, discord.TextChannel)
+                self.webhooks[target_id] = await webhook_channel.create_webhook(
+                    name=f":bridge: ({source_id} {target_id})"
+                )
+
+        # If I don't need to update the database I end here
         if not update_db:
             return bridge
 
+        # Add this Bridge and webhook to the DB
         close_after = False
         try:
             if not session:
