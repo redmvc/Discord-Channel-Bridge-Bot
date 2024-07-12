@@ -656,8 +656,13 @@ class Webhooks:
             - `channel_or_id`: The channel or ID of a channel to add a webhook to.
             - `webhook`: The webhook to add, or None to try to find one or create one. Defaults to None.
         """
+        if webhook:
+            validate_webhook = {"webhook": (webhook, discord.Webhook)}
+        else:
+            validate_webhook = {}
         validate_types(
-            channel_or_id=(channel_or_id, (discord.TextChannel, discord.Thread, int))
+            channel_or_id=(channel_or_id, (discord.TextChannel, discord.Thread, int)),
+            **validate_webhook,
         )
         channel_id = globals.get_id_from_channel(channel_or_id)
 
