@@ -358,8 +358,11 @@ async def on_typing(
         return
 
     async def type_through_bridge(bridge: Bridge):
-        target_channel = await bridge.target_channel
-        await target_channel.typing()
+        try:
+            target_channel = await bridge.target_channel
+            await target_channel.typing()
+        except Exception:
+            pass
 
     async with globals.rate_limiter:
         channels_typing: list[Coroutine] = []
