@@ -505,10 +505,15 @@ async def demolish(interaction: discord.Interaction, target: str):
     await interaction.response.defer(thinking=True, ephemeral=True)
 
     try:
-        await bridges.demolish_bridges(message_channel, target_channel)
-        await validate_auto_bridge_thread_channels(
-            {message_channel.id, target_channel.id}
-        )
+        with SQLSession(engine) as session:
+            await bridges.demolish_bridges(
+                message_channel, target_channel, session=session
+            )
+            await validate_auto_bridge_thread_channels(
+                {message_channel.id, target_channel.id}, session
+            )
+
+            session.commit()
     except Exception as e:
         if isinstance(e, SQLError):
             await interaction.followup.send(
