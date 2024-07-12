@@ -276,6 +276,75 @@ async def sql_upsert(
             raise e
 
 
+async def sql_insert_ignore_duplicate(
+    *,
+    table: _DMLTableArgument,
+    indices: Iterable[str],
+    **kwargs: Any,
+) -> UpdateBase:
+    """Return an `UpdateBase` for inserting values into a table if a set of indices is not duplicated.
+
+    #### Args:
+        - `table`: The table to insert into.
+        - `indices`: A list with the names of the indices (i.e. the columns whose uniqueness will be checked).
+        - `kwargs`: Named arguments for the values to insert or update. The values in `indices` must be a [proper subset](https://en.wikipedia.org/wiki/Subset) of the keys in `kwargs` (i.e. all `indices` should be in `kwargs.keys()` but there should be at least one key in `kwargs` that isn't in `indices`).
+
+    #### Raises:
+        - `SQLError`: SQL statement inferred from arguments was invalid or database connection failed. This error can only be raised if the database dialect is not MySQL, PostgreSQL, nor SQLite.
+    """
+    validate_types(indices=(indices, Iterable), kwargs=(kwargs, dict))
+
+    indices = set(indices)
+    insert_values = kwargs
+
+    db_dialect = engine.dialect.name
+    if db_dialect == "mysql":
+        random_index = indices.pop()
+        return (
+            mysql.insert(table)
+            .values(**insert_values)
+            .on_duplicate_key_update(**{random_index: getattr(table, random_index)})
+        )
+    elif db_dialect in {"postgresql", "sqlite"}:
+        insert: postgresql.Insert | sqlite.Insert
+        if db_dialect == "postgresql":
+            insert = postgresql.insert(table)
+        else:
+            insert = sqlite.insert(table)
+
+        return insert.values(**insert_values).on_conflict_do_nothing()
+    else:
+        # I'll do a manual update in this case
+        session = None
+        try:
+            with SQLSession(engine) as session:
+                index_values = [
+                    getattr(table, idx) == insert_values[idx] for idx in indices
+                ]
+                insert_unknown: UpdateBase
+
+                def select_existing(session: SQLSession):
+                    return session.execute(
+                        SQLSelect(table).where(*index_values)
+                    ).first()
+
+                if await sql_retry(lambda: select_existing(session)):
+                    # Values with those keys do exist, so I do nothing
+                    random_index = indices.pop()
+                    insert_unknown = SQLUpdate(table).values(
+                        **{random_index: getattr(table, random_index)}
+                    )
+                else:
+                    insert_unknown = other_db_insert(table).values(**insert_values)
+
+            return insert_unknown
+        except SQLError as e:
+            if session:
+                session.rollback()
+                session.close()
+            raise e
+
+
 async def sql_retry(
     fun: Callable[..., _T],
     num_retries: int = 5,

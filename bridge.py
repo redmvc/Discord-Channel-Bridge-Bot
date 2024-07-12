@@ -10,7 +10,15 @@ from sqlalchemy.exc import StatementError as SQLError
 from sqlalchemy.orm import Session as SQLSession
 
 import globals
-from database import DBBridge, DBMessageMap, DBWebhook, engine, sql_retry, sql_upsert
+from database import (
+    DBBridge,
+    DBMessageMap,
+    DBWebhook,
+    engine,
+    sql_insert_ignore_duplicate,
+    sql_retry,
+    sql_upsert,
+)
 from validations import validate_channels, validate_types, validate_webhook
 
 
@@ -237,7 +245,7 @@ class Bridges:
                 session = SQLSession(engine)
 
             target_id_str = str(globals.get_id_from_channel(target))
-            insert_bridge_row = await sql_upsert(
+            insert_bridge_row = await sql_insert_ignore_duplicate(
                 table=DBBridge,
                 indices={"source", "target"},
                 source=str(globals.get_id_from_channel(source)),
