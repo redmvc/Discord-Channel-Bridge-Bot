@@ -525,8 +525,7 @@ class EmojiHashMap:
         emoji: discord.PartialEmoji | int | str,
         *,
         only_accessible: bool | None = None,
-    ) -> frozenset[int] | None:
-        ...
+    ) -> frozenset[int] | None: ...
 
     @overload
     def get_matches(
@@ -535,8 +534,7 @@ class EmojiHashMap:
         *,
         only_accessible: bool | None = None,
         return_str: Literal[False],
-    ) -> frozenset[int] | None:
-        ...
+    ) -> frozenset[int] | None: ...
 
     @overload
     def get_matches(
@@ -545,8 +543,7 @@ class EmojiHashMap:
         *,
         only_accessible: bool | None = None,
         return_str: Literal[True],
-    ) -> frozenset[str] | None:
-        ...
+    ) -> frozenset[str] | None: ...
 
     def get_matches(
         self,

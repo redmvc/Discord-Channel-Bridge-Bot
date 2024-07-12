@@ -3,7 +3,7 @@
         "--check-untyped-defs"
     ],
     "flake8.args": [
-        "--ignore=E501,W503",
+        "--ignore=E501,W503,E704",
     ],
     "mypy-type-checker.importStrategy": "fromEnvironment",
     "mypy-type-checker.reportingScope": "workspace",
