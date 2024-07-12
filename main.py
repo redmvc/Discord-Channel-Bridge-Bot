@@ -1354,7 +1354,9 @@ async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
         return
 
     channel = await globals.get_channel_from_id(payload.channel_id)
-    assert isinstance(channel, (discord.TextChannel, discord.Thread))
+    if not isinstance(channel, (discord.TextChannel, discord.Thread)):
+        # This really shouldn't happen
+        return
 
     # I will try to see if this emoji still has other reactions in it and, if so, stop doing this as I don't care anymore
     message = await channel.fetch_message(payload.message_id)
@@ -1531,7 +1533,10 @@ async def unreact(
                 target_channel = await globals.get_channel_from_id(
                     int(target_channel_id)
                 )
-                assert isinstance(target_channel, (discord.TextChannel, discord.Thread))
+                if not isinstance(
+                    target_channel, (discord.TextChannel, discord.Thread)
+                ):
+                    return
 
                 target_message = await target_channel.fetch_message(
                     int(target_message_id)
