@@ -7,6 +7,7 @@ from typing import Any, Coroutine, TypedDict, cast
 from warnings import warn
 
 import discord
+from beartype import beartype
 from sqlalchemy import Delete as SQLDelete
 from sqlalchemy import ScalarResult
 from sqlalchemy import Select as SQLSelect
@@ -28,7 +29,6 @@ from database import (
     engine,
     sql_retry,
 )
-from validations import validate_types
 
 
 class ThreadSplat(TypedDict, total=False):
@@ -410,6 +410,7 @@ async def on_message(message: discord.Message):
     await bridge_message_helper(message)
 
 
+@beartype
 async def bridge_message_helper(message: discord.Message):
     """Mirror a message to any of its outbound bridge targets.
 
@@ -422,8 +423,6 @@ async def bridge_message_helper(message: discord.Message):
         - `Forbidden`: The authorization token for one of the webhooks is incorrect.
         - `ValueError`: The length of embeds was invalid, there was no token associated with one of the webhooks or ephemeral was passed with the improper webhook type or there was no state attached with one of the webhooks when giving it a view.
     """
-    validate_types(message=(message, discord.Message))
-
     outbound_bridges = bridges.get_outbound_bridges(message.channel.id)
     if not outbound_bridges:
         return
@@ -569,6 +568,7 @@ async def bridge_message_helper(message: discord.Message):
         return
 
 
+@beartype
 async def bridge_message_to_target_channel(
     message: discord.Message,
     message_content: str,
@@ -800,12 +800,13 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
                         "Ran into a Discord exception while trying to edit a message across a bridge:\n"
                         + str(e)
                     )
+
+        await asyncio.gather(*async_message_edits)
     except SQLError as e:
         warn("Ran into an SQL error while trying to edit a message:\n" + str(e))
 
-    await asyncio.gather(*async_message_edits)
 
-
+@beartype
 async def replace_missing_emoji(message_content: str) -> str:
     """Return a version of the contents of a message that replaces any instances of an emoji that the bot can't find with matching ones, if possible.
 
@@ -1266,6 +1267,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         )
 
 
+@beartype
 async def copy_emoji_into_server(
     *,
     missing_emoji: discord.PartialEmoji | None = None,
@@ -1452,6 +1454,7 @@ async def on_raw_reaction_clear(payload: discord.RawReactionClearEvent):
     await unreact(payload)
 
 
+@beartype
 async def unreact(
     payload: (
         discord.RawReactionActionEvent

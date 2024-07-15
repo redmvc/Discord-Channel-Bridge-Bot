@@ -2,6 +2,7 @@ import asyncio
 from typing import Any, Coroutine, Literal, Sequence, cast, overload
 
 import discord
+from beartype import beartype
 from sqlalchemy import Delete as SQLDelete
 from sqlalchemy import ScalarResult
 from sqlalchemy import Select as SQLSelect
@@ -13,7 +14,6 @@ from sqlalchemy.orm import Session as SQLSession
 
 import globals
 from database import DBEmoji, engine, sql_retry, sql_upsert
-from validations import validate_types
 
 
 class EmojiHashMap:
@@ -21,15 +21,13 @@ class EmojiHashMap:
     A mapping between emoji IDs and hashes of their images.
     """
 
+    @beartype
     def __init__(self, session: SQLSession | None = None):
         """Initialise the emoji hash map from the emoji table.
 
         #### Args:
             - `session`: A connection to the database. Defaults to None.
         """
-        if session:
-            validate_types(session=(session, SQLSession))
-
         self._emoji_to_hash: dict[int, str] = {}
         self._hash_to_emoji: dict[str, set[int]] = {}
         self._hash_to_available_emoji: dict[str, set[int]] = {}
@@ -97,6 +95,7 @@ class EmojiHashMap:
             session.commit()
             session.close()
 
+    @beartype
     def _add_emoji_to_map(
         self,
         emoji_id: int | str,
@@ -121,21 +120,6 @@ class EmojiHashMap:
         #### Returns:
             - `tuple[int, str]`: A tuple with the emoji ID and the hash of its image.
         """
-        optional_variables_to_validate: dict[str, tuple] = {}
-        if is_internal:
-            optional_variables_to_validate["is_internal"] = (is_internal, bool)
-            accessible = True
-        else:
-            if accessible:
-                optional_variables_to_validate["accessible"] = (accessible, bool)
-            if server_id:
-                optional_variables_to_validate["server_id"] = (server_id, (int, str))
-        validate_types(
-            emoji_id=(emoji_id, (int, str)),
-            image_hash=(image_hash, str),
-            **optional_variables_to_validate,
-        )
-
         if not is_internal and server_id:
             server_id = int(server_id)
             if (
@@ -171,6 +155,7 @@ class EmojiHashMap:
 
         return (emoji_id, image_hash)
 
+    @beartype
     async def _add_emoji_to_database(
         self,
         *,
@@ -210,23 +195,8 @@ class EmojiHashMap:
             globals.get_emoji_information(emoji, emoji_id, emoji_name)
         )
 
-        types_to_validate: dict[str, tuple] = {}
-        if emoji_server_id:
-            types_to_validate["emoji_server_id"] = (emoji_server_id, (int, str))
-        if emoji_animated is not None:
-            types_to_validate["emoji_animated"] = (emoji_animated, bool)
-        else:
+        if emoji_animated is None:
             emoji_animated = emoji_animated_inferred
-        if image_hash:
-            types_to_validate["image_hash"] = (image_hash, str)
-        elif image:
-            types_to_validate["image"] = (image, bytes)
-        if accessible:
-            types_to_validate["accessible"] = (accessible, bool)
-        if session:
-            types_to_validate["session"] = (session, SQLSession)
-        if types_to_validate:
-            validate_types(**types_to_validate)
 
         if not image_hash:
             if not image:
@@ -259,6 +229,7 @@ class EmojiHashMap:
             session.commit()
             session.close()
 
+    @beartype
     async def add_emoji(
         self,
         *,
@@ -299,9 +270,6 @@ class EmojiHashMap:
         #### Returns:
             - `tuple[int, str]`: A tuple with the emoji ID and the hash of its image.
         """
-        if session:
-            validate_types(session=(session, (SQLSession, bool)))
-
         if not emoji_id or not image_hash:
             emoji_id, emoji_name, _, emoji_url = globals.get_emoji_information(
                 emoji, emoji_id, emoji_name
@@ -353,6 +321,7 @@ class EmojiHashMap:
 
         return (emoji_id, image_hash)
 
+    @beartype
     async def upsert_emoji(
         self,
         *,
@@ -390,6 +359,7 @@ class EmojiHashMap:
             **upsert_server_id,
         )
 
+    @beartype
     async def delete_emoji(
         self, emoji_id: int, session: SQLSession | Literal[True] | None = None
     ):
@@ -399,12 +369,6 @@ class EmojiHashMap:
             - `emoji_id`: The ID of the emoji to delete.
             - `session`: A connection to the database, or True in case a new one should be created.
         """
-        if session:
-            validate_session = {"session": (session, (SQLSession, bool))}
-        else:
-            validate_session = {}
-        validate_types(emoji_id=(emoji_id, int), **validate_session)
-
         if not self._emoji_to_hash.get(emoji_id):
             return
 
@@ -449,6 +413,7 @@ class EmojiHashMap:
                 session.commit()
                 session.close()
 
+    @beartype
     async def load_server_emoji(self, server_id: int | None = None):
         """Load all emoji in a server (or in all servers the bot is connected to) into the hash map.
 
@@ -545,6 +510,7 @@ class EmojiHashMap:
         return_str: Literal[True],
     ) -> frozenset[str] | None: ...
 
+    @beartype
     def get_matches(
         self,
         emoji: discord.PartialEmoji | int | str,
@@ -559,8 +525,6 @@ class EmojiHashMap:
             - `only_accessible`: If set to True will return only emoji that are accessible by the bot. Defaults to False.
             - `return_str`: If set to True will return a frozenset of stringified IDs. Defaults to False.
         """
-        validate_types(emoji=(emoji, (discord.PartialEmoji, int, str)))
-
         if isinstance(emoji, discord.PartialEmoji):
             if not emoji.id:
                 return None
@@ -587,14 +551,13 @@ class EmojiHashMap:
 
         return frozenset({str(id) for id in hash_to_emoji[image_hash]})
 
+    @beartype
     def get_internal_equivalent(self, emoji_id: int) -> int | None:
         """Return the ID of an internal emoji matching the one passed, if available.
 
         #### Args:
             - `emoji_id`: The ID of the emoji to check.
         """
-        validate_types(emoji_id=(emoji_id, int))
-
         if not self._emoji_to_hash.get(emoji_id):
             return None
 
@@ -604,6 +567,7 @@ class EmojiHashMap:
 
         return self._hash_to_internal_emoji[image_hash]
 
+    @beartype
     def get_accessible_emoji(
         self, emoji_id: int, *, skip_self: bool = False
     ) -> discord.Emoji | None:
@@ -613,8 +577,6 @@ class EmojiHashMap:
             - `emoji_id`: The ID of the emoji to get.
             - `skip_self`: Whether the function should ignore the attempt to get an emoji associated with the ID itself. Defaults to False.
         """
-        validate_types(emoji_id=(emoji_id, int))
-
         if (
             not skip_self
             and (emoji := globals.client.get_emoji(emoji_id))
@@ -636,6 +598,7 @@ class EmojiHashMap:
 
         return None
 
+    @beartype
     async def get_hash(
         self,
         *,
@@ -672,6 +635,7 @@ class EmojiHashMap:
             emoji=emoji, emoji_id=emoji_id, emoji_name=emoji_name, session=session
         )
 
+    @beartype
     async def ensure_hash_map(
         self,
         *,
@@ -696,9 +660,6 @@ class EmojiHashMap:
             - `RuntimeError`: Session connection failed.
             - `ServerTimeoutError`: Connection to server timed out.
         """
-        if session:
-            validate_types(session=(session, SQLSession))
-
         emoji_id, emoji_name, _, _ = globals.get_emoji_information(
             emoji, emoji_id, emoji_name
         )

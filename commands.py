@@ -4,6 +4,7 @@ from logging import warn
 from typing import Any, AsyncIterator, Coroutine, Iterable, Literal, cast
 
 import discord
+from beartype import beartype
 from sqlalchemy import Delete as SQLDelete
 from sqlalchemy import ScalarResult
 from sqlalchemy import Select as SQLSelect
@@ -20,7 +21,6 @@ from database import (
     engine,
     sql_retry,
 )
-from validations import validate_types
 
 
 @globals.command_tree.command(
@@ -415,6 +415,7 @@ async def auto_bridge_threads(
     await interaction.followup.send(response, ephemeral=True)
 
 
+@beartype
 async def mention_to_channel(
     link_or_mention: str,
 ) -> globals.GuildChannel | discord.Thread | discord.abc.PrivateChannel | None:
@@ -426,8 +427,6 @@ async def mention_to_channel(
     #### Returns:
         - The channel whose ID is given by `channel_id`.
     """
-    validate_types(link_or_mention=(link_or_mention, str))
-
     if link_or_mention.startswith("https://discord.com/channels"):
         try:
             while link_or_mention.endswith("/"):
@@ -613,6 +612,7 @@ async def demolish_all(
     # I'll make a list of all channels that are currently bridged to or from this channel
     bridges_being_demolished = []
     session = None
+    exceptions: set[int] = set()
     try:
         with SQLSession(engine) as session:
             for channel_to_demolish_id, (
@@ -625,7 +625,6 @@ async def demolish_all(
                 else:
                     paired_channels = set()
 
-                exceptions: set[int] = set()
                 if outbound_bridges:
                     for target_id in outbound_bridges.keys():
                         target_channel = await globals.get_channel_from_id(target_id)
@@ -1057,6 +1056,7 @@ class ConfirmHashServer(discord.ui.Button):
         await interaction.followup.send("✅ Successfully hashed emoji!", ephemeral=True)
 
 
+@beartype
 async def bridge_thread_helper(
     thread_to_bridge: discord.Thread,
     user_id: int,
@@ -1069,16 +1069,6 @@ async def bridge_thread_helper(
         - `user_id`: ID of the user that created the thread.
         - `interaction`: The interaction that called this function, if any. Defaults to None.
     """
-    if interaction:
-        validate_interaction = {"interaction": (interaction, discord.Interaction)}
-    else:
-        validate_interaction = {}
-    validate_types(
-        thread_to_bridge=(thread_to_bridge, discord.Thread),
-        threat_to_bridge_parent=(thread_to_bridge.parent, discord.TextChannel),
-        user_id=(user_id, int),
-        **validate_interaction,
-    )
     thread_parent = cast(discord.TextChannel, thread_to_bridge.parent)
 
     outbound_bridges = bridges.get_outbound_bridges(thread_parent.id)
@@ -1297,6 +1287,7 @@ async def bridge_thread_helper(
         await interaction.followup.send(response, ephemeral=True)
 
 
+@beartype
 async def stop_auto_bridging_threads_helper(
     channel_ids_to_remove: int | Iterable[int], session: SQLSession | None = None
 ):
@@ -1309,15 +1300,6 @@ async def stop_auto_bridging_threads_helper(
     #### Raises:
         - `SQLError`: Something went wrong accessing or modifying the database.
     """
-    if session:
-        validate_session = {"session": (session, SQLSession)}
-    else:
-        validate_session = {}
-    validate_types(
-        channel_ids_to_remove=(channel_ids_to_remove, (int, Iterable)),
-        **validate_session,
-    )
-
     if not isinstance(channel_ids_to_remove, set):
         if isinstance(channel_ids_to_remove, int):
             channel_ids_to_remove = {channel_ids_to_remove}
@@ -1354,6 +1336,7 @@ async def stop_auto_bridging_threads_helper(
         session.close()
 
 
+@beartype
 async def validate_auto_bridge_thread_channels(
     channel_ids_to_check: int | Iterable[int], session: SQLSession | None = None
 ):
@@ -1366,8 +1349,6 @@ async def validate_auto_bridge_thread_channels(
     #### Raises:
         - `SQLError`: Something went wrong accessing or modifying the database.
     """
-    validate_types(channel_ids_to_check=(channel_ids_to_check, (int, Iterable)))
-
     if not isinstance(channel_ids_to_check, set):
         if isinstance(channel_ids_to_check, int):
             channel_ids_to_check = {channel_ids_to_check}
@@ -1388,6 +1369,7 @@ async def validate_auto_bridge_thread_channels(
     await stop_auto_bridging_threads_helper(channel_ids_to_remove, session)
 
 
+@beartype
 async def map_emoji_helper(
     *,
     external_emoji: discord.PartialEmoji | None = None,
@@ -1415,12 +1397,6 @@ async def map_emoji_helper(
         - `RuntimeError`: Session connection failed.
         - `ServerTimeoutError`: Connection to server timed out.
     """
-    if session:
-        validate_session = {"session": (session, SQLSession)}
-    else:
-        validate_session = {}
-    validate_types(internal_emoji=(internal_emoji, discord.Emoji), **validate_session)
-
     external_emoji_id, external_emoji_name, external_emoji_animated, _ = (
         globals.get_emoji_information(
             external_emoji, external_emoji_id, external_emoji_name

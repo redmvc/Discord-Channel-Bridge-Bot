@@ -1,6 +1,7 @@
 from typing import Callable, Literal, cast, overload
 
 import discord
+from beartype import beartype
 from sqlalchemy import Delete as SQLDelete
 from sqlalchemy import and_ as sql_and
 from sqlalchemy.exc import StatementError as SQLError
@@ -16,12 +17,7 @@ from database import (
     sql_retry,
     sql_upsert,
 )
-from validations import (
-    ArgumentError,
-    validate_channels,
-    validate_types,
-    validate_webhook,
-)
+from validations import ArgumentError, validate_channels, validate_webhook
 
 
 class Bridge:
@@ -46,6 +42,7 @@ class Bridge:
         A webhook connecting those channels
     """
 
+    @beartype
     @classmethod
     async def create(
         cls,
@@ -69,18 +66,10 @@ class Bridge:
         #### Returns:
             - `Bridge`: The created Bridge.
         """
-        validate_channels(
-            source=(
-                await globals.get_channel_from_id(source)
-                if isinstance(source, int)
-                else source
-            ),
-            target=(
-                await globals.get_channel_from_id(target)
-                if isinstance(target, int)
-                else target
-            ),
-        )
+        if isinstance(source, int):
+            validate_channels(source=await globals.get_channel_from_id(source))
+        if isinstance(target, int):
+            validate_channels(target=await globals.get_channel_from_id(target))
 
         self = Bridge()
         self._source_id = globals.get_id_from_channel(source)
@@ -139,6 +128,7 @@ class Bridges:
         self._inbound_bridges: dict[int, dict[int, Bridge]] = {}
         self.webhooks = Webhooks()
 
+    @beartype
     async def create_bridge(
         self,
         *,
@@ -166,18 +156,6 @@ class Bridges:
         #### Returns:
             - `Bridge`: The created `Bridge`.
         """
-        types_to_validate: dict[str, tuple] = {}
-        if update_db and session:
-            types_to_validate["session"] = (session, SQLSession)
-        if webhook:
-            types_to_validate["webhook"] = (webhook, discord.Webhook)
-        if len(types_to_validate) > 0:
-            validate_types(
-                source=(source, (discord.TextChannel, discord.Thread, int)),
-                target=(target, (discord.TextChannel, discord.Thread, int)),
-                **types_to_validate,
-            )
-
         target_channel = await globals.get_channel_from_id(target)
         source_channel = await globals.get_channel_from_id(target)
         validate_channels(target_channel=target_channel, source_channel=source_channel)
@@ -284,6 +262,7 @@ class Bridges:
 
         return bridge
 
+    @beartype
     async def demolish_bridges(
         self,
         *,
@@ -312,24 +291,6 @@ class Bridges:
             raise ArgumentError(
                 "At least one of source_channel or target_channel needs to be passed as argument to demolish_bridges()."
             )
-
-        types_to_validate: dict[str, tuple] = {}
-        if update_db and session:
-            types_to_validate["session"] = (session, SQLSession)
-        if source_channel:
-            types_to_validate["source_channel"] = (
-                source_channel,
-                (discord.TextChannel, discord.Thread, int),
-            )
-        if target_channel:
-            types_to_validate["target"] = (
-                target_channel,
-                (discord.TextChannel, discord.Thread, int),
-            )
-        assert len(types_to_validate) > 0
-        validate_types(**types_to_validate)
-
-        one_sided = not not one_sided
 
         # Now let's check that all relevant bridges exist
         if target_channel:
@@ -418,19 +379,24 @@ class Bridges:
                 session = SQLSession(engine)
                 close_after = True
 
+            delete_demolished_bridges_and_messages = []
             for sid, tid in bridges_to_demolish:
                 source_id_str = str(sid)
                 target_id_str = str(tid)
-                delete_demolished_bridges = SQLDelete(DBBridge).where(
-                    sql_and(
-                        DBBridge.source == source_id_str,
-                        DBBridge.target == target_id_str,
+                delete_demolished_bridges_and_messages.append(
+                    SQLDelete(DBBridge).where(
+                        sql_and(
+                            DBBridge.source == source_id_str,
+                            DBBridge.target == target_id_str,
+                        )
                     )
                 )
-                delete_demolished_messages = SQLDelete(DBMessageMap).where(
-                    sql_and(
-                        DBMessageMap.source_channel == source_id_str,
-                        DBMessageMap.target_channel == target_id_str,
+                delete_demolished_bridges_and_messages.append(
+                    SQLDelete(DBMessageMap).where(
+                        sql_and(
+                            DBMessageMap.source_channel == source_id_str,
+                            DBMessageMap.target_channel == target_id_str,
+                        )
                     )
                 )
 
@@ -442,8 +408,8 @@ class Bridges:
                 delete_invalid_webhooks = None
 
             def execute_queries():
-                session.execute(delete_demolished_bridges)
-                session.execute(delete_demolished_messages)
+                for delete_query in delete_demolished_bridges_and_messages:
+                    session.execute(delete_query)
                 if delete_invalid_webhooks is not None:
                     session.execute(delete_invalid_webhooks)
 
@@ -459,6 +425,7 @@ class Bridges:
             session.commit()
             session.close()
 
+    @beartype
     def get_one_way_bridge(
         self,
         source: discord.TextChannel | discord.Thread | int,
@@ -470,11 +437,6 @@ class Bridges:
             - `source`: Source channel or ID of same.
             - `target`: Target channel or ID of same.
         """
-        validate_types(
-            source=(source, (discord.TextChannel, discord.Thread, int)),
-            target=(target, (discord.TextChannel, discord.Thread, int)),
-        )
-
         source_id = globals.get_id_from_channel(source)
         target_id = globals.get_id_from_channel(target)
 
@@ -485,6 +447,7 @@ class Bridges:
 
         return self._outbound_bridges[source_id][target_id]
 
+    @beartype
     def get_two_way_bridge(
         self,
         source: discord.TextChannel | discord.Thread | int,
@@ -496,16 +459,12 @@ class Bridges:
             - `source`: Source channel or ID of same.
             - `target`: Target channel or ID of same.
         """
-        validate_types(
-            source=(source, (discord.TextChannel, discord.Thread, int)),
-            target=(target, (discord.TextChannel, discord.Thread, int)),
-        )
-
         return (
             self.get_one_way_bridge(source, target),
             self.get_one_way_bridge(target, source),
         )
 
+    @beartype
     def get_outbound_bridges(
         self, source: discord.TextChannel | discord.Thread | int
     ) -> dict[int, Bridge] | None:
@@ -514,10 +473,9 @@ class Bridges:
         #### Args:
             - `source`: Source channel or ID of same.
         """
-        validate_types(source=(source, (discord.TextChannel, discord.Thread, int)))
-
         return self._outbound_bridges.get(globals.get_id_from_channel(source))
 
+    @beartype
     def get_inbound_bridges(
         self, target: discord.TextChannel | discord.Thread | int
     ) -> dict[int, Bridge] | None:
@@ -526,8 +484,6 @@ class Bridges:
         #### Args:
             - `target`: Target channel or ID of same.
         """
-        validate_types(target=(target, (discord.TextChannel, discord.Thread, int)))
-
         return self._inbound_bridges.get(globals.get_id_from_channel(target))
 
     @overload
@@ -550,6 +506,7 @@ class Bridges:
         include_starting: bool = False,
     ) -> set[int]: ...
 
+    @beartype
     async def get_reachable_channels(
         self,
         starting_channel: discord.TextChannel | discord.Thread | int,
@@ -569,20 +526,6 @@ class Bridges:
         #### Raises:
             - `ValueError`: The `direction` variable has a value other than `"outbound"` and `"inbound"`.
         """
-        if include_webhooks is not None:
-            validate_include_webhooks = {"include_webhooks": (include_webhooks, bool)}
-        else:
-            validate_include_webhooks = {}
-        validate_types(
-            starting_channel=(
-                starting_channel,
-                (discord.TextChannel, discord.Thread, int),
-            ),
-            direction=(direction, str),
-            include_starting=(include_starting, bool),
-            **validate_include_webhooks,
-        )
-
         if direction not in {"outbound", "inbound"}:
             raise ValueError(
                 'direction argument to get_reachable_channels() must be either "outbound" or "inbound".'
@@ -653,6 +596,7 @@ class Webhooks:
         # The webhook used by a parent channel
         self._webhook_by_parent: dict[int, int] = {}
 
+    @beartype
     async def add_webhook(
         self,
         channel_or_id: discord.TextChannel | discord.Thread | int,
@@ -664,14 +608,6 @@ class Webhooks:
             - `channel_or_id`: The channel or ID of a channel to add a webhook to.
             - `webhook`: The webhook to add, or None to try to find one or create one. Defaults to None.
         """
-        if webhook:
-            validate_webhook = {"webhook": (webhook, discord.Webhook)}
-        else:
-            validate_webhook = {}
-        validate_types(
-            channel_or_id=(channel_or_id, (discord.TextChannel, discord.Thread, int)),
-            **validate_webhook,
-        )
         channel_id = globals.get_id_from_channel(channel_or_id)
 
         if existing_webhook := self._webhooks.get(channel_id):
@@ -715,6 +651,7 @@ class Webhooks:
 
         return webhook
 
+    @beartype
     async def get_webhook(
         self, channel_or_id: discord.TextChannel | discord.Thread | int
     ) -> discord.Webhook | None:
@@ -723,10 +660,6 @@ class Webhooks:
         #### Args:
             - `channel_or_id`: The channel or ID to find a webhook for.
         """
-        validate_types(
-            channel_or_id=(channel_or_id, (discord.TextChannel, discord.Thread, int))
-        )
-
         channel_id = globals.get_id_from_channel(channel_or_id)
         if (webhook_id := self._webhook_by_channel.get(channel_id)) and (
             webhook := self._webhooks.get(webhook_id)
@@ -755,6 +688,7 @@ class Webhooks:
         # The channel doesn't have its own webhook associated, nor is it a thread so we can't find its parent
         return None
 
+    @beartype
     async def delete_channel(
         self, channel_or_id: discord.TextChannel | discord.Thread | int
     ) -> int | None:
@@ -763,9 +697,6 @@ class Webhooks:
         #### Args:
             - `channel_or_id`: The channel or ID to delete.
         """
-        validate_types(
-            channel_or_id=(channel_or_id, (discord.TextChannel, discord.Thread, int))
-        )
         channel_id = globals.get_id_from_channel(channel_or_id)
 
         webhook_id = self._webhook_by_channel.get(channel_id)
