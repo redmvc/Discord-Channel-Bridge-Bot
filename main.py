@@ -516,106 +516,16 @@ async def bridge_message_helper(message: discord.Message):
                     thread_splat = {"thread": target_channel}
 
                 # Create an async version of bridging this message to gather at the end
-                async def bridge_message(
-                    webhook_channel: discord.TextChannel,
-                    message: discord.Message,
-                    target_id: int,
-                    bridged_reply_to: dict[int, int],
-                    target_channel: discord.TextChannel | discord.Thread,
-                    reply_has_ping: bool,
-                    thread_splat: ThreadSplat,
-                    webhook: discord.Webhook,
-                ):
-                    # Try to find whether the user who sent this message is on the other side of the bridge and if so what their name and avatar would be
-                    bridged_member = await globals.get_channel_member(
-                        webhook_channel, message.author.id
-                    )
-                    if bridged_member:
-                        bridged_member_name = bridged_member.display_name
-                        bridged_avatar_url = bridged_member.display_avatar
-                    else:
-                        bridged_member_name = message.author.display_name
-                        bridged_avatar_url = message.author.display_avatar
-
-                    if bridged_reply_to.get(target_id):
-                        # The message being replied to is also bridged to this channel, so I'll create an embed to represent this
-                        try:
-                            message_replied_to = await target_channel.fetch_message(
-                                bridged_reply_to[target_id]
-                            )
-
-                            def truncate(msg: str, length: int) -> str:
-                                return (
-                                    msg
-                                    if len(msg) < length
-                                    else msg[: length - 1] + "…"
-                                )
-
-                            display_name = discord.utils.escape_markdown(
-                                message_replied_to.author.display_name
-                            )
-
-                            # Discord represents ping "ON" vs "OFF" replies with an @ symbol before the reply author name
-                            # copy this behavior here
-                            if reply_has_ping:
-                                display_name = "@" + display_name
-
-                            replied_content = await replace_missing_emoji(
-                                truncate(
-                                    discord.utils.remove_markdown(
-                                        message_replied_to.clean_content
-                                    ),
-                                    50,
-                                )
-                            )
-                            reply_embed = [
-                                discord.Embed.from_dict(
-                                    {
-                                        "type": "rich",
-                                        "url": message_replied_to.jump_url,
-                                        "thumbnail": {
-                                            "url": message_replied_to.author.display_avatar.replace(
-                                                size=16
-                                            ).url,
-                                            "height": 18,
-                                            "width": 18,
-                                        },
-                                        "description": f"**[↪]({message_replied_to.jump_url}) {display_name}**  {replied_content}",
-                                    }
-                                ),
-                            ]
-                        except discord.HTTPException:
-                            reply_embed = []
-                    else:
-                        reply_embed = []
-
-                    attachments = []
-                    for attachment in message.attachments:
-                        attachments.append(await attachment.to_file())
-
-                    return await webhook.send(
-                        content=message_content,
-                        allowed_mentions=discord.AllowedMentions(
-                            users=True, roles=False, everyone=False
-                        ),
-                        avatar_url=bridged_avatar_url,
-                        username=bridged_member_name,
-                        embeds=list(message.embeds + reply_embed),
-                        files=attachments,  # TODO might throw HHTPException if too large?
-                        wait=True,
-                        **thread_splat,
-                    )
-
                 async_bridged_messages.append(
-                    bridge_message(
-                        webhook_channel,
+                    bridge_message_to_target_channel(
                         message,
-                        target_id,
-                        bridged_reply_to,
+                        message_content,
                         target_channel,
+                        webhook,
+                        webhook_channel,
+                        bridged_reply_to.get(target_id),
                         reply_has_ping,
                         thread_splat,
-                        webhook,
                     )
                 )
 
@@ -652,6 +562,104 @@ async def bridge_message_helper(message: discord.Message):
 
         warn("Ran into an SQL error while trying to bridge a message:\n" + str(e))
         return
+
+
+async def bridge_message_to_target_channel(
+    message: discord.Message,
+    message_content: str,
+    target_channel: discord.TextChannel | discord.Thread,
+    webhook: discord.Webhook,
+    webhook_channel: discord.TextChannel,
+    bridged_reply_to: int | None,
+    reply_has_ping: bool,
+    thread_splat: ThreadSplat,
+) -> discord.WebhookMessage:
+    """Bridge a message to a channel and returns the message bridged.
+
+    #### Args:
+        - `message`: The message being bridged.
+        - `message_content`: Its contents
+        - `target_channel`: The channel the message is being bridged to.
+        - `webhook`: The webhook that will send the message.
+        - `webhook_channel`: The parent channel the webhook is attached to.
+        - `bridged_reply_to`: The ID of a message the message being bridged is replying to on the target channel.
+        - `reply_has_ping`: Whether the reply is pinging the original message.
+        - `thread_splat`: A splat with the thread this message is being bridged to, if any.
+
+    #### Returns:
+        - `discord.WebhookMessage`: The message bridged.
+    """
+    # Try to find whether the user who sent this message is on the other side of the bridge and if so what their name and avatar would be
+    bridged_member = await globals.get_channel_member(
+        webhook_channel, message.author.id
+    )
+    if bridged_member:
+        bridged_member_name = bridged_member.display_name
+        bridged_avatar_url = bridged_member.display_avatar
+    else:
+        bridged_member_name = message.author.display_name
+        bridged_avatar_url = message.author.display_avatar
+
+    if bridged_reply_to:
+        # The message being replied to is also bridged to this channel, so I'll create an embed to represent this
+        try:
+            message_replied_to = await target_channel.fetch_message(bridged_reply_to)
+
+            def truncate(msg: str, length: int) -> str:
+                return msg if len(msg) < length else msg[: length - 1] + "…"
+
+            display_name = discord.utils.escape_markdown(
+                message_replied_to.author.display_name
+            )
+
+            # Discord represents ping "ON" vs "OFF" replies with an @ symbol before the reply author name
+            # copy this behavior here
+            if reply_has_ping:
+                display_name = "@" + display_name
+
+            replied_content = await replace_missing_emoji(
+                truncate(
+                    discord.utils.remove_markdown(message_replied_to.clean_content),
+                    50,
+                )
+            )
+            reply_embed = [
+                discord.Embed.from_dict(
+                    {
+                        "type": "rich",
+                        "url": message_replied_to.jump_url,
+                        "thumbnail": {
+                            "url": message_replied_to.author.display_avatar.replace(
+                                size=16
+                            ).url,
+                            "height": 18,
+                            "width": 18,
+                        },
+                        "description": f"**[↪]({message_replied_to.jump_url}) {display_name}**  {replied_content}",
+                    }
+                ),
+            ]
+        except discord.HTTPException:
+            reply_embed = []
+    else:
+        reply_embed = []
+
+    attachments = []
+    for attachment in message.attachments:
+        attachments.append(await attachment.to_file())
+
+    return await webhook.send(
+        content=message_content,
+        allowed_mentions=discord.AllowedMentions(
+            users=True, roles=False, everyone=False
+        ),
+        avatar_url=bridged_avatar_url,
+        username=bridged_member_name,
+        embeds=list(message.embeds + reply_embed),
+        files=attachments,  # TODO might throw HHTPException if too large?
+        wait=True,
+        **thread_splat,
+    )
 
 
 @globals.client.event
