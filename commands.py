@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session as SQLSession
 
 import emoji_hash_map
 import globals
-from bridge import bridges
+from bridge import Bridge, bridges
 from database import (
     DBAppWhitelist,
     DBAutoBridgeThreadChannels,
@@ -200,7 +200,7 @@ async def bridge(
 
     await interaction.response.defer(thinking=True, ephemeral=True)
 
-    join_threads: list[Coroutine] = []
+    join_threads: list[Coroutine[Any, Any, None]] = []
     if isinstance(message_channel, discord.Thread) and not message_channel.me:
         try:
             join_threads.append(message_channel.join())
@@ -215,7 +215,7 @@ async def bridge(
     session = None
     try:
         with SQLSession(engine) as session:
-            create_bridges = []
+            create_bridges: list[Coroutine[Any, Any, Bridge]] = []
             if direction != "inbound":
                 create_bridges.append(
                     bridges.create_bridge(
@@ -610,7 +610,7 @@ async def demolish_all(
     await interaction.response.defer(thinking=True, ephemeral=True)
 
     # I'll make a list of all channels that are currently bridged to or from this channel
-    bridges_being_demolished = []
+    bridges_being_demolished: list[Coroutine[Any, Any, None]] = []
     session = None
     exceptions: set[int] = set()
     try:
@@ -767,11 +767,11 @@ async def whitelist(interaction: discord.Interaction, apps: str):
                 apps_to_add.add(app_id)
 
     session = None
-    response = []
+    response: list[str] = []
     try:
         channel_id_str = str(channel.id)
         with SQLSession(engine) as session:
-            run_queries = []
+            run_queries: list[Coroutine[Any, Any, None]] = []
             if len(apps_to_add) > 0:
 
                 def whitelist_apps():
@@ -999,7 +999,7 @@ async def hash_server_emoji(
     await interaction.response.send_message(message, view=view, ephemeral=True)
 
 
-class CancelHashServer(discord.ui.Button):
+class CancelHashServer(discord.ui.Button[Any]):
     def __init__(self, original_interaction: discord.Interaction):
         super().__init__(label="No", style=discord.ButtonStyle.grey)
         self._original_interaction = original_interaction
@@ -1010,7 +1010,7 @@ class CancelHashServer(discord.ui.Button):
         )
 
 
-class ConfirmHashServer(discord.ui.Button):
+class ConfirmHashServer(discord.ui.Button[Any]):
     def __init__(
         self,
         original_interaction: discord.Interaction,
@@ -1110,11 +1110,10 @@ async def bridge_thread_helper(
                 await thread_parent.fetch_message(thread_to_bridge.id)
 
                 def get_source_starting_message():
-                    return session.scalars(
-                        SQLSelect(DBMessageMap).where(
-                            DBMessageMap.target_message == str(thread_to_bridge.id)
-                        )
-                    ).first()
+                    select_message_map: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
+                        DBMessageMap
+                    ).where(DBMessageMap.target_message == str(thread_to_bridge.id))
+                    return session.scalars(select_message_map).first()
 
                 source_starting_message: DBMessageMap | None = await sql_retry(
                     get_source_starting_message
@@ -1129,11 +1128,10 @@ async def bridge_thread_helper(
                     source_message_id = thread_to_bridge.id
 
                 def get_target_starting_messages():
-                    return session.scalars(
-                        SQLSelect(DBMessageMap).where(
-                            DBMessageMap.source_message == str(source_message_id)
-                        )
-                    )
+                    select_message_map: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
+                        DBMessageMap
+                    ).where(DBMessageMap.source_message == str(source_message_id))
+                    return session.scalars(select_message_map)
 
                 target_starting_messages: ScalarResult[DBMessageMap] = await sql_retry(
                     get_target_starting_messages
@@ -1148,11 +1146,11 @@ async def bridge_thread_helper(
             # Now find all channels that are bridged to the channel this thread's parent is bridged to and create threads there
             threads_created: dict[int, discord.Thread] = {}
             succeeded_at_least_once = False
-            bridged_threads = []
-            failed_channels = []
+            bridged_threads: list[int] = []
+            failed_channels: list[int] = []
 
-            create_bridges: list[Coroutine] = []
-            add_user_to_threads: list[Coroutine] = []
+            create_bridges: list[Coroutine[Any, Any, Bridge]] = []
+            add_user_to_threads: list[Coroutine[Any, Any, None]] = []
             try:
                 add_user_to_threads.append(thread_to_bridge.join())
             except Exception:
@@ -1516,11 +1514,12 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
         with SQLSession(engine) as session:
             # We need to see whether this message is a bridged message and, if so, find its source
             def get_source_message_map():
-                return session.scalars(
-                    SQLSelect(DBMessageMap).where(
-                        DBMessageMap.target_message == str(message.id),
-                    )
-                ).first()
+                select_message_map: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
+                    DBMessageMap
+                ).where(
+                    DBMessageMap.target_message == str(message.id),
+                )
+                return session.scalars(select_message_map).first()
 
             source_message_map: DBMessageMap | None = await sql_retry(
                 get_source_message_map
@@ -1552,11 +1551,10 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
             if outbound_bridges:
 
                 def get_bridged_messages():
-                    return session.scalars(
-                        SQLSelect(DBMessageMap).where(
-                            DBMessageMap.source_message == str(source_message_id)
-                        )
-                    )
+                    select_message_map: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
+                        DBMessageMap
+                    ).where(DBMessageMap.source_message == str(source_message_id))
+                    return session.scalars(select_message_map)
 
                 bridged_messages: ScalarResult[DBMessageMap] = await sql_retry(
                     get_bridged_messages
@@ -1601,7 +1599,7 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
             list_of_reacters: list[Coroutine[Any, Any, set[int]]]
         ):
             gathered_users = await asyncio.gather(*list_of_reacters)
-            set_of_users: set[int] = set.union(*gathered_users)
+            set_of_users: set[int] = set().union(*gathered_users)
             set_of_users.discard(bot_user_id)
             return set_of_users
 

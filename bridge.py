@@ -379,7 +379,7 @@ class Bridges:
                 session = SQLSession(engine)
                 close_after = True
 
-            delete_demolished_bridges_and_messages = []
+            delete_demolished_bridges_and_messages: list[SQLDelete] = []
             for sid, tid in bridges_to_demolish:
                 source_id_str = str(sid)
                 target_id_str = str(tid)

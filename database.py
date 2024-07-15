@@ -187,7 +187,7 @@ class DBAppWhitelist(DBBase):
 @beartype
 async def sql_upsert(
     *,
-    table,
+    table: Any,
     indices: Iterable[str],
     ignored_cols: Iterable[str] | None = None,
     **kwargs: Any,
@@ -248,9 +248,10 @@ async def sql_upsert(
                 upsert: UpdateBase
 
                 def select_existing(session: SQLSession):
-                    return session.execute(
-                        SQLSelect(table).where(*index_values)
-                    ).first()
+                    select_table: SQLSelect[tuple[Any]] = SQLSelect(table).where(
+                        *index_values
+                    )
+                    return session.execute(select_table).first()
 
                 if await sql_retry(lambda: select_existing(session)):
                     # Values with those keys do exist, so I update
@@ -271,7 +272,7 @@ async def sql_upsert(
 @beartype
 async def sql_insert_ignore_duplicate(
     *,
-    table,
+    table: Any,
     indices: Iterable[str],
     **kwargs: Any,
 ) -> UpdateBase:
@@ -315,9 +316,10 @@ async def sql_insert_ignore_duplicate(
                 insert_unknown: UpdateBase
 
                 def select_existing(session: SQLSession):
-                    return session.execute(
-                        SQLSelect(table).where(*index_values)
-                    ).first()
+                    select_table: SQLSelect[tuple[Any]] = SQLSelect(table).where(
+                        *index_values
+                    )
+                    return session.execute(select_table).first()
 
                 if await sql_retry(lambda: select_existing(session)):
                     # Values with those keys do exist, so I do nothing
@@ -350,7 +352,7 @@ async def sql_retry(
         - `time_to_wait`: How long to wait between retries.
 
     #### Returns:
-        - `_T`: The result of calling `fun()`.
+        - `T`: The result of calling `fun()`.
     """
     return await run_retries(fun, num_retries, time_to_wait, SQLError)
 

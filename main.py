@@ -60,11 +60,11 @@ async def on_ready():
             invalid_channel_ids: set[str] = set()
             invalid_webhook_ids: set[str] = set()
 
-            select_all_webhooks: SQLSelect = SQLSelect(DBWebhook)
+            select_all_webhooks: SQLSelect[tuple[DBWebhook]] = SQLSelect(DBWebhook)
             webhook_query_result: ScalarResult[DBWebhook] = session.scalars(
                 select_all_webhooks
             )
-            add_webhook_async = []
+            add_webhook_async: list[Coroutine[Any, Any, discord.Webhook]] = []
             for channel_webhook in webhook_query_result:
                 channel_id = int(channel_webhook.channel)
                 webhook_id = int(channel_webhook.webhook)
@@ -99,7 +99,7 @@ async def on_ready():
             targets_with_sources: set[str] = set()
 
             async_create_bridges: list[Coroutine[Any, Any, Bridge]] = []
-            select_all_bridges: SQLSelect = SQLSelect(DBBridge)
+            select_all_bridges: SQLSelect[tuple[DBBridge]] = SQLSelect(DBBridge)
             bridge_query_result: ScalarResult[DBBridge] = session.scalars(
                 select_all_bridges
             )
@@ -218,12 +218,14 @@ async def on_ready():
             emoji_hash_map.map = emoji_hash_map.EmojiHashMap(session)
 
             # Try to find all apps whitelisted per channel
-            select_whitelisted_apps: SQLSelect = SQLSelect(DBAppWhitelist)
+            select_whitelisted_apps: SQLSelect[tuple[DBAppWhitelist]] = SQLSelect(
+                DBAppWhitelist
+            )
             whitelisted_apps_query_result: ScalarResult[DBAppWhitelist] = (
                 session.scalars(select_whitelisted_apps)
             )
-            accessible_channels = set()
-            inaccessible_channels = set()
+            accessible_channels: set[int] = set()
+            inaccessible_channels: set[int] = set()
             for whitelisted_app in whitelisted_apps_query_result:
                 channel_id = int(whitelisted_app.channel)
                 if channel_id in inaccessible_channels:
@@ -259,9 +261,9 @@ async def on_ready():
             session.commit()
 
             # Identify all automatically-thread-bridging channels
-            select_auto_bridge_thread_channels: SQLSelect = SQLSelect(
-                DBAutoBridgeThreadChannels
-            )
+            select_auto_bridge_thread_channels: SQLSelect[
+                tuple[DBAutoBridgeThreadChannels]
+            ] = SQLSelect(DBAutoBridgeThreadChannels)
             auto_thread_query_result: ScalarResult[DBAutoBridgeThreadChannels] = (
                 session.scalars(select_auto_bridge_thread_channels)
             )
@@ -357,7 +359,7 @@ async def on_typing(
             pass
 
     async with globals.rate_limiter:
-        channels_typing: list[Coroutine] = []
+        channels_typing: list[Coroutine[Any, Any, None]] = []
         for _, bridge in outbound_bridges.items():
             channels_typing.append(type_through_bridge(bridge))
 
@@ -457,11 +459,10 @@ async def bridge_message_helper(message: discord.Message):
 
                 # First, check whether the message replied to was itself bridged from a different channel
                 def get_local_replied_to():
-                    return session.scalars(
-                        SQLSelect(DBMessageMap).where(
-                            DBMessageMap.target_message == str(replied_to_id)
-                        )
-                    ).first()
+                    select_message_map: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
+                        DBMessageMap
+                    ).where(DBMessageMap.target_message == str(replied_to_id))
+                    return session.scalars(select_message_map).first()
 
                 local_replied_to_message_map: DBMessageMap | None = await sql_retry(
                     get_local_replied_to
@@ -481,9 +482,9 @@ async def bridge_message_helper(message: discord.Message):
 
                 # Now find all other bridged versions of the message we're replying to
                 def get_bridged_reply_tos():
-                    select_bridged_reply_to: SQLSelect = SQLSelect(DBMessageMap).where(
-                        DBMessageMap.source_message == str(source_replied_to_id)
-                    )
+                    select_bridged_reply_to: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
+                        DBMessageMap
+                    ).where(DBMessageMap.source_message == str(source_replied_to_id))
                     return session.scalars(select_bridged_reply_to)
 
                 query_result: ScalarResult[DBMessageMap] = await sql_retry(
@@ -714,15 +715,14 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
 
     # Find all messages matching this one
     try:
-        async_message_edits = []
+        async_message_edits: list[Coroutine[Any, Any, None]] = []
         with SQLSession(engine) as session:
 
             def get_bridged_messages():
-                return session.scalars(
-                    SQLSelect(DBMessageMap).where(
-                        DBMessageMap.source_message == payload.message_id
-                    )
-                )
+                select_message_map: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
+                    DBMessageMap
+                ).where(DBMessageMap.source_message == payload.message_id)
+                return session.scalars(select_message_map)
 
             bridged_messages: ScalarResult[DBMessageMap] = await sql_retry(
                 get_bridged_messages
@@ -890,15 +890,14 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
     # Find all messages matching this one
     session = None
     try:
-        async_message_deletes = []
+        async_message_deletes: list[Coroutine[Any, Any, None]] = []
         with SQLSession(engine) as session:
 
             def get_bridged_messages():
-                return session.scalars(
-                    SQLSelect(DBMessageMap).where(
-                        DBMessageMap.source_message == payload.message_id
-                    )
-                )
+                select_message_map: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
+                    DBMessageMap
+                ).where(DBMessageMap.source_message == payload.message_id)
+                return session.scalars(select_message_map)
 
             bridged_messages: ScalarResult[DBMessageMap] = await sql_retry(
                 get_bridged_messages
@@ -1144,12 +1143,13 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         with SQLSession(engine) as session:
             # Let me check whether I've already reacted to bridged messages in some of these channels
             def get_already_bridged_reactions():
-                return session.scalars(
-                    SQLSelect(DBReactionMap).where(
-                        DBReactionMap.source_message == source_message_id_str,
-                        DBReactionMap.source_emoji == emoji_id_str,
-                    )
+                select_reaction_map: SQLSelect[tuple[DBReactionMap]] = SQLSelect(
+                    DBReactionMap
+                ).where(
+                    DBReactionMap.source_message == source_message_id_str,
+                    DBReactionMap.source_emoji == emoji_id_str,
                 )
+                return session.scalars(select_reaction_map)
 
             already_bridged_reactions: ScalarResult[DBReactionMap] = await sql_retry(
                 get_already_bridged_reactions
@@ -1168,11 +1168,12 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
 
             # First, check whether this message is bridged, in which case I need to find its source
             def get_source_message_map():
-                return session.scalars(
-                    SQLSelect(DBMessageMap).where(
-                        DBMessageMap.target_message == source_message_id_str,
-                    )
-                ).first()
+                select_message_map: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
+                    DBMessageMap
+                ).where(
+                    DBMessageMap.target_message == source_message_id_str,
+                )
+                return session.scalars(select_message_map).first()
 
             source_message_map: DBMessageMap | None = await sql_retry(
                 get_source_message_map
@@ -1217,11 +1218,10 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                 return
 
             def get_bridged_messages():
-                return session.scalars(
-                    SQLSelect(DBMessageMap).where(
-                        DBMessageMap.source_message == str(source_message_id)
-                    )
-                )
+                select_message_map: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
+                    DBMessageMap
+                ).where(DBMessageMap.source_message == str(source_message_id))
+                return session.scalars(select_message_map)
 
             bridged_messages_query_result: ScalarResult[DBMessageMap] = await sql_retry(
                 get_bridged_messages
@@ -1294,7 +1294,7 @@ async def copy_emoji_into_server(
         return None
     emoji_server_id = globals.emoji_server.id
 
-    missing_emoji_id, missing_emoji_name, missing_emoji_animated, missing_emoji_url = (
+    missing_emoji_id, missing_emoji_name, _, missing_emoji_url = (
         globals.get_emoji_information(
             missing_emoji, missing_emoji_id, missing_emoji_name
         )
@@ -1490,8 +1490,11 @@ async def unreact(
             if removed_emoji_id:
                 conditions.append(DBReactionMap.source_emoji == removed_emoji_id)
 
+            select_bridged_reactions: SQLSelect[tuple[DBReactionMap]] = SQLSelect(
+                DBReactionMap
+            ).where(*conditions)
             bridged_reactions: ScalarResult[DBReactionMap] = await sql_retry(
-                lambda: session.scalars(SQLSelect(DBReactionMap).where(*conditions))
+                lambda: session.scalars(select_bridged_reactions)
             )
             bridged_messages = {
                 (
@@ -1523,8 +1526,11 @@ async def unreact(
             ]
             if equivalent_emoji_ids:
                 conditions.append(DBReactionMap.source_emoji.in_(equivalent_emoji_ids))
+            select_bridged_reactions: SQLSelect[tuple[DBReactionMap]] = SQLSelect(
+                DBReactionMap
+            ).where(*conditions)
             remaining_reactions: ScalarResult[DBReactionMap] = await sql_retry(
-                lambda: session.scalars(SQLSelect(DBReactionMap).where(*conditions))
+                lambda: session.scalars(select_bridged_reactions)
             )
 
             # And I get rid of my reactions from the messages that aren't on that list
