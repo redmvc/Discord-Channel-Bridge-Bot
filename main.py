@@ -601,7 +601,7 @@ async def bridge_message_helper(message: discord.Message):
                         avatar_url=bridged_avatar_url,
                         username=bridged_member_name,
                         embeds=list(message.embeds + reply_embed),
-                        files=attachments,  # might throw HHTPException if too large?
+                        files=attachments,  # TODO might throw HHTPException if too large?
                         wait=True,
                         **thread_splat,
                     )
