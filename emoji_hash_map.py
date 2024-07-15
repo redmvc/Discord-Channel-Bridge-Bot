@@ -1,5 +1,5 @@
 import asyncio
-from typing import Any, Coroutine, Literal, Sequence, cast, overload
+from typing import Any, Coroutine, Literal, Sequence, overload
 
 import discord
 from beartype import beartype
@@ -39,7 +39,7 @@ class EmojiHashMap:
                 session = SQLSession(engine)
                 close_after = True
 
-            select_hashed_emoji: SQLSelect = SQLSelect(DBEmoji)
+            select_hashed_emoji: SQLSelect[tuple[DBEmoji]] = SQLSelect(DBEmoji)
             hashed_emoji_query_result: ScalarResult[DBEmoji] = session.scalars(
                 select_hashed_emoji
             )
@@ -547,7 +547,8 @@ class EmojiHashMap:
             return None
 
         if not return_str:
-            return cast(frozenset[int], frozenset(hash_to_emoji[image_hash]))
+            emoji_set = frozenset(hash_to_emoji[image_hash])
+            return emoji_set
 
         return frozenset({str(id) for id in hash_to_emoji[image_hash]})
 

@@ -115,7 +115,7 @@ per_channel_whitelist: dict[int, set[int]] = {}
 rate_limiter = AsyncLimiter(1, 10)
 
 # Type wildcard
-_T = TypeVar("_T", bound=Any)
+T = TypeVar("T", bound=Any)
 
 
 @beartype
@@ -316,11 +316,11 @@ async def wait_until_ready(
 
 @beartype
 async def run_retries(
-    fun: Callable[..., _T],
+    fun: Callable[..., T],
     num_retries: int,
     time_to_wait: float | int = 5,
     exceptions_to_catch: type | tuple[type] | None = None,
-) -> _T:
+) -> T:
     """Run a function and retry it every time an exception occurs up to a certain maximum number of tries. If it succeeds, return its result; otherwise, raise the error.
 
     #### Args:
@@ -330,7 +330,7 @@ async def run_retries(
         - `exceptions_to_catch`: An exception type or a list of exception types to catch. Defaults to None, in which case all types will be caught.
 
     #### Returns:
-        - `_T`: The result of calling `fun()`.
+        - `T`: The result of calling `fun()`.
     """
     if num_retries < 1:
         num_retries = 1
