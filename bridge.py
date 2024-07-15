@@ -379,19 +379,24 @@ class Bridges:
                 session = SQLSession(engine)
                 close_after = True
 
+            delete_demolished_bridges_and_messages = []
             for sid, tid in bridges_to_demolish:
                 source_id_str = str(sid)
                 target_id_str = str(tid)
-                delete_demolished_bridges = SQLDelete(DBBridge).where(
-                    sql_and(
-                        DBBridge.source == source_id_str,
-                        DBBridge.target == target_id_str,
+                delete_demolished_bridges_and_messages.append(
+                    SQLDelete(DBBridge).where(
+                        sql_and(
+                            DBBridge.source == source_id_str,
+                            DBBridge.target == target_id_str,
+                        )
                     )
                 )
-                delete_demolished_messages = SQLDelete(DBMessageMap).where(
-                    sql_and(
-                        DBMessageMap.source_channel == source_id_str,
-                        DBMessageMap.target_channel == target_id_str,
+                delete_demolished_bridges_and_messages.append(
+                    SQLDelete(DBMessageMap).where(
+                        sql_and(
+                            DBMessageMap.source_channel == source_id_str,
+                            DBMessageMap.target_channel == target_id_str,
+                        )
                     )
                 )
 
@@ -403,8 +408,8 @@ class Bridges:
                 delete_invalid_webhooks = None
 
             def execute_queries():
-                session.execute(delete_demolished_bridges)
-                session.execute(delete_demolished_messages)
+                for delete_query in delete_demolished_bridges_and_messages:
+                    session.execute(delete_query)
                 if delete_invalid_webhooks is not None:
                     session.execute(delete_invalid_webhooks)
 
