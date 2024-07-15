@@ -10,9 +10,10 @@ from typing import Any, Callable, Literal, SupportsInt, TypedDict, TypeVar, cast
 import aiohttp
 import discord
 from aiolimiter import AsyncLimiter
+from beartype import beartype
 from typing_extensions import NotRequired
 
-from validations import ArgumentError, HTTPResponseError, validate_types
+from validations import ArgumentError, HTTPResponseError
 
 # discord.guild.GuildChannel isn't working in commands.py for some reason
 GuildChannel = (
@@ -114,9 +115,10 @@ per_channel_whitelist: dict[int, set[int]] = {}
 rate_limiter = AsyncLimiter(1, 10)
 
 # Type wildcard
-_T = TypeVar("_T", bound=Any)
+T = TypeVar("T", bound=Any)
 
 
+@beartype
 async def get_channel_from_id(
     channel_or_id: GuildChannel | discord.Thread | discord.abc.PrivateChannel | int,
 ) -> GuildChannel | discord.Thread | discord.abc.PrivateChannel | None:
@@ -141,6 +143,7 @@ async def get_channel_from_id(
     return channel
 
 
+@beartype
 def get_id_from_channel(
     channel_or_id: GuildChannel | discord.Thread | discord.abc.PrivateChannel | int,
 ) -> int:
@@ -161,6 +164,7 @@ def get_id_from_channel(
     raise ValueError("Argument passed was not a valid channel nor an ID.")
 
 
+@beartype
 async def get_channel_member(
     channel: GuildChannel | discord.Thread, member_id: int
 ) -> discord.Member | None:
@@ -180,6 +184,7 @@ async def get_channel_member(
     return channel_member
 
 
+@beartype
 async def get_image_from_URL(url: str) -> bytes:
     """Return an image stored in a URL.
 
@@ -211,6 +216,7 @@ async def get_image_from_URL(url: str) -> bytes:
     return image_bytes.read()
 
 
+@beartype
 def get_emoji_information(
     emoji: discord.PartialEmoji | discord.Emoji | None = None,
     emoji_id: int | str | None = None,
@@ -227,24 +233,16 @@ def get_emoji_information(
         - `ArgumentError`: Neither `emoji` nor `emoji_id` were passed, or `emoji_id` was passed but not `emoji_name`.
         - `ValueError`: `emoji` argument was passed and had type `PartialEmoji` but it was not a custom emoji, or `emoji_id` argument was passed and had type `str` but it was not a valid numerical ID.
     """
-    types_to_validate: dict[str, tuple] = {}
-    if emoji:
-        types_to_validate = {"emoji": (emoji, (discord.PartialEmoji, discord.Emoji))}
-    elif emoji_id:
-        if emoji_name:
-            types_to_validate = {
-                "emoji_id": (emoji_id, (int, str)),
-                "emoji_name": (emoji_name, str),
-            }
+    if not emoji:
+        if emoji_id:
+            if not emoji_name:
+                raise ArgumentError(
+                    "If emoji_id is passed as argument, emoji_name must also be."
+                )
         else:
             raise ArgumentError(
-                "If emoji_id is passed as argument, emoji_name must also be."
+                "At least one of emoji or emoji_id must be passed as argument."
             )
-    else:
-        raise ArgumentError(
-            "At least one of emoji or emoji_id must be passed as argument."
-        )
-    validate_types(**types_to_validate)
 
     if emoji:
         if not emoji.id:
@@ -279,6 +277,7 @@ def get_emoji_information(
     return (emoji_id_int, emoji_name, emoji_animated, emoji_url)
 
 
+@beartype
 def hash_image(image: bytes) -> str:
     """Return a string with a hash of an image.
 
@@ -288,6 +287,7 @@ def hash_image(image: bytes) -> str:
     return md5(image).hexdigest()
 
 
+@beartype
 async def wait_until_ready(
     *, time_to_wait: float | int = 100, polling_rate: float | int = 1
 ) -> bool:
@@ -300,11 +300,6 @@ async def wait_until_ready(
     global is_ready
     if is_ready:
         return True
-
-    validate_types(
-        time_to_wait=(time_to_wait, (int, float)),
-        polling_rate=(polling_rate, (int, float)),
-    )
 
     time_to_wait = max(time_to_wait, 0.0)
     polling_rate = max(polling_rate, 0.0)
@@ -319,12 +314,13 @@ async def wait_until_ready(
     return True
 
 
+@beartype
 async def run_retries(
-    fun: Callable[..., _T],
+    fun: Callable[..., T],
     num_retries: int,
-    time_to_wait: float = 5,
+    time_to_wait: float | int = 5,
     exceptions_to_catch: type | tuple[type] | None = None,
-) -> _T:
+) -> T:
     """Run a function and retry it every time an exception occurs up to a certain maximum number of tries. If it succeeds, return its result; otherwise, raise the error.
 
     #### Args:
@@ -334,23 +330,8 @@ async def run_retries(
         - `exceptions_to_catch`: An exception type or a list of exception types to catch. Defaults to None, in which case all types will be caught.
 
     #### Returns:
-        - `_T`: The result of calling `fun()`.
+        - `T`: The result of calling `fun()`.
     """
-    validate_exceptions_to_catch: dict[str, tuple] = {}
-    if exceptions_to_catch:
-        if isinstance(exceptions_to_catch, type):
-            exceptions_to_catch = (exceptions_to_catch,)
-        else:
-            validate_exceptions_to_catch["exceptions_to_catch"] = (
-                exceptions_to_catch,
-                tuple,
-            )
-    validate_types(
-        num_retries=(num_retries, int),
-        time_to_wait=(time_to_wait, (float, int)),
-        **validate_exceptions_to_catch,
-    )
-
     if num_retries < 1:
         num_retries = 1
     elif num_retries > 1 and time_to_wait <= 0:

@@ -4,6 +4,7 @@ from logging import warn
 from typing import Any, AsyncIterator, Coroutine, Iterable, Literal, cast
 
 import discord
+from beartype import beartype
 from sqlalchemy import Delete as SQLDelete
 from sqlalchemy import ScalarResult
 from sqlalchemy import Select as SQLSelect
@@ -12,7 +13,7 @@ from sqlalchemy.orm import Session as SQLSession
 
 import emoji_hash_map
 import globals
-from bridge import bridges
+from bridge import Bridge, bridges
 from database import (
     DBAppWhitelist,
     DBAutoBridgeThreadChannels,
@@ -20,7 +21,6 @@ from database import (
     engine,
     sql_retry,
 )
-from validations import validate_types
 
 
 @globals.command_tree.command(
@@ -200,7 +200,7 @@ async def bridge(
 
     await interaction.response.defer(thinking=True, ephemeral=True)
 
-    join_threads: list[Coroutine] = []
+    join_threads: list[Coroutine[Any, Any, None]] = []
     if isinstance(message_channel, discord.Thread) and not message_channel.me:
         try:
             join_threads.append(message_channel.join())
@@ -215,7 +215,7 @@ async def bridge(
     session = None
     try:
         with SQLSession(engine) as session:
-            create_bridges = []
+            create_bridges: list[Coroutine[Any, Any, Bridge]] = []
             if direction != "inbound":
                 create_bridges.append(
                     bridges.create_bridge(
@@ -415,6 +415,7 @@ async def auto_bridge_threads(
     await interaction.followup.send(response, ephemeral=True)
 
 
+@beartype
 async def mention_to_channel(
     link_or_mention: str,
 ) -> globals.GuildChannel | discord.Thread | discord.abc.PrivateChannel | None:
@@ -426,8 +427,6 @@ async def mention_to_channel(
     #### Returns:
         - The channel whose ID is given by `channel_id`.
     """
-    validate_types(link_or_mention=(link_or_mention, str))
-
     if link_or_mention.startswith("https://discord.com/channels"):
         try:
             while link_or_mention.endswith("/"):
@@ -508,7 +507,9 @@ async def demolish(interaction: discord.Interaction, target: str):
     try:
         with SQLSession(engine) as session:
             await bridges.demolish_bridges(
-                message_channel, target_channel, session=session
+                source_channel=message_channel,
+                target_channel=target_channel,
+                session=session,
             )
             await validate_auto_bridge_thread_channels(
                 {message_channel.id, target_channel.id}, session
@@ -609,8 +610,9 @@ async def demolish_all(
     await interaction.response.defer(thinking=True, ephemeral=True)
 
     # I'll make a list of all channels that are currently bridged to or from this channel
-    bridges_being_demolished = []
+    bridges_being_demolished: list[Coroutine[Any, Any, None]] = []
     session = None
+    exceptions: set[int] = set()
     try:
         with SQLSession(engine) as session:
             for channel_to_demolish_id, (
@@ -623,7 +625,6 @@ async def demolish_all(
                 else:
                     paired_channels = set()
 
-                exceptions: set[int] = set()
                 if outbound_bridges:
                     for target_id in outbound_bridges.keys():
                         target_channel = await globals.get_channel_from_id(target_id)
@@ -652,7 +653,9 @@ async def demolish_all(
                 for paired_channel_id in paired_channels:
                     bridges_being_demolished.append(
                         bridges.demolish_bridges(
-                            paired_channel_id, channel_to_demolish_id, session=session
+                            source_channel=paired_channel_id,
+                            target_channel=channel_to_demolish_id,
+                            session=session,
                         )
                     )
 
@@ -764,11 +767,11 @@ async def whitelist(interaction: discord.Interaction, apps: str):
                 apps_to_add.add(app_id)
 
     session = None
-    response = []
+    response: list[str] = []
     try:
         channel_id_str = str(channel.id)
         with SQLSession(engine) as session:
-            run_queries = []
+            run_queries: list[Coroutine[Any, Any, None]] = []
             if len(apps_to_add) > 0:
 
                 def whitelist_apps():
@@ -996,7 +999,7 @@ async def hash_server_emoji(
     await interaction.response.send_message(message, view=view, ephemeral=True)
 
 
-class CancelHashServer(discord.ui.Button):
+class CancelHashServer(discord.ui.Button[Any]):
     def __init__(self, original_interaction: discord.Interaction):
         super().__init__(label="No", style=discord.ButtonStyle.grey)
         self._original_interaction = original_interaction
@@ -1007,7 +1010,7 @@ class CancelHashServer(discord.ui.Button):
         )
 
 
-class ConfirmHashServer(discord.ui.Button):
+class ConfirmHashServer(discord.ui.Button[Any]):
     def __init__(
         self,
         original_interaction: discord.Interaction,
@@ -1053,6 +1056,7 @@ class ConfirmHashServer(discord.ui.Button):
         await interaction.followup.send("✅ Successfully hashed emoji!", ephemeral=True)
 
 
+@beartype
 async def bridge_thread_helper(
     thread_to_bridge: discord.Thread,
     user_id: int,
@@ -1065,16 +1069,6 @@ async def bridge_thread_helper(
         - `user_id`: ID of the user that created the thread.
         - `interaction`: The interaction that called this function, if any. Defaults to None.
     """
-    if interaction:
-        validate_interaction = {"interaction": (interaction, discord.Interaction)}
-    else:
-        validate_interaction = {}
-    validate_types(
-        thread_to_bridge=(thread_to_bridge, discord.Thread),
-        threat_to_bridge_parent=(thread_to_bridge.parent, discord.TextChannel),
-        user_id=(user_id, int),
-        **validate_interaction,
-    )
     thread_parent = cast(discord.TextChannel, thread_to_bridge.parent)
 
     outbound_bridges = bridges.get_outbound_bridges(thread_parent.id)
@@ -1116,11 +1110,10 @@ async def bridge_thread_helper(
                 await thread_parent.fetch_message(thread_to_bridge.id)
 
                 def get_source_starting_message():
-                    return session.scalars(
-                        SQLSelect(DBMessageMap).where(
-                            DBMessageMap.target_message == str(thread_to_bridge.id)
-                        )
-                    ).first()
+                    select_message_map: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
+                        DBMessageMap
+                    ).where(DBMessageMap.target_message == str(thread_to_bridge.id))
+                    return session.scalars(select_message_map).first()
 
                 source_starting_message: DBMessageMap | None = await sql_retry(
                     get_source_starting_message
@@ -1135,11 +1128,10 @@ async def bridge_thread_helper(
                     source_message_id = thread_to_bridge.id
 
                 def get_target_starting_messages():
-                    return session.scalars(
-                        SQLSelect(DBMessageMap).where(
-                            DBMessageMap.source_message == str(source_message_id)
-                        )
-                    )
+                    select_message_map: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
+                        DBMessageMap
+                    ).where(DBMessageMap.source_message == str(source_message_id))
+                    return session.scalars(select_message_map)
 
                 target_starting_messages: ScalarResult[DBMessageMap] = await sql_retry(
                     get_target_starting_messages
@@ -1154,11 +1146,11 @@ async def bridge_thread_helper(
             # Now find all channels that are bridged to the channel this thread's parent is bridged to and create threads there
             threads_created: dict[int, discord.Thread] = {}
             succeeded_at_least_once = False
-            bridged_threads = []
-            failed_channels = []
+            bridged_threads: list[int] = []
+            failed_channels: list[int] = []
 
-            create_bridges: list[Coroutine] = []
-            add_user_to_threads: list[Coroutine] = []
+            create_bridges: list[Coroutine[Any, Any, Bridge]] = []
+            add_user_to_threads: list[Coroutine[Any, Any, None]] = []
             try:
                 add_user_to_threads.append(thread_to_bridge.join())
             except Exception:
@@ -1293,6 +1285,7 @@ async def bridge_thread_helper(
         await interaction.followup.send(response, ephemeral=True)
 
 
+@beartype
 async def stop_auto_bridging_threads_helper(
     channel_ids_to_remove: int | Iterable[int], session: SQLSession | None = None
 ):
@@ -1305,15 +1298,6 @@ async def stop_auto_bridging_threads_helper(
     #### Raises:
         - `SQLError`: Something went wrong accessing or modifying the database.
     """
-    if session:
-        validate_session = {"session": (session, SQLSession)}
-    else:
-        validate_session = {}
-    validate_types(
-        channel_ids_to_remove=(channel_ids_to_remove, (int, Iterable)),
-        **validate_session,
-    )
-
     if not isinstance(channel_ids_to_remove, set):
         if isinstance(channel_ids_to_remove, int):
             channel_ids_to_remove = {channel_ids_to_remove}
@@ -1350,6 +1334,7 @@ async def stop_auto_bridging_threads_helper(
         session.close()
 
 
+@beartype
 async def validate_auto_bridge_thread_channels(
     channel_ids_to_check: int | Iterable[int], session: SQLSession | None = None
 ):
@@ -1362,8 +1347,6 @@ async def validate_auto_bridge_thread_channels(
     #### Raises:
         - `SQLError`: Something went wrong accessing or modifying the database.
     """
-    validate_types(channel_ids_to_check=(channel_ids_to_check, (int, Iterable)))
-
     if not isinstance(channel_ids_to_check, set):
         if isinstance(channel_ids_to_check, int):
             channel_ids_to_check = {channel_ids_to_check}
@@ -1384,6 +1367,7 @@ async def validate_auto_bridge_thread_channels(
     await stop_auto_bridging_threads_helper(channel_ids_to_remove, session)
 
 
+@beartype
 async def map_emoji_helper(
     *,
     external_emoji: discord.PartialEmoji | None = None,
@@ -1411,12 +1395,6 @@ async def map_emoji_helper(
         - `RuntimeError`: Session connection failed.
         - `ServerTimeoutError`: Connection to server timed out.
     """
-    if session:
-        validate_session = {"session": (session, SQLSession)}
-    else:
-        validate_session = {}
-    validate_types(internal_emoji=(internal_emoji, discord.Emoji), **validate_session)
-
     external_emoji_id, external_emoji_name, external_emoji_animated, _ = (
         globals.get_emoji_information(
             external_emoji, external_emoji_id, external_emoji_name
@@ -1536,11 +1514,12 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
         with SQLSession(engine) as session:
             # We need to see whether this message is a bridged message and, if so, find its source
             def get_source_message_map():
-                return session.scalars(
-                    SQLSelect(DBMessageMap).where(
-                        DBMessageMap.target_message == str(message.id),
-                    )
-                ).first()
+                select_message_map: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
+                    DBMessageMap
+                ).where(
+                    DBMessageMap.target_message == str(message.id),
+                )
+                return session.scalars(select_message_map).first()
 
             source_message_map: DBMessageMap | None = await sql_retry(
                 get_source_message_map
@@ -1572,11 +1551,10 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
             if outbound_bridges:
 
                 def get_bridged_messages():
-                    return session.scalars(
-                        SQLSelect(DBMessageMap).where(
-                            DBMessageMap.source_message == str(source_message_id)
-                        )
-                    )
+                    select_message_map: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
+                        DBMessageMap
+                    ).where(DBMessageMap.source_message == str(source_message_id))
+                    return session.scalars(select_message_map)
 
                 bridged_messages: ScalarResult[DBMessageMap] = await sql_retry(
                     get_bridged_messages
@@ -1621,7 +1599,7 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
             list_of_reacters: list[Coroutine[Any, Any, set[int]]]
         ):
             gathered_users = await asyncio.gather(*list_of_reacters)
-            set_of_users: set[int] = set.union(*gathered_users)
+            set_of_users: set[int] = set().union(*gathered_users)
             set_of_users.discard(bot_user_id)
             return set_of_users
 

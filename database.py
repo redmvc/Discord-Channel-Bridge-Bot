@@ -1,5 +1,6 @@
 from typing import Any, Callable, Iterable
 
+from beartype import beartype
 from sqlalchemy import Boolean
 from sqlalchemy import Select as SQLSelect
 from sqlalchemy import String, UniqueConstraint
@@ -11,10 +12,8 @@ from sqlalchemy.exc import StatementError as SQLError
 from sqlalchemy.orm import DeclarativeBase, Mapped
 from sqlalchemy.orm import Session as SQLSession
 from sqlalchemy.orm import mapped_column
-from sqlalchemy.sql._typing import _DMLTableArgument
 
-from globals import _T, run_retries, settings
-from validations import validate_types
+from globals import T, run_retries, settings
 
 
 class DBBase(DeclarativeBase):
@@ -185,9 +184,10 @@ class DBAppWhitelist(DBBase):
     application: Mapped[str] = mapped_column(String(32), nullable=False)
 
 
+@beartype
 async def sql_upsert(
     *,
-    table: _DMLTableArgument,
+    table: Any,
     indices: Iterable[str],
     ignored_cols: Iterable[str] | None = None,
     **kwargs: Any,
@@ -204,14 +204,6 @@ async def sql_upsert(
         - `ValueError`: `indices` is not a proper subset of `kwargs.keys()`.
         - `SQLError`: SQL statement inferred from arguments was invalid or database connection failed. This error can only be raised if the database dialect is not MySQL, PostgreSQL, nor SQLite.
     """
-    if ignored_cols:
-        validate_ignored_cols = {"ignored_cols": (ignored_cols, Iterable)}
-    else:
-        validate_ignored_cols = {}
-    validate_types(
-        indices=(indices, Iterable), kwargs=(kwargs, dict), **validate_ignored_cols
-    )
-
     indices = set(indices)
     insert_values = kwargs
     insert_value_keys = set(insert_values.keys())
@@ -256,9 +248,10 @@ async def sql_upsert(
                 upsert: UpdateBase
 
                 def select_existing(session: SQLSession):
-                    return session.execute(
-                        SQLSelect(table).where(*index_values)
-                    ).first()
+                    select_table: SQLSelect[tuple[Any]] = SQLSelect(table).where(
+                        *index_values
+                    )
+                    return session.execute(select_table).first()
 
                 if await sql_retry(lambda: select_existing(session)):
                     # Values with those keys do exist, so I update
@@ -276,9 +269,10 @@ async def sql_upsert(
             raise e
 
 
+@beartype
 async def sql_insert_ignore_duplicate(
     *,
-    table: _DMLTableArgument,
+    table: Any,
     indices: Iterable[str],
     **kwargs: Any,
 ) -> UpdateBase:
@@ -292,8 +286,6 @@ async def sql_insert_ignore_duplicate(
     #### Raises:
         - `SQLError`: SQL statement inferred from arguments was invalid or database connection failed. This error can only be raised if the database dialect is not MySQL, PostgreSQL, nor SQLite.
     """
-    validate_types(indices=(indices, Iterable), kwargs=(kwargs, dict))
-
     indices = set(indices)
     insert_values = kwargs
 
@@ -324,9 +316,10 @@ async def sql_insert_ignore_duplicate(
                 insert_unknown: UpdateBase
 
                 def select_existing(session: SQLSession):
-                    return session.execute(
-                        SQLSelect(table).where(*index_values)
-                    ).first()
+                    select_table: SQLSelect[tuple[Any]] = SQLSelect(table).where(
+                        *index_values
+                    )
+                    return session.execute(select_table).first()
 
                 if await sql_retry(lambda: select_existing(session)):
                     # Values with those keys do exist, so I do nothing
@@ -345,11 +338,12 @@ async def sql_insert_ignore_duplicate(
             raise e
 
 
+@beartype
 async def sql_retry(
-    fun: Callable[..., _T],
+    fun: Callable[..., T],
     num_retries: int = 5,
-    time_to_wait: float = 10,
-) -> _T:
+    time_to_wait: float | int = 10,
+) -> T:
     """Run an SQL function and retry it every time an SQLError occurs up to a certain maximum number of tries. If it succeeds, return its result; otherwise, raise the error.
 
     #### Args:
@@ -358,7 +352,7 @@ async def sql_retry(
         - `time_to_wait`: How long to wait between retries.
 
     #### Returns:
-        - `_T`: The result of calling `fun()`.
+        - `T`: The result of calling `fun()`.
     """
     return await run_retries(fun, num_retries, time_to_wait, SQLError)
 

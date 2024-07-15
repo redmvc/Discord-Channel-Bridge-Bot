@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Sequence, Type
+from typing import Sequence
 
 import discord
 
@@ -26,28 +26,6 @@ def natural_language_concat(items: Sequence[str]) -> str:
         return items[0] + " or " + items[1]
     else:
         return ", ".join(items[:-1]) + " or " + items[-1]
-
-
-def validate_types(
-    **kwargs: tuple[Any, type | Type[int | str] | tuple[type | Type[int | str], ...]]
-):
-    """Raise `TypeError` if the arguments passed are not the right type.
-
-    #### Args:
-        - `kwargs`: The arguments to validate and tuples with their values and types.
-    """
-    for arg_name, (arg_value, valid_type) in kwargs.items():
-        if not isinstance(arg_value, valid_type):
-            if isinstance(valid_type, type):
-                raise TypeError(
-                    f"{arg_name} must be {valid_type.__name__}, not "
-                    + type(arg_value).__name__
-                )
-            else:
-                raise TypeError(
-                    f"{arg_name} must be {[t.__name__ for t in valid_type]}, not "
-                    + type(arg_value).__name__
-                )
 
 
 def validate_channels(
