@@ -769,11 +769,20 @@ class Webhooks:
             # The webhook doesn't exist somehow
             return webhook_id
 
-        await webhook.delete(reason="Bridge demolition.")
+        try:
+            await webhook.delete(reason="Bridge demolition.")
+        except discord.NotFound:
+            pass
 
-        assert webhook.channel_id
+        if webhook.channel_id:
+            del self._webhook_by_parent[webhook.channel_id]
+        else:
+            # Can't find the channel ID directly, webhook doesn't exist or something
+            for parent_id, parented_webhook_id in self._webhook_by_parent.items():
+                if webhook_id == parented_webhook_id:
+                    del self._webhook_by_parent[parent_id]
+                    break
         del self._channels_per_webhook[webhook_id]
-        del self._webhook_by_parent[webhook.channel_id]
         del self._webhooks[webhook_id]
 
         return webhook_id
