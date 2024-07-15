@@ -13,7 +13,7 @@ from sqlalchemy.orm import DeclarativeBase, Mapped
 from sqlalchemy.orm import Session as SQLSession
 from sqlalchemy.orm import mapped_column
 
-from globals import _T, run_retries, settings
+from globals import T, run_retries, settings
 
 
 class DBBase(DeclarativeBase):
@@ -340,10 +340,10 @@ async def sql_insert_ignore_duplicate(
 
 @beartype
 async def sql_retry(
-    fun: Callable[..., _T],
+    fun: Callable[..., T],
     num_retries: int = 5,
     time_to_wait: float | int = 10,
-) -> _T:
+) -> T:
     """Run an SQL function and retry it every time an SQLError occurs up to a certain maximum number of tries. If it succeeds, return its result; otherwise, raise the error.
 
     #### Args:
