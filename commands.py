@@ -508,7 +508,9 @@ async def demolish(interaction: discord.Interaction, target: str):
     try:
         with SQLSession(engine) as session:
             await bridges.demolish_bridges(
-                message_channel, target_channel, session=session
+                source_channel=message_channel,
+                target_channel=target_channel,
+                session=session,
             )
             await validate_auto_bridge_thread_channels(
                 {message_channel.id, target_channel.id}, session
@@ -652,7 +654,9 @@ async def demolish_all(
                 for paired_channel_id in paired_channels:
                     bridges_being_demolished.append(
                         bridges.demolish_bridges(
-                            paired_channel_id, channel_to_demolish_id, session=session
+                            source_channel=paired_channel_id,
+                            target_channel=channel_to_demolish_id,
+                            session=session,
                         )
                     )
 
