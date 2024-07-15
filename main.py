@@ -92,7 +92,7 @@ async def on_ready():
                 add_webhook_async.append(
                     bridges.webhooks.add_webhook(channel_id, webhook)
                 )
-            asyncio.gather(*add_webhook_async)
+            await asyncio.gather(*add_webhook_async)
 
             # I will make a list of all target channels that have at least one source and delete the ones that don't
             all_target_channels: set[str] = set()
