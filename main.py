@@ -651,9 +651,9 @@ async def bridge_message_to_target_channel(
     else:
         reply_embed = []
 
-    attachments = []
-    for attachment in message.attachments:
-        attachments.append(await attachment.to_file())
+    attachments = await asyncio.gather(
+        *[attachment.to_file() for attachment in message.attachments]
+    )
 
     try:
         return await webhook.send(
