@@ -496,7 +496,9 @@ async def bridge_message_helper(message: discord.Message):
                     )
 
             # Send a message out to each target webhook
-            async_bridged_messages = []
+            async_bridged_messages: list[
+                Coroutine[Any, Any, discord.WebhookMessage | None]
+            ] = []
             for target_id, webhook in reachable_channels.items():
                 if not webhook:
                     continue
@@ -526,6 +528,7 @@ async def bridge_message_helper(message: discord.Message):
                         bridged_reply_to.get(target_id),
                         reply_has_ping,
                         thread_splat,
+                        session,
                     )
                 )
 
@@ -533,9 +536,11 @@ async def bridge_message_helper(message: discord.Message):
                 return
 
             # Insert references to the linked messages into the message_mappings table
-            bridged_messages: list[discord.WebhookMessage] = await asyncio.gather(
-                *async_bridged_messages
-            )
+            bridged_messages: list[discord.WebhookMessage] = [
+                bridged_message
+                for bridged_message in (await asyncio.gather(*async_bridged_messages))
+                if bridged_message
+            ]
             source_message_id_str = str(message.id)
             source_channel_id_str = str(message.channel.id)
 
@@ -573,7 +578,8 @@ async def bridge_message_to_target_channel(
     bridged_reply_to: int | None,
     reply_has_ping: bool,
     thread_splat: ThreadSplat,
-) -> discord.WebhookMessage:
+    session: SQLSession,
+) -> discord.WebhookMessage | None:
     """Bridge a message to a channel and returns the message bridged.
 
     #### Args:
@@ -585,6 +591,7 @@ async def bridge_message_to_target_channel(
         - `bridged_reply_to`: The ID of a message the message being bridged is replying to on the target channel.
         - `reply_has_ping`: Whether the reply is pinging the original message.
         - `thread_splat`: A splat with the thread this message is being bridged to, if any.
+        - `session`: A connection to the database.
 
     #### Returns:
         - `discord.WebhookMessage`: The message bridged.
@@ -648,18 +655,26 @@ async def bridge_message_to_target_channel(
     for attachment in message.attachments:
         attachments.append(await attachment.to_file())
 
-    return await webhook.send(
-        content=message_content,
-        allowed_mentions=discord.AllowedMentions(
-            users=True, roles=False, everyone=False
-        ),
-        avatar_url=bridged_avatar_url,
-        username=bridged_member_name,
-        embeds=list(message.embeds + reply_embed),
-        files=attachments,  # TODO might throw HHTPException if too large?
-        wait=True,
-        **thread_splat,
-    )
+    try:
+        return await webhook.send(
+            content=message_content,
+            allowed_mentions=discord.AllowedMentions(
+                users=True, roles=False, everyone=False
+            ),
+            avatar_url=bridged_avatar_url,
+            username=bridged_member_name,
+            embeds=list(message.embeds + reply_embed),
+            files=attachments,  # TODO might throw HHTPException if too large?
+            wait=True,
+            **thread_splat,
+        )
+    except discord.NotFound:
+        # Webhook is gone, delete this bridge
+        warn(
+            f"Webhook in {target_channel.guild.name}:{target_channel.name} (ID: {target_channel.id}) not found, demolishing bridges to this channel and its threads."
+        )
+        await bridges.demolish_bridges(target_channel=target_channel, session=session)
+        return None
 
 
 @globals.client.event
@@ -755,11 +770,23 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
                             except Exception:
                                 return
 
-                        await webhook.edit_message(
-                            message_id=int(message_row.target_message),
-                            content=updated_message_content,
-                            **thread_splat,
-                        )
+                        try:
+                            await webhook.edit_message(
+                                message_id=int(message_row.target_message),
+                                content=updated_message_content,
+                                **thread_splat,
+                            )
+                        except discord.NotFound:
+                            # Webhook is gone, delete this bridge
+                            assert isinstance(
+                                bridged_channel, (discord.TextChannel, discord.Thread)
+                            )
+                            warn(
+                                f"Webhook in {bridged_channel.guild.name}:{bridged_channel.name} (ID: {bridged_channel.id}) not found, demolishing bridges to this channel and its threads."
+                            )
+                            await bridges.demolish_bridges(
+                                target_channel=bridged_channel, session=session
+                            )
 
                     async_message_edits.append(
                         edit_message(
@@ -917,10 +944,22 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
                             except Exception:
                                 return
 
-                        await webhook.delete_message(
-                            int(message_row.target_message),
-                            **thread_splat,
-                        )
+                        try:
+                            await webhook.delete_message(
+                                int(message_row.target_message),
+                                **thread_splat,
+                            )
+                        except discord.NotFound:
+                            # Webhook is gone, delete this bridge
+                            assert isinstance(
+                                bridged_channel, (discord.TextChannel, discord.Thread)
+                            )
+                            warn(
+                                f"Webhook in {bridged_channel.guild.name}:{bridged_channel.name} (ID: {bridged_channel.id}) not found, demolishing bridges to this channel and its threads."
+                            )
+                            await bridges.demolish_bridges(
+                                target_channel=bridged_channel, session=session
+                            )
 
                     async_message_deletes.append(
                         delete_message(message_row, target_channel_id, thread_splat)
