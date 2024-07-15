@@ -12,7 +12,6 @@ from sqlalchemy.exc import StatementError as SQLError
 from sqlalchemy.orm import DeclarativeBase, Mapped
 from sqlalchemy.orm import Session as SQLSession
 from sqlalchemy.orm import mapped_column
-from sqlalchemy.sql._typing import _DMLTableArgument
 
 from globals import _T, run_retries, settings
 
@@ -188,7 +187,7 @@ class DBAppWhitelist(DBBase):
 @beartype
 async def sql_upsert(
     *,
-    table: _DMLTableArgument,
+    table,
     indices: Iterable[str],
     ignored_cols: Iterable[str] | None = None,
     **kwargs: Any,
@@ -272,7 +271,7 @@ async def sql_upsert(
 @beartype
 async def sql_insert_ignore_duplicate(
     *,
-    table: _DMLTableArgument,
+    table,
     indices: Iterable[str],
     **kwargs: Any,
 ) -> UpdateBase:
