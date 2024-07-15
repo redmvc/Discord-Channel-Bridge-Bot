@@ -340,7 +340,7 @@ async def sql_insert_ignore_duplicate(
 async def sql_retry(
     fun: Callable[..., _T],
     num_retries: int = 5,
-    time_to_wait: float = 10,
+    time_to_wait: float | int = 10,
 ) -> _T:
     """Run an SQL function and retry it every time an SQLError occurs up to a certain maximum number of tries. If it succeeds, return its result; otherwise, raise the error.
 

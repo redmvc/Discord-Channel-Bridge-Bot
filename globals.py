@@ -318,7 +318,7 @@ async def wait_until_ready(
 async def run_retries(
     fun: Callable[..., _T],
     num_retries: int,
-    time_to_wait: float = 5,
+    time_to_wait: float | int = 5,
     exceptions_to_catch: type | tuple[type] | None = None,
 ) -> _T:
     """Run a function and retry it every time an exception occurs up to a certain maximum number of tries. If it succeeds, return its result; otherwise, raise the error.
