@@ -1,4 +1,5 @@
 import asyncio
+from copy import deepcopy
 from typing import Any, Callable, Coroutine, Literal, cast, overload
 
 import discord
@@ -247,7 +248,7 @@ class Bridges:
         }.union(
             {
                 channel_id
-                for channel_id, webhook_id in self.webhooks._webhook_by_channel.items()
+                for channel_id, webhook_id in self.webhooks.webhook_by_channel.items()
                 if str(channel_id) not in targets_with_sources
                 or str(webhook_id) in invalid_webhook_ids
             }
@@ -910,6 +911,10 @@ class Webhooks:
         del self._webhooks[webhook_id]
 
         return webhook_id
+
+    @property
+    def webhook_by_channel(self):
+        return deepcopy(self._webhook_by_channel)
 
 
 bridges = Bridges()
