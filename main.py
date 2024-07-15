@@ -457,7 +457,6 @@ async def bridge_message_helper(message: discord.Message):
 
                 # First, check whether the message replied to was itself bridged from a different channel
                 def get_local_replied_to():
-                    assert session
                     return session.scalars(
                         SQLSelect(DBMessageMap).where(
                             DBMessageMap.target_message == str(replied_to_id)
@@ -485,7 +484,6 @@ async def bridge_message_helper(message: discord.Message):
                     select_bridged_reply_to: SQLSelect = SQLSelect(DBMessageMap).where(
                         DBMessageMap.source_message == str(source_replied_to_id)
                     )
-                    assert session
                     return session.scalars(select_bridged_reply_to)
 
                 query_result: ScalarResult[DBMessageMap] = await sql_retry(
@@ -546,7 +544,6 @@ async def bridge_message_helper(message: discord.Message):
             source_channel_id_str = str(message.channel.id)
 
             def insert_into_message_map():
-                assert session
                 session.add_all(
                     [
                         DBMessageMap(
@@ -1094,7 +1091,6 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                     None,
                 )
             if not existing_matching_emoji:
-                assert equivalent_emoji_ids
                 existing_matching_emoji = next(
                     (
                         emoji
@@ -1148,7 +1144,6 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         with SQLSession(engine) as session:
             # Let me check whether I've already reacted to bridged messages in some of these channels
             def get_already_bridged_reactions():
-                assert session
                 return session.scalars(
                     SQLSelect(DBReactionMap).where(
                         DBReactionMap.source_message == source_message_id_str,
@@ -1173,7 +1168,6 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
 
             # First, check whether this message is bridged, in which case I need to find its source
             def get_source_message_map():
-                assert session
                 return session.scalars(
                     SQLSelect(DBMessageMap).where(
                         DBMessageMap.target_message == source_message_id_str,
@@ -1216,7 +1210,6 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                     reaction_added = await async_add_reactions[0]
 
                     def insert_into_reactions_map():
-                        assert session
                         session.add(reaction_added)
                         session.commit()
 
@@ -1259,7 +1252,6 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         reactions_added = await asyncio.gather(*async_add_reactions)
 
         def insert_into_reactions_map():
-            assert session
             session.add_all([r for r in reactions_added if r])
             session.commit()
 

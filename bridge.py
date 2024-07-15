@@ -237,7 +237,6 @@ class Bridges:
             )
 
             def execute_query():
-                assert session
                 session.execute(insert_bridge_row)
                 session.execute(insert_webhook_row)
 
@@ -404,7 +403,6 @@ class Bridges:
                 delete_invalid_webhooks = None
 
             def execute_queries():
-                assert session
                 session.execute(delete_demolished_bridges)
                 session.execute(delete_demolished_messages)
                 if delete_invalid_webhooks is not None:
