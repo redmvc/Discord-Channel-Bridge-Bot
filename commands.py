@@ -612,6 +612,7 @@ async def demolish_all(
     # I'll make a list of all channels that are currently bridged to or from this channel
     bridges_being_demolished = []
     session = None
+    exceptions: set[int] = set()
     try:
         with SQLSession(engine) as session:
             for channel_to_demolish_id, (
@@ -624,7 +625,6 @@ async def demolish_all(
                 else:
                     paired_channels = set()
 
-                exceptions: set[int] = set()
                 if outbound_bridges:
                     for target_id in outbound_bridges.keys():
                         target_channel = await globals.get_channel_from_id(target_id)
