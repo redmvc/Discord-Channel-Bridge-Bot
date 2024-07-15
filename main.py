@@ -800,10 +800,10 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
                         "Ran into a Discord exception while trying to edit a message across a bridge:\n"
                         + str(e)
                     )
+
+        await asyncio.gather(*async_message_edits)
     except SQLError as e:
         warn("Ran into an SQL error while trying to edit a message:\n" + str(e))
-
-    await asyncio.gather(*async_message_edits)
 
 
 @beartype
