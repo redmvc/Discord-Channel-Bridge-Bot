@@ -1,5 +1,6 @@
 from typing import Any, Callable, Iterable
 
+from beartype import beartype
 from sqlalchemy import Boolean
 from sqlalchemy import Select as SQLSelect
 from sqlalchemy import String, UniqueConstraint
@@ -14,7 +15,6 @@ from sqlalchemy.orm import mapped_column
 from sqlalchemy.sql._typing import _DMLTableArgument
 
 from globals import _T, run_retries, settings
-from validations import validate_types
 
 
 class DBBase(DeclarativeBase):
@@ -185,6 +185,7 @@ class DBAppWhitelist(DBBase):
     application: Mapped[str] = mapped_column(String(32), nullable=False)
 
 
+@beartype
 async def sql_upsert(
     *,
     table: _DMLTableArgument,
@@ -204,14 +205,6 @@ async def sql_upsert(
         - `ValueError`: `indices` is not a proper subset of `kwargs.keys()`.
         - `SQLError`: SQL statement inferred from arguments was invalid or database connection failed. This error can only be raised if the database dialect is not MySQL, PostgreSQL, nor SQLite.
     """
-    if ignored_cols:
-        validate_ignored_cols = {"ignored_cols": (ignored_cols, Iterable)}
-    else:
-        validate_ignored_cols = {}
-    validate_types(
-        indices=(indices, Iterable), kwargs=(kwargs, dict), **validate_ignored_cols
-    )
-
     indices = set(indices)
     insert_values = kwargs
     insert_value_keys = set(insert_values.keys())
@@ -276,6 +269,7 @@ async def sql_upsert(
             raise e
 
 
+@beartype
 async def sql_insert_ignore_duplicate(
     *,
     table: _DMLTableArgument,
@@ -292,8 +286,6 @@ async def sql_insert_ignore_duplicate(
     #### Raises:
         - `SQLError`: SQL statement inferred from arguments was invalid or database connection failed. This error can only be raised if the database dialect is not MySQL, PostgreSQL, nor SQLite.
     """
-    validate_types(indices=(indices, Iterable), kwargs=(kwargs, dict))
-
     indices = set(indices)
     insert_values = kwargs
 
@@ -345,6 +337,7 @@ async def sql_insert_ignore_duplicate(
             raise e
 
 
+@beartype
 async def sql_retry(
     fun: Callable[..., _T],
     num_retries: int = 5,

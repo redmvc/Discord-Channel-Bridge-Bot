@@ -7,6 +7,7 @@ from typing import Any, Coroutine, TypedDict, cast
 from warnings import warn
 
 import discord
+from beartype import beartype
 from sqlalchemy import Delete as SQLDelete
 from sqlalchemy import ScalarResult
 from sqlalchemy import Select as SQLSelect
@@ -28,7 +29,6 @@ from database import (
     engine,
     sql_retry,
 )
-from validations import validate_types
 
 
 class ThreadSplat(TypedDict, total=False):
@@ -410,6 +410,7 @@ async def on_message(message: discord.Message):
     await bridge_message_helper(message)
 
 
+@beartype
 async def bridge_message_helper(message: discord.Message):
     """Mirror a message to any of its outbound bridge targets.
 
@@ -422,8 +423,6 @@ async def bridge_message_helper(message: discord.Message):
         - `Forbidden`: The authorization token for one of the webhooks is incorrect.
         - `ValueError`: The length of embeds was invalid, there was no token associated with one of the webhooks or ephemeral was passed with the improper webhook type or there was no state attached with one of the webhooks when giving it a view.
     """
-    validate_types(message=(message, discord.Message))
-
     outbound_bridges = bridges.get_outbound_bridges(message.channel.id)
     if not outbound_bridges:
         return
@@ -458,6 +457,7 @@ async def bridge_message_helper(message: discord.Message):
 
                 # First, check whether the message replied to was itself bridged from a different channel
                 def get_local_replied_to():
+                    assert session
                     return session.scalars(
                         SQLSelect(DBMessageMap).where(
                             DBMessageMap.target_message == str(replied_to_id)
@@ -485,6 +485,7 @@ async def bridge_message_helper(message: discord.Message):
                     select_bridged_reply_to: SQLSelect = SQLSelect(DBMessageMap).where(
                         DBMessageMap.source_message == str(source_replied_to_id)
                     )
+                    assert session
                     return session.scalars(select_bridged_reply_to)
 
                 query_result: ScalarResult[DBMessageMap] = await sql_retry(
@@ -545,6 +546,7 @@ async def bridge_message_helper(message: discord.Message):
             source_channel_id_str = str(message.channel.id)
 
             def insert_into_message_map():
+                assert session
                 session.add_all(
                     [
                         DBMessageMap(
@@ -569,6 +571,7 @@ async def bridge_message_helper(message: discord.Message):
         return
 
 
+@beartype
 async def bridge_message_to_target_channel(
     message: discord.Message,
     message_content: str,
@@ -806,6 +809,7 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
     await asyncio.gather(*async_message_edits)
 
 
+@beartype
 async def replace_missing_emoji(message_content: str) -> str:
     """Return a version of the contents of a message that replaces any instances of an emoji that the bot can't find with matching ones, if possible.
 
@@ -1090,6 +1094,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                     None,
                 )
             if not existing_matching_emoji:
+                assert equivalent_emoji_ids
                 existing_matching_emoji = next(
                     (
                         emoji
@@ -1143,6 +1148,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         with SQLSession(engine) as session:
             # Let me check whether I've already reacted to bridged messages in some of these channels
             def get_already_bridged_reactions():
+                assert session
                 return session.scalars(
                     SQLSelect(DBReactionMap).where(
                         DBReactionMap.source_message == source_message_id_str,
@@ -1167,6 +1173,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
 
             # First, check whether this message is bridged, in which case I need to find its source
             def get_source_message_map():
+                assert session
                 return session.scalars(
                     SQLSelect(DBMessageMap).where(
                         DBMessageMap.target_message == source_message_id_str,
@@ -1209,6 +1216,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                     reaction_added = await async_add_reactions[0]
 
                     def insert_into_reactions_map():
+                        assert session
                         session.add(reaction_added)
                         session.commit()
 
@@ -1251,6 +1259,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         reactions_added = await asyncio.gather(*async_add_reactions)
 
         def insert_into_reactions_map():
+            assert session
             session.add_all([r for r in reactions_added if r])
             session.commit()
 
@@ -1266,6 +1275,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         )
 
 
+@beartype
 async def copy_emoji_into_server(
     *,
     missing_emoji: discord.PartialEmoji | None = None,
@@ -1452,6 +1462,7 @@ async def on_raw_reaction_clear(payload: discord.RawReactionClearEvent):
     await unreact(payload)
 
 
+@beartype
 async def unreact(
     payload: (
         discord.RawReactionActionEvent
