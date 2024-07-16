@@ -1,5 +1,6 @@
 import asyncio
 from copy import deepcopy
+import inspect
 from typing import Any, Callable, Coroutine, Literal, cast, overload
 
 import discord
@@ -476,9 +477,11 @@ class Bridges:
             - `ValueError`: The webhook does not have a token associated with it.
         """
         if not source_channel and not target_channel:
-            raise ArgumentError(
-                "At least one of source_channel or target_channel needs to be passed as argument to demolish_bridges()."
+            err = ArgumentError(
+                f"Error in function {inspect.stack()[1][3]}(): at least one of source_channel or target_channel needs to be passed as argument to demolish_bridges()."
             )
+            logger.error(err)
+            raise err
 
         # Now let's check that all relevant bridges exist
         if target_channel:
@@ -715,9 +718,11 @@ class Bridges:
             - `ValueError`: The `direction` variable has a value other than `"outbound"` and `"inbound"`.
         """
         if direction not in {"outbound", "inbound"}:
-            raise ValueError(
-                'direction argument to get_reachable_channels() must be either "outbound" or "inbound".'
+            err = ValueError(
+                f'Error in function {inspect.stack()[1][3]}(): direction argument to get_reachable_channels() must be either "outbound" or "inbound".'
             )
+            logger.error(err)
+            raise err
 
         get_bridges: Callable[
             [discord.TextChannel | discord.Thread | int], dict[int, Bridge] | None
