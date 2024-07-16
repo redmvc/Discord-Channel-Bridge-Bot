@@ -716,11 +716,8 @@ class Bridges:
         channel_ids_to_check: set[int] = {starting_channel_id}
         channel_ids_checked: set[int] = set()
 
-        reachable_channel_ids: set[int] | dict[int, discord.Webhook]
-        if include_webhooks:
-            reachable_channel_ids = {}
-        else:
-            reachable_channel_ids = set()
+        reachable_channel_ids_dict: dict[int, discord.Webhook] = {}
+        reachable_channel_ids_set: set[int] = set()
 
         while len(channel_ids_to_check) > 0:
             channel_id_to_check = channel_ids_to_check.pop()
@@ -733,24 +730,29 @@ class Bridges:
                 continue
 
             newly_reachable_ids = set(bridges_to_check.keys())
-            if isinstance(reachable_channel_ids, dict):
-                reachable_channel_ids = {
+            if include_webhooks:
+                reachable_channel_ids_dict = {
                     channel_id: await bridge.webhook
                     for channel_id, bridge in bridges_to_check.items()
-                } | reachable_channel_ids
+                } | reachable_channel_ids_dict
             else:
-                reachable_channel_ids = reachable_channel_ids.union(newly_reachable_ids)
+                reachable_channel_ids_set = reachable_channel_ids_set.union(
+                    newly_reachable_ids
+                )
             channel_ids_to_check = (
                 channel_ids_to_check.union(newly_reachable_ids) - channel_ids_checked
             )
 
         if not include_starting:
-            if isinstance(reachable_channel_ids, dict):
-                reachable_channel_ids.pop(starting_channel_id, None)
+            if include_webhooks:
+                reachable_channel_ids_dict.pop(starting_channel_id, None)
             else:
-                reachable_channel_ids.discard(starting_channel_id)
+                reachable_channel_ids_set.discard(starting_channel_id)
 
-        return reachable_channel_ids
+        if include_webhooks:
+            return reachable_channel_ids_dict
+        else:
+            return reachable_channel_ids_set
 
 
 class Webhooks:
