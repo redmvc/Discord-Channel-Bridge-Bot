@@ -515,7 +515,10 @@ async def bridge_message_to_target_channel(
     except discord.NotFound:
         # Webhook is gone, delete this bridge
         logger.warning(
-            f"Webhook in {target_channel.guild.name}:{target_channel.name} (ID: {target_channel.id}) not found, demolishing bridges to this channel and its threads."
+            "Webhook in %s:%s (ID: %s) not found, demolishing bridges to this channel and its threads.",
+            target_channel.guild.name,
+            target_channel.name,
+            target_channel.id,
         )
         await bridges.demolish_bridges(target_channel=target_channel, session=session)
         return None
@@ -625,7 +628,10 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
                                 bridged_channel, (discord.TextChannel, discord.Thread)
                             )
                             logger.warning(
-                                f"Webhook in {bridged_channel.guild.name}:{bridged_channel.name} (ID: {bridged_channel.id}) not found, demolishing bridges to this channel and its threads."
+                                "Webhook in %s:%s (ID: %s) not found, demolishing bridges to this channel and its threads.",
+                                bridged_channel.guild.name,
+                                bridged_channel.name,
+                                bridged_channel.id,
                             )
                             await bridges.demolish_bridges(
                                 target_channel=bridged_channel, session=session
@@ -800,7 +806,10 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
                                 bridged_channel, (discord.TextChannel, discord.Thread)
                             )
                             logger.warning(
-                                f"Webhook in {bridged_channel.guild.name}:{bridged_channel.name} (ID: {bridged_channel.id}) not found, demolishing bridges to this channel and its threads."
+                                "Webhook in %s:%s (ID: %s) not found, demolishing bridges to this channel and its threads.",
+                                bridged_channel.guild.name,
+                                bridged_channel.name,
+                                bridged_channel.id,
                             )
                             await bridges.demolish_bridges(
                                 target_channel=bridged_channel, session=session

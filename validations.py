@@ -40,7 +40,7 @@ def beartype_catch_errors(func: Callable[..., T]) -> Callable[..., T]:
             return func(*args, **kwargs)
         except BeartypeException as e:
             logger.error(
-                f"Beartype type-checking error in function '{func.__name__}': {e}"
+                "Beartype type-checking error in function '%s': %s", func.__name__, e
             )
             raise
 
