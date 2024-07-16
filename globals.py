@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import io
 import json
-import logging
 from hashlib import md5
 from typing import Any, Callable, Literal, SupportsInt, TypedDict, TypeVar, cast
 
@@ -13,7 +12,7 @@ from aiolimiter import AsyncLimiter
 from beartype import beartype
 from typing_extensions import NotRequired
 
-from validations import ArgumentError, HTTPResponseError
+from validations import ArgumentError, HTTPResponseError, logger
 
 # discord.guild.GuildChannel isn't working in commands.py for some reason
 GuildChannel = (
@@ -114,13 +113,6 @@ per_channel_whitelist: dict[int, set[int]] = {}
 
 # Helper to prevent us from being rate limited
 rate_limiter = AsyncLimiter(1, 10)
-
-# Objects to log events
-logging.basicConfig(
-    filename="logs.log", format="%(asctime)s %(levelname)s: %(message)s", filemode="w"
-)
-logger = logging.getLogger()
-logger.setLevel(logging.WARNING)
 
 # Type wildcard
 T = TypeVar("T", bound=Any)

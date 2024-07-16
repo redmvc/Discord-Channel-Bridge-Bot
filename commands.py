@@ -20,6 +20,7 @@ from database import (
     engine,
     sql_retry,
 )
+from validations import logger
 
 
 @globals.command_tree.command(
@@ -245,7 +246,7 @@ async def bridge(
                 "❌ An unknown error occurred.",
                 ephemeral=True,
             )
-            globals.logger.warning(
+            logger.warning(
                 "An error occurred while running command bridge():\n" + str(e)
             )
 
@@ -406,7 +407,7 @@ async def auto_bridge_threads(
                 "❌ An unknown error occurred.",
                 ephemeral=True,
             )
-            globals.logger.warning(
+            logger.warning(
                 "An error occurred while running command auto_bridge_threads():\n"
                 + str(e)
             )
@@ -528,7 +529,7 @@ async def demolish(interaction: discord.Interaction, target: str):
                 "❌ An unknown error occurred.",
                 ephemeral=True,
             )
-            globals.logger.warning(
+            logger.warning(
                 "An error occurred while running command demolish():\n" + str(e)
             )
 
@@ -681,7 +682,7 @@ async def demolish_all(
                 "❌ An unknown error occurred.",
                 ephemeral=True,
             )
-            globals.logger.warning(
+            logger.warning(
                 "An error occurred while running command demolish_all():\n" + str(e)
             )
 
@@ -843,7 +844,7 @@ async def whitelist(interaction: discord.Interaction, apps: str):
                 "❌ An unknown error occurred.",
                 ephemeral=True,
             )
-            globals.logger.warning(
+            logger.warning(
                 "An error occurred while running command whitelist():\n" + str(e)
             )
 
@@ -1050,14 +1051,14 @@ class ConfirmHashServer(discord.ui.Button[Any]):
                 "❌ There was a problem with the database connection.",
                 ephemeral=True,
             )
-            globals.logger.warning(e)
+            logger.warning(e)
             return
         except Exception as e:
             await interaction.followup.send(
                 "❌ An unknown error occurred.",
                 ephemeral=True,
             )
-            globals.logger.warning(e)
+            logger.warning(e)
             return
 
         await interaction.followup.send("✅ Successfully hashed emoji!", ephemeral=True)
@@ -1260,7 +1261,7 @@ async def bridge_thread_helper(
                     "❌ An unknown error occurred.",
                     ephemeral=True,
                 )
-            globals.logger.warning(
+            logger.warning(
                 "An error occurred while running command bridge_thread_helper():\n"
                 + str(e)
             )
@@ -1596,7 +1597,7 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
             "❌ There was a problem accessing the database.",
             ephemeral=True,
         )
-        globals.logger.warning(e)
+        logger.warning(e)
         return
 
     # Now we resolve all of the async calls to get the final list of users per reaction

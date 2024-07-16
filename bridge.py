@@ -22,7 +22,7 @@ from database import (
     sql_retry,
     sql_upsert,
 )
-from validations import ArgumentError, validate_channels, validate_webhook
+from validations import ArgumentError, logger, validate_channels, validate_webhook
 
 
 class Bridge:

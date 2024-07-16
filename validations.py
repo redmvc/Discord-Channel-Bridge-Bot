@@ -1,6 +1,15 @@
 from __future__ import annotations
 
+import logging
+
 import discord
+
+# Objects to log events
+logging.basicConfig(
+    filename="logs.log", format="%(asctime)s %(levelname)s: %(message)s", filemode="w"
+)
+logger = logging.getLogger()
+logger.setLevel(logging.WARNING)
 
 
 class ChannelTypeError(ValueError):
