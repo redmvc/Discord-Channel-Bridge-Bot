@@ -44,8 +44,7 @@ def validate_channels(
             or not isinstance(channel.parent, discord.TextChannel)
         ) and not isinstance(channel, discord.TextChannel):
             raise ChannelTypeError(
-                f"{channel_name} channel must be text channel or text channel thread, not "
-                + type(channel).__name__
+                f"{channel_name} channel must be text channel or text channel thread, not {type(channel).__name__}."
             )
 
 
