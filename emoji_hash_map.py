@@ -1,6 +1,6 @@
 import asyncio
 from typing import Any, Coroutine, Literal, Sequence, overload
-
+import logging
 import discord
 from beartype import beartype
 from sqlalchemy import Delete as SQLDelete
