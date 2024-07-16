@@ -86,17 +86,18 @@ context = settings_root["context"]
 settings: Settings = cast(Settings, settings_root[context])
 
 # Variables for connection to the Discord client
-intents = discord.Intents(
-    emojis_and_stickers=True,
-    guilds=True,
-    members=True,
-    message_content=True,
-    messages=True,
-    reactions=True,
-    typing=True,
-    webhooks=True,
+client = discord.Client(
+    intents=discord.Intents(
+        emojis_and_stickers=True,
+        guilds=True,
+        members=True,
+        message_content=True,
+        messages=True,
+        reactions=True,
+        typing=True,
+        webhooks=True,
+    )
 )
-client = discord.Client(intents=intents)
 command_tree = discord.app_commands.CommandTree(client)
 
 # This one is set to True once the bot has been initialised in main.py
