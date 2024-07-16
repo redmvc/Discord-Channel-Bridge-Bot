@@ -232,14 +232,24 @@ class Bridges:
                 # I have access to both the source and target channels and to the webhook
                 # so I can add this channel to my list of Bridges
                 targets_with_sources.add(target_id_str)
-                async_create_bridges.append(
-                    self.create_bridge(
-                        source=source_id,
-                        target=target_id,
-                        webhook=target_webhook,
-                        update_db=False,
+                try:
+                    async_create_bridges.append(
+                        self.create_bridge(
+                            source=source_id,
+                            target=target_id,
+                            webhook=target_webhook,
+                            update_db=False,
+                        )
                     )
-                )
+                except Exception as e:
+                    logger.error(
+                        "Exception occurred when calling create_bridge() from load_from_database() with arguments (source=%s, target=%s, webhook=%s): %s",
+                        source_id,
+                        target_id,
+                        target_webhook,
+                        e,
+                    )
+                    raise e
 
         # Any target channels that don't have valid source channels attached to them should be deleted
         invalid_channel_ids = invalid_channel_ids.union(
