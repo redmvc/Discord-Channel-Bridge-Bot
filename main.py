@@ -4,7 +4,6 @@ import asyncio
 import random
 import re
 from typing import Any, Coroutine, TypedDict, cast
-from warnings import warn
 
 import discord
 from beartype import beartype
@@ -406,7 +405,9 @@ async def bridge_message_helper(message: discord.Message):
             session.rollback()
             session.close()
 
-        warn("Ran into an SQL error while trying to bridge a message:\n" + str(e))
+        globals.logger.warning(
+            "Ran into an SQL error while trying to bridge a message:\n" + str(e)
+        )
         return
 
 
@@ -512,7 +513,7 @@ async def bridge_message_to_target_channel(
         )
     except discord.NotFound:
         # Webhook is gone, delete this bridge
-        warn(
+        globals.logger.warning(
             f"Webhook in {target_channel.guild.name}:{target_channel.name} (ID: {target_channel.id}) not found, demolishing bridges to this channel and its threads."
         )
         await bridges.demolish_bridges(target_channel=target_channel, session=session)
@@ -622,7 +623,7 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
                             assert isinstance(
                                 bridged_channel, (discord.TextChannel, discord.Thread)
                             )
-                            warn(
+                            globals.logger.warning(
                                 f"Webhook in {bridged_channel.guild.name}:{bridged_channel.name} (ID: {bridged_channel.id}) not found, demolishing bridges to this channel and its threads."
                             )
                             await bridges.demolish_bridges(
@@ -637,14 +638,16 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
                         )
                     )
                 except discord.HTTPException as e:
-                    warn(
+                    globals.logger.warning(
                         "Ran into a Discord exception while trying to edit a message across a bridge:\n"
                         + str(e)
                     )
 
         await asyncio.gather(*async_message_edits)
     except SQLError as e:
-        warn("Ran into an SQL error while trying to edit a message:\n" + str(e))
+        globals.logger.warning(
+            "Ran into an SQL error while trying to edit a message:\n" + str(e)
+        )
 
 
 @beartype
@@ -795,7 +798,7 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
                             assert isinstance(
                                 bridged_channel, (discord.TextChannel, discord.Thread)
                             )
-                            warn(
+                            globals.logger.warning(
                                 f"Webhook in {bridged_channel.guild.name}:{bridged_channel.name} (ID: {bridged_channel.id}) not found, demolishing bridges to this channel and its threads."
                             )
                             await bridges.demolish_bridges(
@@ -806,7 +809,7 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
                         delete_message(message_row, target_channel_id, thread_splat)
                     )
                 except discord.HTTPException as e:
-                    warn(
+                    globals.logger.warning(
                         "Ran into a Discord exception while trying to delete a message across a bridge:\n"
                         + str(e)
                     )
@@ -830,7 +833,9 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
             session.rollback()
             session.close()
 
-        warn("Ran into an SQL error while trying to delete a message:\n" + str(e))
+        globals.logger.warning(
+            "Ran into an SQL error while trying to delete a message:\n" + str(e)
+        )
         return
 
     await asyncio.gather(*async_message_deletes)
@@ -1038,7 +1043,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                             add_reaction_helper(source_channel, source_message_id)
                         )
                     except discord.HTTPException as e:
-                        warn(
+                        globals.logger.warning(
                             "Ran into a Discord exception while trying to add a reaction across a bridge:\n"
                             + str(e)
                         )
@@ -1085,7 +1090,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                         )
                     )
                 except discord.HTTPException as e:
-                    warn(
+                    globals.logger.warning(
                         "Ran into a Discord exception while trying to add a reaction across a bridge:\n"
                         + str(e)
                     )
@@ -1102,7 +1107,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
             session.rollback()
             session.close()
 
-        warn(
+        globals.logger.warning(
             "Ran into an SQL error while trying to add a reaction to a message:\n"
             + str(e)
         )
@@ -1203,7 +1208,7 @@ async def copy_emoji_into_server(
 
             session.commit()
     except SQLError as e:
-        warn("Couldn't add emoji mapping to table.")
+        globals.logger.warning("Couldn't add emoji mapping to table.")
         print(e)
 
         if session:
@@ -1465,7 +1470,9 @@ async def unreact(
             session.rollback()
             session.close()
 
-        warn("Ran into an SQL error while trying to remove a reaction:\n" + str(e))
+        globals.logger.warning(
+            "Ran into an SQL error while trying to remove a reaction:\n" + str(e)
+        )
         return
 
 

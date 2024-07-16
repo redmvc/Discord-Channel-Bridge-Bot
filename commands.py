@@ -1,6 +1,5 @@
 import asyncio
 import re
-from logging import warn
 from typing import Any, AsyncIterator, Coroutine, Iterable, Literal, cast
 
 import discord
@@ -246,7 +245,9 @@ async def bridge(
                 "❌ An unknown error occurred.",
                 ephemeral=True,
             )
-            warn("An error occurred while running command bridge():\n" + str(e))
+            globals.logger.warning(
+                "An error occurred while running command bridge():\n" + str(e)
+            )
 
         return
 
@@ -405,7 +406,7 @@ async def auto_bridge_threads(
                 "❌ An unknown error occurred.",
                 ephemeral=True,
             )
-            warn(
+            globals.logger.warning(
                 "An error occurred while running command auto_bridge_threads():\n"
                 + str(e)
             )
@@ -527,7 +528,9 @@ async def demolish(interaction: discord.Interaction, target: str):
                 "❌ An unknown error occurred.",
                 ephemeral=True,
             )
-            warn("An error occurred while running command demolish():\n" + str(e))
+            globals.logger.warning(
+                "An error occurred while running command demolish():\n" + str(e)
+            )
 
         return
 
@@ -678,7 +681,9 @@ async def demolish_all(
                 "❌ An unknown error occurred.",
                 ephemeral=True,
             )
-            warn("An error occurred while running command demolish_all():\n" + str(e))
+            globals.logger.warning(
+                "An error occurred while running command demolish_all():\n" + str(e)
+            )
 
         return
 
@@ -838,7 +843,9 @@ async def whitelist(interaction: discord.Interaction, apps: str):
                 "❌ An unknown error occurred.",
                 ephemeral=True,
             )
-            warn("An error occurred while running command whitelist():\n" + str(e))
+            globals.logger.warning(
+                "An error occurred while running command whitelist():\n" + str(e)
+            )
 
         return
 
@@ -1043,14 +1050,14 @@ class ConfirmHashServer(discord.ui.Button[Any]):
                 "❌ There was a problem with the database connection.",
                 ephemeral=True,
             )
-            warn(e)
+            globals.logger.warning(e)
             return
         except Exception as e:
             await interaction.followup.send(
                 "❌ An unknown error occurred.",
                 ephemeral=True,
             )
-            warn(e)
+            globals.logger.warning(e)
             return
 
         await interaction.followup.send("✅ Successfully hashed emoji!", ephemeral=True)
@@ -1253,7 +1260,7 @@ async def bridge_thread_helper(
                     "❌ An unknown error occurred.",
                     ephemeral=True,
                 )
-            warn(
+            globals.logger.warning(
                 "An error occurred while running command bridge_thread_helper():\n"
                 + str(e)
             )
@@ -1589,7 +1596,7 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
             "❌ There was a problem accessing the database.",
             ephemeral=True,
         )
-        warn(e)
+        globals.logger.warning(e)
         return
 
     # Now we resolve all of the async calls to get the final list of users per reaction

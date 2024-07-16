@@ -5,7 +5,6 @@ import io
 import json
 import logging
 from hashlib import md5
-from logging import warn
 from typing import Any, Callable, Literal, SupportsInt, TypedDict, TypeVar, cast
 
 import aiohttp
@@ -318,7 +317,7 @@ async def wait_until_ready(
         time_waited += polling_rate
 
     if time_waited >= time_to_wait:
-        warn("Taking forever to get ready.")
+        logger.warning("Taking forever to get ready.")
         return False
     return True
 
