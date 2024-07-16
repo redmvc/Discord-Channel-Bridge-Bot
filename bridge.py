@@ -425,7 +425,7 @@ class Bridges:
                 session.close()
 
             if isinstance(e, SQLError):
-                await bridges.demolish_bridges(
+                await self.demolish_bridges(
                     source_channel=source,
                     target_channel=target,
                     one_sided=True,
