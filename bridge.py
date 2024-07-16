@@ -160,7 +160,9 @@ class Bridges:
             webhook_id = int(channel_webhook.webhook)
 
             channel = await globals.get_channel_from_id(channel_id)
-            if not channel:
+            if not channel or not isinstance(
+                channel, (discord.TextChannel, discord.Thread)
+            ):
                 # If I don't have access to the channel, delete bridges from and to it
                 invalid_channel_ids.add(channel_webhook.channel)
                 continue
