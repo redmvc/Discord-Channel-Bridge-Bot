@@ -1,6 +1,5 @@
 from typing import Any, Callable, Iterable
 
-from beartype import beartype
 from sqlalchemy import Boolean
 from sqlalchemy import Select as SQLSelect
 from sqlalchemy import String, UniqueConstraint
@@ -14,6 +13,7 @@ from sqlalchemy.orm import Session as SQLSession
 from sqlalchemy.orm import mapped_column
 
 from globals import T, run_retries, settings
+from validations import beartype
 
 
 class DBBase(DeclarativeBase):

@@ -1,8 +1,7 @@
 import asyncio
 from typing import Any, Coroutine, Literal, Sequence, overload
-import logging
+
 import discord
-from beartype import beartype
 from sqlalchemy import Delete as SQLDelete
 from sqlalchemy import ScalarResult
 from sqlalchemy import Select as SQLSelect
@@ -14,6 +13,7 @@ from sqlalchemy.orm import Session as SQLSession
 
 import globals
 from database import DBEmoji, engine, sql_retry, sql_upsert
+from validations import beartype
 
 
 class EmojiHashMap:

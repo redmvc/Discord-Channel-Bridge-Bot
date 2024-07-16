@@ -3,7 +3,6 @@ from copy import deepcopy
 from typing import Any, Callable, Coroutine, Literal, cast, overload
 
 import discord
-from beartype import beartype
 from sqlalchemy import Delete as SQLDelete
 from sqlalchemy import ScalarResult
 from sqlalchemy import Select as SQLSelect
@@ -22,7 +21,13 @@ from database import (
     sql_retry,
     sql_upsert,
 )
-from validations import ArgumentError, logger, validate_channels, validate_webhook
+from validations import (
+    ArgumentError,
+    beartype,
+    logger,
+    validate_channels,
+    validate_webhook,
+)
 
 
 class Bridge:
