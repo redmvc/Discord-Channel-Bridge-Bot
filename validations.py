@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Sequence
-
 import discord
 
 
@@ -19,13 +17,6 @@ class HTTPResponseError(Exception):
 
 class ArgumentError(ValueError):
     pass
-
-
-def natural_language_concat(items: Sequence[str]) -> str:
-    if len(items) == 2:
-        return items[0] + " or " + items[1]
-    else:
-        return ", ".join(items[:-1]) + " or " + items[-1]
 
 
 def validate_channels(
