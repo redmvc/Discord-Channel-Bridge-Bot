@@ -8,7 +8,6 @@ from sqlalchemy import Select as SQLSelect
 from sqlalchemy import Update as SQLUpdate
 from sqlalchemy import UpdateBase
 from sqlalchemy import not_ as sql_not
-from sqlalchemy.exc import StatementError as SQLError
 from sqlalchemy.orm import Session as SQLSession
 
 import globals
@@ -84,12 +83,12 @@ class EmojiHashMap:
                     .where(DBEmoji.id.in_(accessibility_flips))
                     .values(accessible=sql_not(DBEmoji.accessible))
                 )
-        except SQLError as e:
+        except Exception:
             if close_after and session:
                 session.rollback()
                 session.close()
 
-            raise e
+            raise
 
         if close_after:
             session.commit()
@@ -218,12 +217,12 @@ class EmojiHashMap:
                 accessible=accessible,
             )
             await sql_retry(lambda: session.execute(upsert_emoji))
-        except SQLError as e:
+        except Exception:
             if close_after and session:
                 session.rollback()
                 session.close()
 
-            raise e
+            raise
 
         if close_after:
             session.commit()
@@ -308,12 +307,12 @@ class EmojiHashMap:
                     accessible=accessible,
                     session=session,
                 )
-            except SQLError as e:
+            except Exception:
                 if close_after and isinstance(session, SQLSession):
                     session.rollback()
                     session.close()
 
-                raise e
+                raise
 
             if close_after:
                 session.commit()
@@ -402,12 +401,12 @@ class EmojiHashMap:
                         SQLDelete(DBEmoji).where(DBEmoji.id == str(emoji_id))
                     )
                 )
-            except SQLError as e:
+            except Exception:
                 if close_after and isinstance(session, SQLSession):
                     session.rollback()
                     session.close()
 
-                raise e
+                raise
 
             if close_after:
                 session.commit()
@@ -477,12 +476,12 @@ class EmojiHashMap:
                         session.execute(upsert)
 
                 session.commit()
-        except SQLError as e:
+        except Exception:
             if session:
                 session.rollback()
                 session.close()
 
-            raise e
+            raise
 
     @overload
     def get_matches(

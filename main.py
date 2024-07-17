@@ -116,7 +116,7 @@ async def on_ready():
                     }
                 )
             )
-    except SQLError as e:
+    except Exception as e:
         if session:
             session.rollback()
             session.close()
@@ -401,14 +401,18 @@ async def bridge_message_helper(message: discord.Message):
 
             await sql_retry(insert_into_message_map)
             session.commit()
-    except SQLError as e:
+    except Exception as e:
         if session:
             session.rollback()
             session.close()
 
-        logger.warning(
-            "Ran into an SQL error while trying to bridge a message:\n" + str(e)
-        )
+        if isinstance(e, SQLError):
+            logger.warning(
+                "Ran into an SQL error while trying to bridge a message:\n" + str(e)
+            )
+        else:
+            raise
+
         return
 
 
@@ -651,10 +655,13 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
                     )
 
         await asyncio.gather(*async_message_edits)
-    except SQLError as e:
-        logger.warning(
-            "Ran into an SQL error while trying to edit a message:\n" + str(e)
-        )
+    except Exception as e:
+        if isinstance(e, SQLError):
+            logger.warning(
+                "Ran into an SQL error while trying to edit a message:\n" + str(e)
+            )
+        else:
+            raise
 
 
 @beartype
@@ -838,14 +845,17 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
 
             await sql_retry(delete_bridged_messages)
             session.commit()
-    except SQLError as e:
+    except Exception as e:
         if session:
             session.rollback()
             session.close()
 
-        logger.warning(
-            "Ran into an SQL error while trying to delete a message:\n" + str(e)
-        )
+        if isinstance(e, SQLError):
+            logger.warning(
+                "Ran into an SQL error while trying to delete a message:\n" + str(e)
+            )
+        else:
+            raise
         return
 
     await asyncio.gather(*async_message_deletes)
@@ -1112,15 +1122,18 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
             session.commit()
 
         await sql_retry(insert_into_reactions_map)
-    except SQLError as e:
+    except Exception as e:
         if session:
             session.rollback()
             session.close()
 
-        logger.warning(
-            "Ran into an SQL error while trying to add a reaction to a message:\n"
-            + str(e)
-        )
+        if isinstance(e, SQLError):
+            logger.warning(
+                "Ran into an SQL error while trying to add a reaction to a message: %s",
+                e,
+            )
+        else:
+            raise
 
 
 @beartype
@@ -1217,9 +1230,8 @@ async def copy_emoji_into_server(
                 )
 
             session.commit()
-    except SQLError as e:
-        logger.warning("Couldn't add emoji mapping to table.")
-        print(e)
+    except Exception as e:
+        logger.warning("Couldn't add emoji mapping to table.", e)
 
         if session:
             session.rollback()
@@ -1475,14 +1487,17 @@ async def unreact(
                     for target_message_id, target_channel_id, target_emoji_id, target_emoji_name in compacted_messages_to_remove_reaction_from
                 ]
             )
-    except SQLError as e:
+    except Exception as e:
         if session:
             session.rollback()
             session.close()
 
-        logger.warning(
-            "Ran into an SQL error while trying to remove a reaction:\n" + str(e)
-        )
+        if isinstance(e, SQLError):
+            logger.warning(
+                "Ran into an SQL error while trying to remove a reaction:%s", e
+            )
+        else:
+            raise
         return
 
 
