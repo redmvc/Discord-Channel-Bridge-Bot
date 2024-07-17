@@ -51,6 +51,8 @@ async def on_ready():
     if globals.is_ready:
         return
 
+    logger.info("Client successfully connected. Running initial loading procedures...")
+
     session = None
     try:
         with SQLSession(engine) as session:
@@ -60,6 +62,7 @@ async def on_ready():
             emoji_hash_map.map = emoji_hash_map.EmojiHashMap(session)
 
             # Try to find all apps whitelisted per channel
+            logger.info("Loading whitelisted apps...")
             select_whitelisted_apps: SQLSelect[tuple[DBAppWhitelist]] = SQLSelect(
                 DBAppWhitelist
             )
@@ -74,16 +77,15 @@ async def on_ready():
                     continue
 
                 if channel_id not in accessible_channels:
-                    channel = globals.client.get_channel(channel_id)
-                    if not channel:
-                        try:
-                            channel = await globals.client.fetch_channel(channel_id)
-                        except Exception:
-                            channel = None
+                    channel = await globals.get_channel_from_id(channel_id)
 
                     if channel:
                         accessible_channels.add(channel_id)
                     else:
+                        logger.debug(
+                            "Channel with ID %s not found when loading list of whitelisted apps.",
+                            channel_id,
+                        )
                         inaccessible_channels.add(channel_id)
                         continue
 
@@ -100,9 +102,11 @@ async def on_ready():
                 )
                 session.execute(delete_inaccessible_channels)
 
+            logger.info("Whitelists loaded.")
             session.commit()
 
             # Identify all automatically-thread-bridging channels
+            logger.info("Loading automatically-thread-bridging channels...")
             select_auto_bridge_thread_channels: SQLSelect[
                 tuple[DBAutoBridgeThreadChannels]
             ] = SQLSelect(DBAutoBridgeThreadChannels)
@@ -117,6 +121,7 @@ async def on_ready():
                     }
                 )
             )
+            logger.info("Auto-thread-bridging channels loaded.")
     except Exception as e:
         if session:
             session.rollback()
@@ -127,6 +132,7 @@ async def on_ready():
         raise
 
     # Finally I'll check whether I have a registered emoji server and save it if so
+    logger.info("Loading emoji server...")
     emoji_server_id_str = globals.settings.get("emoji_server_id")
     try:
         if emoji_server_id_str:
@@ -161,16 +167,35 @@ async def on_ready():
         else:
             globals.emoji_server = emoji_server
 
+        logger.info("Emoji server loaded.")
+    else:
+        logger.info("Emoji server ID not set.")
+
+    logger.info("Syncing command tree...")
     sync_command_tree = [globals.command_tree.sync()]
     if globals.emoji_server:
         sync_command_tree.append(globals.command_tree.sync(guild=globals.emoji_server))
     await asyncio.gather(*sync_command_tree)
+    logger.info("Command tree synced.")
 
-    print(f"{globals.client.user} is connected to the following servers:\n")
-    for server in globals.client.guilds:
-        print(f"{server.name}(id: {server.id})")
+    if (connected_servers := globals.client.guilds) and len(connected_servers) > 0:
+        print(f"{globals.client.user} is connected to the following servers:\n")
+        connected_servers_listed: list[str] = []
+        for server in globals.client.guilds:
+            server_id_str = f"{server.name}(id: {server.id})"
+            print(server_id_str)
+            connected_servers_listed.append(server_id_str)
+
+        logger.info(
+            "Connected to the following servers:\n- %s",
+            "\n- ".join(connected_servers_listed),
+        )
+    else:
+        print("Bot is not connected to any servers.")
+        logger.info("Bot is not connected to any servers.")
 
     globals.is_ready = True
+    logger.info("Bot is ready.")
 
 
 @globals.client.event
@@ -270,16 +295,23 @@ async def bridge_message_helper(message: discord.Message):
         - `Forbidden`: The authorization token for one of the webhooks is incorrect.
         - `ValueError`: The length of embeds was invalid, there was no token associated with one of the webhooks or ephemeral was passed with the improper webhook type or there was no state attached with one of the webhooks when giving it a view.
     """
-    outbound_bridges = bridges.get_outbound_bridges(message.channel.id)
+    message_channel_id = message.channel.id
+    outbound_bridges = bridges.get_outbound_bridges(message_channel_id)
     if not outbound_bridges:
         return
+
+    logger.debug(
+        "Bridging message with ID %s from channel with ID %s.",
+        message.id,
+        message_channel_id,
+    )
 
     # Ensure that the message has emoji I have access to
     message_content = await replace_missing_emoji(message.content)
 
     # Get all channels reachable from this one via an unbroken sequence of outbound bridges as well as their webhooks
     reachable_channels = await bridges.get_reachable_channels(
-        message.channel.id,
+        message_channel_id,
         "outbound",
         include_webhooks=True,
     )
@@ -323,7 +355,7 @@ async def bridge_message_helper(message: discord.Message):
                     bridged_reply_to[reply_source_channel_id] = source_replied_to_id
                 else:
                     source_replied_to_id = replied_to_id
-                    reply_source_channel_id = message.channel.id
+                    reply_source_channel_id = message_channel_id
 
                 # Now find all other bridged versions of the message we're replying to
                 def get_bridged_reply_tos():
@@ -359,6 +391,11 @@ async def bridge_message_helper(message: discord.Message):
                 if target_id != webhook_channel.id:
                     # The target channel is not the same as the webhook's channel, so it should be a thread
                     if not isinstance(target_channel, discord.Thread):
+                        logger.warning(
+                            "Target channel for bridging (ID %s) does not match its associated webhook (ID %s).",
+                            target_id,
+                            webhook_channel.id,
+                        )
                         continue
                     thread_splat = {"thread": target_channel}
 
@@ -387,7 +424,7 @@ async def bridge_message_helper(message: discord.Message):
                 if bridged_message
             ]
             source_message_id_str = str(message.id)
-            source_channel_id_str = str(message.channel.id)
+            source_channel_id_str = str(message_channel_id)
 
             def insert_into_message_map():
                 session.add_all(
@@ -395,11 +432,11 @@ async def bridge_message_helper(message: discord.Message):
                         DBMessageMap(
                             source_message=source_message_id_str,
                             source_channel=source_channel_id_str,
-                            target_message=message.id,
-                            target_channel=message.channel.id,
-                            webhook=message.webhook_id,
+                            target_message=bridged_message.id,
+                            target_channel=bridged_message.channel.id,
+                            webhook=bridged_message.webhook_id,
                         )
-                        for message in bridged_messages
+                        for bridged_message in bridged_messages
                     ]
                 )
 
@@ -420,6 +457,8 @@ async def bridge_message_helper(message: discord.Message):
             )
 
         raise
+
+    logger.debug("Message with ID %s successfully bridged.", message.id)
 
 
 @beartype
@@ -450,6 +489,12 @@ async def bridge_message_to_target_channel(
     #### Returns:
         - `discord.WebhookMessage`: The message bridged.
     """
+    logger.debug(
+        "Bridging message with ID %s to channel with ID %s.",
+        message.id,
+        target_channel.id,
+    )
+
     # Try to find whether the user who sent this message is on the other side of the bridge and if so what their name and avatar would be
     bridged_member = await globals.get_channel_member(
         webhook_channel, message.author.id
@@ -568,6 +613,8 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
 
     if not bridges.get_outbound_bridges(payload.channel_id):
         return
+
+    logger.debug("Bridging edit to message with ID %s.", payload.message_id)
 
     # Ensure that the message has emoji I have access to
     updated_message_content = await replace_missing_emoji(updated_message_content)
@@ -689,6 +736,8 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
 
         raise
 
+    logger.debug("Successfully bridged edit to message with ID %s.", payload.message_id)
+
 
 @beartype
 async def replace_missing_emoji(message_content: str) -> str:
@@ -771,6 +820,8 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
 
     if not bridges.get_outbound_bridges(payload.channel_id):
         return
+
+    logger.debug("Bridging deletion of message with ID %s.", payload.message_id)
 
     # Get all channels reachable from this one via an unbroken sequence of outbound bridges as well as their webhooks
     reachable_channels = await bridges.get_reachable_channels(
@@ -905,6 +956,10 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
 
     await asyncio.gather(*async_message_deletes)
 
+    logger.debug(
+        "Successfully bridged deletion of message with ID %s.", payload.message_id
+    )
+
 
 @globals.client.event
 async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
@@ -931,6 +986,12 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
     if not bridges.get_outbound_bridges(payload.channel_id):
         # Only bridge reactions across outbound bridges
         return
+
+    logger.debug(
+        "Bridging reaction add of %s to message with ID %s.",
+        payload.emoji,
+        payload.message_id,
+    )
 
     # Choose a "fallback emoji" to use in case I don't have access to the one being reacted and the message across the bridge doesn't already have it
     fallback_emoji: discord.Emoji | str | None
@@ -1204,6 +1265,8 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
 
         raise
 
+    logger.debug("Reaction bridged.")
+
 
 @beartype
 async def copy_emoji_into_server(
@@ -1231,6 +1294,11 @@ async def copy_emoji_into_server(
     if not globals.emoji_server:
         return None
     emoji_server_id = globals.emoji_server.id
+
+    logger.debug(
+        "Copying emoji %s into emoji server.",
+        missing_emoji if missing_emoji else missing_emoji_id,
+    )
 
     missing_emoji_id, missing_emoji_name, _, missing_emoji_url = (
         globals.get_emoji_information(
@@ -1324,6 +1392,7 @@ async def copy_emoji_into_server(
             )
             raise
 
+    logger.debug("%s added to emoji server.", emoji)
     return emoji
 
 
@@ -1354,6 +1423,12 @@ async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
         # This really shouldn't happen
         return
 
+    logger.debug(
+        "Bridging reaction removal of %s from message with ID %s.",
+        payload.emoji,
+        payload.message_id,
+    )
+
     # I will try to see if this emoji still has other reactions in it and, if so, stop doing this as I don't care anymore
     message = await channel.fetch_message(payload.message_id)
     reactions_with_emoji = {
@@ -1369,6 +1444,12 @@ async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
 
     # If I'm here, there are no remaining reactions of this kind on this message except perhaps for my own
     await unreact(payload)
+
+    logger.debug(
+        "Successfully bridged reaction removal of %s from message with ID %s.",
+        payload.emoji,
+        payload.message_id,
+    )
 
 
 @globals.client.event
@@ -1387,7 +1468,17 @@ async def on_raw_reaction_clear_emoji(payload: discord.RawReactionClearEmojiEven
         # Only remove reactions across outbound bridges
         return
 
+    logger.debug(
+        "Bridging reaction clear of %s from message with ID %s.",
+        payload.emoji,
+        payload.message_id,
+    )
     await unreact(payload)
+    logger.debug(
+        "Successfully bridged clear removal of %s from message with ID %s.",
+        payload.emoji,
+        payload.message_id,
+    )
 
 
 @globals.client.event
@@ -1406,7 +1497,12 @@ async def on_raw_reaction_clear(payload: discord.RawReactionClearEvent):
         # Only remove reactions across outbound bridges
         return
 
+    logger.debug("Bridging reaction clear from message with ID %s.", payload.message_id)
     await unreact(payload)
+    logger.debug(
+        "Successfully bridged clear removal from message with ID %s.",
+        payload.message_id,
+    )
 
 
 @beartype
@@ -1625,6 +1721,8 @@ async def on_thread_create(thread: discord.Thread):
     if not thread.permissions_for(thread.guild.me).manage_webhooks:
         return
 
+    logger.debug("Automatically bridging thread with ID %s.", thread.id)
+
     try:
         await commands.bridge_thread_helper(thread, thread.owner_id)
     except Exception as e:
@@ -1638,6 +1736,8 @@ async def on_thread_create(thread: discord.Thread):
         last_message = cast(discord.Thread, refreshed_thread).last_message
     if last_message and last_message.content != "":
         await bridge_message_helper(last_message)
+
+    logger.debug("Thread with ID %s successfully bridged.", thread.id)
 
 
 @globals.client.event
@@ -1665,4 +1765,5 @@ async def on_guild_remove(server: discord.Guild):
 
 app_token = globals.settings.get("app_token")
 assert isinstance(app_token, str)
+logger.info("Connecting client...")
 globals.client.run(app_token, reconnect=True)
