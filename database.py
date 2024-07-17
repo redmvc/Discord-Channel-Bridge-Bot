@@ -368,5 +368,9 @@ logger.info("Created.")
 
 # Create all tables represented by the above classes, if they haven't already been created
 logger.info("Ensuring all necessary tables exist...")
-DBBase.metadata.create_all(engine)
+try:
+    DBBase.metadata.create_all(engine)
+except Exception as e:
+    logger.error("An error occurred while trying to create necessary tables: %s", e)
+    raise
 logger.info("All necessary tables are available.")
