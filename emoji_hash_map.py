@@ -488,8 +488,6 @@ class EmojiHashMap:
     def get_matches(
         self,
         emoji: discord.PartialEmoji | int | str,
-        *,
-        only_accessible: bool | None = None,
     ) -> frozenset[int] | None: ...
 
     @overload
@@ -497,7 +495,6 @@ class EmojiHashMap:
         self,
         emoji: discord.PartialEmoji | int | str,
         *,
-        only_accessible: bool | None = None,
         return_str: Literal[False],
     ) -> frozenset[int] | None: ...
 
@@ -506,7 +503,6 @@ class EmojiHashMap:
         self,
         emoji: discord.PartialEmoji | int | str,
         *,
-        only_accessible: bool | None = None,
         return_str: Literal[True],
     ) -> frozenset[str] | None: ...
 
@@ -535,22 +531,21 @@ class EmojiHashMap:
             except ValueError:
                 return None
 
-        if not self._emoji_to_hash.get(emoji_id):
+        if not (image_hash := self._emoji_to_hash.get(emoji_id)):
             return None
 
-        image_hash = self._emoji_to_hash[emoji_id]
         if only_accessible:
-            hash_to_emoji = self._hash_to_available_emoji
+            hash_to_emoji = self._hash_to_available_emoji.get(image_hash)
         else:
-            hash_to_emoji = self._hash_to_emoji
-        if not hash_to_emoji.get(image_hash):
+            hash_to_emoji = self._hash_to_emoji.get(image_hash)
+        if not hash_to_emoji:
             return None
 
         if not return_str:
-            emoji_set = frozenset(hash_to_emoji[image_hash])
+            emoji_set = frozenset(hash_to_emoji)
             return emoji_set
 
-        return frozenset({str(id) for id in hash_to_emoji[image_hash]})
+        return frozenset({str(id) for id in hash_to_emoji})
 
     @beartype
     def get_internal_equivalent(self, emoji_id: int) -> int | None:
