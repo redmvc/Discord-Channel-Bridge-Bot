@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import random
 import re
 from typing import Any, Coroutine, TypedDict, cast
@@ -122,7 +123,8 @@ async def on_ready():
             session.close()
 
         await globals.client.close()
-        raise e
+        logger.error("An error occurred when performing bot startup procedures: %s", e)
+        raise
 
     # Finally I'll check whether I have a registered emoji server and save it if so
     emoji_server_id_str = globals.settings.get("emoji_server_id")
@@ -132,7 +134,7 @@ async def on_ready():
         else:
             emoji_server_id = None
     except Exception:
-        print(
+        logger.warning(
             "Emoji server ID stored in settings.json file does not resolve to a valid integer."
         )
         emoji_server_id = None
@@ -146,12 +148,14 @@ async def on_ready():
                 emoji_server = None
 
         if not emoji_server:
-            print("Couldn't find emoji server with ID registered in settings.json.")
+            logger.warning(
+                "Couldn't find emoji server with ID registered in settings.json."
+            )
         elif (
             not emoji_server.me.guild_permissions.manage_expressions
             or not emoji_server.me.guild_permissions.create_expressions
         ):
-            print(
+            logger.warning(
                 "I don't have Create Expressions or Manage Expressions permissions in the emoji server."
             )
         else:
@@ -408,12 +412,14 @@ async def bridge_message_helper(message: discord.Message):
 
         if isinstance(e, SQLError):
             logger.warning(
-                "Ran into an SQL error while trying to bridge a message:\n" + str(e)
+                "Ran into an SQL error while trying to bridge a message: %s", e
             )
         else:
-            raise
+            logger.error(
+                "Ran into an unknown error while trying to bridge a message: %s", e
+            )
 
-        return
+        raise
 
 
 @beartype
@@ -524,7 +530,17 @@ async def bridge_message_to_target_channel(
             target_channel.name,
             target_channel.id,
         )
-        await bridges.demolish_bridges(target_channel=target_channel, session=session)
+
+        try:
+            await bridges.demolish_bridges(
+                target_channel=target_channel, session=session
+            )
+        except Exception as e:
+            logger.error(
+                "Exception occurred when trying to demolish an invalid bridge after bridging a message: %s",
+                e,
+            )
+            raise
         return None
 
 
@@ -637,9 +653,15 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
                                 bridged_channel.name,
                                 bridged_channel.id,
                             )
-                            await bridges.demolish_bridges(
-                                target_channel=bridged_channel, session=session
-                            )
+                            try:
+                                await bridges.demolish_bridges(
+                                    target_channel=bridged_channel, session=session
+                                )
+                            except Exception as e:
+                                logger.error(
+                                    "Exception occurred when trying to demolish an invalid bridge after bridging a message edit: %s",
+                                    e,
+                                )
 
                     async_message_edits.append(
                         edit_message(
@@ -658,10 +680,14 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
     except Exception as e:
         if isinstance(e, SQLError):
             logger.warning(
-                "Ran into an SQL error while trying to edit a message:\n" + str(e)
+                "Ran into an SQL error while trying to edit a message: %s", e
             )
         else:
-            raise
+            logger.error(
+                "Ran into an unknown error while trying to edit a message: %s", e
+            )
+
+        raise
 
 
 @beartype
@@ -696,9 +722,17 @@ async def replace_missing_emoji(message_content: str) -> str:
             # I already have access to this emoji so it's fine
             continue
 
-        await emoji_hash_map.map.ensure_hash_map(
-            emoji_id=emoji_id, emoji_name=emoji_name
-        )
+        try:
+            await emoji_hash_map.map.ensure_hash_map(
+                emoji_id=emoji_id, emoji_name=emoji_name
+            )
+        except Exception as e:
+            logger.error(
+                "An error occurred when calling ensure_hash_map() from replace_missing_emoji(): %s",
+                e,
+            )
+            continue
+
         if emoji := emoji_hash_map.map.get_accessible_emoji(emoji_id, skip_self=True):
             # I don't have access to this emoji but I have a matching one in my emoji mappings
             emoji_to_replace[f"<{emoji_name}:{emoji_id_str}>"] = str(emoji)
@@ -818,17 +852,25 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
                                 bridged_channel.name,
                                 bridged_channel.id,
                             )
-                            await bridges.demolish_bridges(
-                                target_channel=bridged_channel, session=session
-                            )
+                            try:
+                                await bridges.demolish_bridges(
+                                    target_channel=bridged_channel, session=session
+                                )
+                            except Exception as e:
+                                if not isinstance(e, discord.HTTPException):
+                                    logger.error(
+                                        "Exception occurred when trying to demolish an invalid bridge after bridging a message deletion: %s",
+                                        e,
+                                    )
+                                raise
 
                     async_message_deletes.append(
                         delete_message(message_row, target_channel_id, thread_splat)
                     )
                 except discord.HTTPException as e:
                     logger.warning(
-                        "Ran into a Discord exception while trying to delete a message across a bridge:\n"
-                        + str(e)
+                        "Ran into a Discord exception while trying to delete a message across a bridge: %s",
+                        e,
                     )
 
             # If the message was bridged, delete its row
@@ -852,11 +894,14 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
 
         if isinstance(e, SQLError):
             logger.warning(
-                "Ran into an SQL error while trying to delete a message:\n" + str(e)
+                "Ran into an SQL error while trying to delete a message: %s", e
             )
         else:
-            raise
-        return
+            logger.error(
+                "Ran into an unknown error while trying to delete a message: %s", e
+            )
+
+        raise
 
     await asyncio.gather(*async_message_deletes)
 
@@ -892,7 +937,14 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
     if payload.emoji.is_custom_emoji():
         # Custom emoji, I need to check whether it exists and is available to me
         # I'll add this to my hash map if it's not there already
-        await emoji_hash_map.map.ensure_hash_map(emoji=payload.emoji)
+        try:
+            await emoji_hash_map.map.ensure_hash_map(emoji=payload.emoji)
+        except Exception as e:
+            logger.error(
+                "An error occurred when calling ensure_hash_map() from on_raw_reaction_add(): %s",
+                e,
+            )
+            raise
 
         # is_custom_emoji() guarantees that payload.emoji.id is not None
         emoji_id = cast(int, payload.emoji.id)
@@ -1064,9 +1116,15 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                         )
                     except discord.HTTPException as e:
                         logger.warning(
-                            "Ran into a Discord exception while trying to add a reaction across a bridge:\n"
-                            + str(e)
+                            "Ran into a Discord exception while trying to add a reaction across a bridge: %s",
+                            e,
                         )
+                    except Exception as e:
+                        logger.error(
+                            "Ran into an unknown error while trying to add a reaction across a bridge: %s",
+                            e,
+                        )
+                        raise
             else:
                 # This message is (or might be) the source
                 source_message_id = payload.message_id
@@ -1111,9 +1169,15 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                     )
                 except discord.HTTPException as e:
                     logger.warning(
-                        "Ran into a Discord exception while trying to add a reaction across a bridge:\n"
-                        + str(e)
+                        "Ran into a Discord exception while trying to add a reaction across a bridge: %s",
+                        e,
                     )
+                except Exception as e:
+                    logger.error(
+                        "Ran into an unknown error while trying to add a reaction across a bridge: %s",
+                        e,
+                    )
+                    raise
 
         reactions_added = await asyncio.gather(*async_add_reactions)
 
@@ -1133,7 +1197,12 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                 e,
             )
         else:
-            raise
+            logger.error(
+                "Ran into an unknown error while trying to add a reaction to a message: %s",
+                e,
+            )
+
+        raise
 
 
 @beartype
@@ -1177,13 +1246,13 @@ async def copy_emoji_into_server(
         emoji = await globals.emoji_server.create_custom_emoji(
             name=missing_emoji_name, image=image, reason="Bridging reaction."
         )
-    except discord.Forbidden as e:
-        print("Emoji server permissions not set correctly.")
-        raise e
-    except discord.HTTPException as e:
+    except discord.Forbidden:
+        logger.warning("Emoji server permissions not set correctly.")
+        raise
+    except discord.HTTPException:
         if len(globals.emoji_server.emojis) < 50:
             # Something weird happened, the error was not due to a full server
-            raise e
+            raise
 
         # Try to delete an emoji from the server and then add this again.
         emoji_to_delete = random.choice(globals.emoji_server.emojis)
@@ -1194,16 +1263,24 @@ async def copy_emoji_into_server(
             emoji = await globals.emoji_server.create_custom_emoji(
                 name=missing_emoji_name, image=image, reason="Bridging reaction."
             )
-        except discord.Forbidden as e:
-            print("Emoji server permissions not set correctly.")
-            raise e
+        except discord.Forbidden:
+            logger.warning("Emoji server permissions not set correctly.")
+            raise
 
     # Copied the emoji, going to update my table
     session = None
     try:
         with SQLSession(engine) as session:
             if emoji_to_delete_id is not None:
-                await emoji_hash_map.map.delete_emoji(emoji_to_delete_id, session)
+                try:
+                    await emoji_hash_map.map.delete_emoji(emoji_to_delete_id, session)
+                except Exception as e:
+                    logger.error(
+                        "An error occurred when trying to delete an emoji from the hash map while running copy_emoji_into_server(): %s",
+                        e,
+                    )
+
+                    raise
 
             await emoji_hash_map.map.add_emoji(
                 emoji=emoji,
@@ -1231,11 +1308,21 @@ async def copy_emoji_into_server(
 
             session.commit()
     except Exception as e:
-        logger.warning("Couldn't add emoji mapping to table.", e)
-
         if session:
             session.rollback()
             session.close()
+
+        if isinstance(e, SQLError):
+            logger.warning(
+                "An SQL error occurred while trying to copy an emoji into the emoji server: %s",
+                e,
+            )
+        else:
+            logger.error(
+                "An SQL error occurred while trying to copy an emoji into the emoji server: %s",
+                e,
+            )
+            raise
 
     return emoji
 
@@ -1494,11 +1581,16 @@ async def unreact(
 
         if isinstance(e, SQLError):
             logger.warning(
-                "Ran into an SQL error while trying to remove a reaction:%s", e
+                "Ran into an SQL error while running %s(): %s", inspect.stack()[1][3], e
             )
         else:
-            raise
-        return
+            logger.error(
+                "Ran into an unknown error while running %s(): %s",
+                inspect.stack()[1][3],
+                e,
+            )
+
+        raise
 
 
 @globals.client.event
@@ -1533,7 +1625,11 @@ async def on_thread_create(thread: discord.Thread):
     if not thread.permissions_for(thread.guild.me).manage_webhooks:
         return
 
-    await commands.bridge_thread_helper(thread, thread.owner_id)
+    try:
+        await commands.bridge_thread_helper(thread, thread.owner_id)
+    except Exception as e:
+        logger.error("An error occurred while trying to bridge a thread: %s", e)
+        raise
 
     # The message that was used to create the thread will need to be bridged, as the bridge didn't exist at the time
     last_message = thread.last_message
@@ -1546,14 +1642,25 @@ async def on_thread_create(thread: discord.Thread):
 
 @globals.client.event
 async def on_guild_join(server: discord.Guild):
-    print(f"Just joined server '{server.name}'. Hashing emoji...")
-    await emoji_hash_map.map.load_server_emoji(server.id)
-    print("Emoji hashed!")
+    joined_server_msg = f"Just joined server '{server.name}'."
+    logger.info(f"{joined_server_msg} Hashing emoji...")
+    print(joined_server_msg)
+    try:
+        await emoji_hash_map.map.load_server_emoji(server.id)
+        logger.info("Emoji hashed!")
+    except Exception as e:
+        logger.error(
+            "An unknown error occurred when trying to hash emoji on joining a new server: %s",
+            e,
+        )
+        raise
 
 
 @globals.client.event
 async def on_guild_remove(server: discord.Guild):
-    print(f"Just left server '{server.name}'.")
+    left_server_msg = f"Just left server '{server.name}'."
+    logger.info(left_server_msg)
+    print(left_server_msg)
 
 
 app_token = globals.settings.get("app_token")
