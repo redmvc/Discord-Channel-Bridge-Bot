@@ -15,7 +15,7 @@ logging.basicConfig(
     filename="logs.log", format="%(asctime)s %(levelname)s: %(message)s", filemode="w"
 )
 logger = logging.getLogger()
-logger.setLevel(logging.WARNING)
+logger.setLevel(logging.INFO)
 
 
 class ChannelTypeError(ValueError):
