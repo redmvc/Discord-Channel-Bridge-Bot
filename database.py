@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session as SQLSession
 from sqlalchemy.orm import mapped_column
 
 from globals import T, run_retries, settings
+from validations import logger
 
 
 class DBBase(DeclarativeBase):
@@ -262,11 +263,11 @@ async def sql_upsert(
                     upsert = other_db_insert(table).values(**insert_values)
 
             return upsert
-        except SQLError as e:
+        except Exception:
             if session:
                 session.rollback()
                 session.close()
-            raise e
+            raise
 
 
 @beartype
@@ -331,11 +332,11 @@ async def sql_insert_ignore_duplicate(
                     insert_unknown = other_db_insert(table).values(**insert_values)
 
             return insert_unknown
-        except SQLError as e:
+        except Exception:
             if session:
                 session.rollback()
                 session.close()
-            raise e
+            raise
 
 
 @beartype
@@ -358,11 +359,19 @@ async def sql_retry(
 
 
 # Create the engine connecting to the database
+logger.info("Creating engine to connect to database...")
 engine = create_engine(
     f"{settings['db_dialect']}+{settings['db_driver']}://{settings['db_user']}:{settings['db_pwd']}@{settings['db_host']}:{settings['db_port']}/{settings['db_name']}",
     pool_pre_ping=True,
     pool_recycle=3600,
 )
+logger.info("Created.")
 
 # Create all tables represented by the above classes, if they haven't already been created
-DBBase.metadata.create_all(engine)
+logger.info("Ensuring all necessary tables exist...")
+try:
+    DBBase.metadata.create_all(engine)
+except Exception as e:
+    logger.error("An error occurred while trying to create necessary tables: %s", e)
+    raise
+logger.info("All necessary tables are available.")

@@ -1,8 +1,19 @@
 from __future__ import annotations
 
-from typing import Sequence
+import inspect
+import logging
+from typing import Any, TypeVar
 
 import discord
+
+T = TypeVar("T", bound=Any)
+
+# Objects to log events
+logging.basicConfig(
+    filename="logs.log", format="%(asctime)s %(levelname)s: %(message)s", filemode="w"
+)
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
 
 
 class ChannelTypeError(ValueError):
@@ -21,13 +32,6 @@ class ArgumentError(ValueError):
     pass
 
 
-def natural_language_concat(items: Sequence[str]) -> str:
-    if len(items) == 2:
-        return items[0] + " or " + items[1]
-    else:
-        return ", ".join(items[:-1]) + " or " + items[-1]
-
-
 def validate_channels(
     **kwargs: (
         discord.guild.GuildChannel | discord.Thread | discord.abc.PrivateChannel | None
@@ -43,10 +47,11 @@ def validate_channels(
             not isinstance(channel, discord.Thread)
             or not isinstance(channel.parent, discord.TextChannel)
         ) and not isinstance(channel, discord.TextChannel):
-            raise ChannelTypeError(
-                f"{channel_name} channel must be text channel or text channel thread, not "
-                + type(channel).__name__
+            err = ChannelTypeError(
+                f"Invalid {channel_name} channel passed to function {inspect.stack()[1][3]}(). It must be text channel or text channel thread, not {type(channel).__name__}."
             )
+            logger.error(err)
+            raise err
 
 
 def validate_webhook(
@@ -67,8 +72,16 @@ def validate_webhook(
         try:
             assert isinstance(target_channel.parent, discord.TextChannel)
         except AssertionError:
-            raise ChannelTypeError("Target thread is not a thread off a text channel.")
+            err = ChannelTypeError(
+                f"Error in function {inspect.stack()[1][3]}: webhook's target thread is not a thread off a text channel."
+            )
+            logger.error(err)
+            raise err
         target_channel_id = target_channel.parent.id
 
     if target_channel_id != webhook.channel_id:
-        raise WebhookChannelError("webhook is not attached to Bridge's target channel.")
+        err = WebhookChannelError(
+            f"Error in function {inspect.stack()[1][3]}: webhook is not attached to Bridge's target channel."
+        )
+        logger.error(err)
+        raise err
