@@ -3,6 +3,7 @@ import re
 from typing import Any, AsyncIterator, Coroutine, Iterable, Literal, cast
 
 import discord
+from beartype import beartype
 from sqlalchemy import Delete as SQLDelete
 from sqlalchemy import ScalarResult
 from sqlalchemy import Select as SQLSelect
@@ -19,7 +20,7 @@ from database import (
     engine,
     sql_retry,
 )
-from validations import beartype, logger
+from validations import logger
 
 
 @globals.command_tree.command(

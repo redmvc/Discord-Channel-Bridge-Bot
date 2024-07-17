@@ -10,9 +10,10 @@ from typing import Any, Callable, Literal, SupportsInt, TypedDict, TypeVar, cast
 import aiohttp
 import discord
 from aiolimiter import AsyncLimiter
+from beartype import beartype
 from typing_extensions import NotRequired
 
-from validations import ArgumentError, HTTPResponseError, beartype, logger
+from validations import ArgumentError, HTTPResponseError, logger
 
 # discord.guild.GuildChannel isn't working in commands.py for some reason
 GuildChannel = (

@@ -2,11 +2,9 @@ from __future__ import annotations
 
 import inspect
 import logging
-from typing import Any, Callable, TypeVar
+from typing import Any, TypeVar
 
 import discord
-from beartype import beartype as og_beartype
-from beartype.roar import BeartypeException
 
 T = TypeVar("T", bound=Any)
 
@@ -32,23 +30,6 @@ class HTTPResponseError(Exception):
 
 class ArgumentError(ValueError):
     pass
-
-
-def beartype_catch_errors(func: Callable[..., T]) -> Callable[..., T]:
-    def wrapper(*args: Any, **kwargs: Any) -> T:
-        try:
-            return func(*args, **kwargs)
-        except BeartypeException as e:
-            logger.error(
-                "Beartype type-checking error in function '%s': %s", func.__name__, e
-            )
-            raise
-
-    return wrapper
-
-
-def beartype(func: Callable[..., T]) -> Callable[..., T]:
-    return beartype_catch_errors(og_beartype(func))
 
 
 def validate_channels(
