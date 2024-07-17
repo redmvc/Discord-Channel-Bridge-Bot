@@ -977,7 +977,7 @@ class Webhooks:
         self._channels_per_webhook[webhook_id].add(channel_id)
         self._webhook_by_channel[channel_id] = webhook_id
 
-        logger.info("Webhook added.")
+        logger.info("Webhook added to channel with ID %s.", channel_id)
         return webhook
 
     @beartype
@@ -1044,7 +1044,7 @@ class Webhooks:
         except KeyError:
             pass
 
-        logger.info("Channel deleted.")
+        logger.info("Channel with ID %s deleted from list of webhooks.", channel_id)
         if (channels := self._channels_per_webhook.get(webhook_id)) and len(
             channels
         ) > 0:
