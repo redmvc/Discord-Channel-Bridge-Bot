@@ -43,6 +43,13 @@ async def help(
         | None
     ) = None,
 ):
+    logger.debug(
+        "User with ID %s ran command /help%s from channel with ID %s.",
+        interaction.user.id,
+        f" {command}" if command else "",
+        interaction.channel_id,
+    )
+
     if (
         globals.emoji_server
         and interaction.guild
@@ -156,6 +163,15 @@ async def bridge(
     target: str,
     direction: Literal["outbound", "inbound"] | None = None,
 ):
+    logger.debug(
+        "User with ID %s ran command /bridge %s%s from channel with ID %s. Interaction ID: %s.",
+        interaction.user.id,
+        target,
+        f" {direction}" if direction else "",
+        interaction.channel_id,
+        interaction.id,
+    )
+
     message_channel = interaction.channel
     if not isinstance(message_channel, (discord.TextChannel, discord.Thread)):
         await interaction.response.send_message(
@@ -265,6 +281,8 @@ async def bridge(
 
     await asyncio.gather(*join_threads)
 
+    logger.debug("Call to /bridge with interaction ID %s successful.", interaction.id)
+
 
 @discord.app_commands.default_permissions(
     manage_webhooks=True, create_public_threads=True
@@ -275,6 +293,13 @@ async def bridge(
     description="Create threads across the bridge matching this one and bridge them.",
 )
 async def bridge_thread(interaction: discord.Interaction):
+    logger.debug(
+        "User with ID %s ran command /bridge_thread from channel with ID %s. Interaction ID: %s.",
+        interaction.user.id,
+        interaction.channel_id,
+        interaction.id,
+    )
+
     message_thread = interaction.channel
     if not isinstance(message_thread, discord.Thread):
         await interaction.response.send_message(
@@ -330,6 +355,10 @@ async def bridge_thread(interaction: discord.Interaction):
 
         raise
 
+    logger.debug(
+        "Call to /bridge_thread with interaction ID %s successful.", interaction.id
+    )
+
 
 @discord.app_commands.default_permissions(
     manage_webhooks=True, create_public_threads=True
@@ -342,6 +371,13 @@ async def bridge_thread(interaction: discord.Interaction):
 async def auto_bridge_threads(
     interaction: discord.Interaction,
 ):
+    logger.debug(
+        "User with ID %s ran command /auto_bridge_threads from channel with ID %s. Interaction ID: %s.",
+        interaction.user.id,
+        interaction.channel_id,
+        interaction.id,
+    )
+
     message_channel = interaction.channel
     if not isinstance(message_channel, discord.TextChannel):
         await interaction.response.send_message(
@@ -441,6 +477,11 @@ async def auto_bridge_threads(
 
     await interaction.followup.send(response, ephemeral=True)
 
+    logger.debug(
+        "Call to /auto_bridge_threads with interaction ID %s successful.",
+        interaction.id,
+    )
+
 
 @beartype
 async def mention_to_channel(
@@ -483,6 +524,14 @@ async def mention_to_channel(
     target="The channel to and from whose bridges to destroy."
 )
 async def demolish(interaction: discord.Interaction, target: str):
+    logger.debug(
+        "User with ID %s ran command /demolish %s from channel with ID %s. Interaction ID: %s.",
+        interaction.user.id,
+        target,
+        interaction.channel_id,
+        interaction.id,
+    )
+
     message_channel = interaction.channel
     if not isinstance(message_channel, (discord.TextChannel, discord.Thread)):
         await interaction.response.send_message(
@@ -568,6 +617,8 @@ async def demolish(interaction: discord.Interaction, target: str):
         ephemeral=True,
     )
 
+    logger.debug("Call to /demolish with interaction ID %s successful.", interaction.id)
+
 
 @discord.app_commands.default_permissions(manage_webhooks=True)
 @discord.app_commands.guild_only()
@@ -581,6 +632,14 @@ async def demolish(interaction: discord.Interaction, target: str):
 async def demolish_all(
     interaction: discord.Interaction, channel_and_threads: bool | None = None
 ):
+    logger.debug(
+        "User with ID %s ran command /demolish_all%s from channel with ID %s. Interaction ID: %s.",
+        interaction.user.id,
+        " True" if channel_and_threads else "",
+        interaction.channel_id,
+        interaction.id,
+    )
+
     message_channel = interaction.channel
     if not isinstance(message_channel, (discord.TextChannel, discord.Thread)):
         await interaction.response.send_message(
@@ -730,6 +789,10 @@ async def demolish_all(
             ephemeral=True,
         )
 
+    logger.debug(
+        "Call to /demolish_all with interaction ID %s successful.", interaction.id
+    )
+
 
 @discord.app_commands.default_permissions(manage_webhooks=True)
 @discord.app_commands.guild_only()
@@ -741,6 +804,14 @@ async def demolish_all(
     apps="Mentions or IDs of the app or apps to add to or remove from the whitelist."
 )
 async def whitelist(interaction: discord.Interaction, apps: str):
+    logger.debug(
+        "User with ID %s ran command /whitelist %s from channel with ID %s. Interaction ID: %s.",
+        interaction.user.id,
+        apps,
+        interaction.channel_id,
+        interaction.id,
+    )
+
     channel = interaction.channel
     if not channel or not isinstance(channel, (discord.TextChannel, discord.Thread)):
         await interaction.response.send_message(
@@ -886,6 +957,10 @@ async def whitelist(interaction: discord.Interaction, apps: str):
 
     await interaction.followup.send("\n".join(response), ephemeral=True)
 
+    logger.debug(
+        "Call to /whitelist with interaction ID %s successful.", interaction.id
+    )
+
 
 @discord.app_commands.default_permissions(
     create_expressions=True, manage_expressions=True
@@ -907,6 +982,15 @@ async def map_emoji(
     internal_emoji_id_str: str,
     external_emojis: str,
 ):
+    logger.debug(
+        "User with ID %s ran command /map_emoji %s %s from channel with ID %s and arguments. Interaction ID: %s.",
+        interaction.user.id,
+        internal_emoji_id_str,
+        external_emojis,
+        interaction.channel_id,
+        interaction.id,
+    )
+
     if not globals.settings.get("emoji_server_id"):
         await interaction.response.send_message(
             "❌ Bot doesn't have an emoji server registered.", ephemeral=True
@@ -1000,6 +1084,10 @@ async def map_emoji(
             ephemeral=True,
         )
 
+    logger.debug(
+        "Call to /map_emoji with interaction ID %s successful.", interaction.id
+    )
+
 
 @discord.app_commands.default_permissions(
     create_expressions=True, manage_expressions=True
@@ -1018,6 +1106,14 @@ async def map_emoji(
 async def hash_server_emoji(
     interaction: discord.Interaction, server_id_str: str | None = None
 ):
+    logger.debug(
+        "User with ID %s ran command /hash_server_emoji%s from channel with ID %s. Interaction ID: %s.",
+        interaction.user.id,
+        f" {server_id_str}" if server_id_str else "",
+        interaction.channel_id,
+        interaction.id,
+    )
+
     if server_id_str:
         try:
             server_id = int(server_id_str)
@@ -1061,6 +1157,10 @@ class CancelHashServer(discord.ui.Button[Any]):
     async def callback(self, interaction: discord.Interaction):
         await self._original_interaction.edit_original_response(
             view=None, content="Request cancelled."
+        )
+        logger.debug(
+            "Call to /hash_server_emoji with interaction ID %s cancelled.",
+            interaction.id,
         )
 
 
@@ -1112,6 +1212,11 @@ class ConfirmHashServer(discord.ui.Button[Any]):
             raise
 
         await interaction.followup.send("✅ Successfully hashed emoji!", ephemeral=True)
+
+        logger.debug(
+            "Call to /hash_server_emoji with interaction ID %s successful.",
+            interaction.id,
+        )
 
 
 @beartype
@@ -1493,6 +1598,14 @@ async def map_emoji_helper(
 @globals.command_tree.context_menu(name="List Reactions")
 async def list_reactions(interaction: discord.Interaction, message: discord.Message):
     """List all reactions and users who reacted on all sides of a bridge."""
+    logger.debug(
+        "User with ID %s requested a list of reactions attached to message with ID %s in channel with ID %s. Interaction ID: %s.",
+        interaction.user.id,
+        message.id,
+        interaction.channel_id,
+        interaction.id,
+    )
+
     assert globals.client.user
     bot_user_id = globals.client.user.id
 
@@ -1706,4 +1819,8 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
             ]
         ),
         ephemeral=True,
+    )
+
+    logger.debug(
+        "Reaction list request with interaction ID %s successful.", interaction.id
     )
