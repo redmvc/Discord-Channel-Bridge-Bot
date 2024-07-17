@@ -1322,12 +1322,12 @@ async def stop_auto_bridging_threads_helper(
         await sql_retry(execute_query)
 
         globals.auto_bridge_thread_channels -= channel_ids_to_remove
-    except SQLError as e:
+    except Exception:
         if close_after and session:
             session.rollback()
             session.close()
 
-        raise e
+        raise
 
     if close_after:
         session.commit()
@@ -1580,15 +1580,21 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
                         target_message_id
                     )
                     append_users_to_reactions_list(bridged_message)
-    except SQLError as e:
+    except Exception as e:
         if session:
             session.rollback()
             session.close()
 
-        await interaction.followup.send(
-            "❌ There was a problem accessing the database.",
-            ephemeral=True,
-        )
+        if isinstance(e, SQLError):
+            await interaction.followup.send(
+                "❌ There was a problem accessing the database.",
+                ephemeral=True,
+            )
+        else:
+            await interaction.followup.send(
+                "❌ An unknown error occurred.",
+                ephemeral=True,
+            )
         warn(e)
         return
 

@@ -262,11 +262,11 @@ async def sql_upsert(
                     upsert = other_db_insert(table).values(**insert_values)
 
             return upsert
-        except SQLError as e:
+        except Exception:
             if session:
                 session.rollback()
                 session.close()
-            raise e
+            raise
 
 
 @beartype
@@ -331,11 +331,11 @@ async def sql_insert_ignore_duplicate(
                     insert_unknown = other_db_insert(table).values(**insert_values)
 
             return insert_unknown
-        except SQLError as e:
+        except Exception:
             if session:
                 session.rollback()
                 session.close()
-            raise e
+            raise
 
 
 @beartype
