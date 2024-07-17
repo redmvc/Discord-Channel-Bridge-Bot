@@ -76,6 +76,12 @@ async def on_ready():
                 if channel_id in inaccessible_channels:
                     continue
 
+                logger.debug(
+                    "Adding app with ID %s to whitelist associated with channel with ID %s.",
+                    whitelisted_app.application,
+                    channel_id,
+                )
+
                 if channel_id not in accessible_channels:
                     channel = await globals.get_channel_from_id(channel_id)
 

@@ -379,7 +379,7 @@ class Bridges:
             validate_channels(source_channel=source_channel)
             source_channel = cast(discord.TextChannel | discord.Thread, source_channel)
 
-        logger.info(
+        logger.debug(
             "Creating bridge from #%s:%s (ID: %s) to #%s:%s (ID: %s)...",
             source_channel.guild.name,
             (
@@ -468,7 +468,7 @@ class Bridges:
 
         # If I don't need to update the database I end here
         if not update_db:
-            logger.info(
+            logger.debug(
                 "Bridge from #%s to #%s created!",
                 source_channel.name,
                 target_channel.name,
@@ -476,7 +476,7 @@ class Bridges:
             return bridge
 
         # Add this Bridge and webhook to the DB
-        logger.info(
+        logger.debug(
             "Inserting bridge from #%s to #%s into database...",
             source_channel.name,
             target_channel.name,
@@ -527,7 +527,7 @@ class Bridges:
             session.commit()
             session.close()
 
-        logger.info(
+        logger.debug(
             "Bridge from #%s to #%s created.", source_channel.name, target_channel.name
         )
         return bridge
@@ -614,21 +614,21 @@ class Bridges:
         if source_id:
             if target_id:
                 if one_sided:
-                    logger.info(
+                    logger.debug(
                         "Demolishing bridge from channel ID %s to channel ID %s...",
                         source_id,
                         target_id,
                     )
                 else:
-                    logger.info(
+                    logger.debug(
                         "Demolishing bridges between channel ID %s and channel ID %s...",
                         source_id,
                         target_id,
                     )
             else:
-                logger.info("Demolishing bridges from channel ID %s...", source_id)
+                logger.debug("Demolishing bridges from channel ID %s...", source_id)
         else:
-            logger.info("Demolishing bridges to channel ID %s...", target_id)
+            logger.debug("Demolishing bridges to channel ID %s...", target_id)
 
         # And then we list all of the bridges we want to demolish
         if source_id:
@@ -661,11 +661,11 @@ class Bridges:
 
         # Return if we're not meant to update the DB
         if not update_db:
-            logger.info("Bridge(s) demolished.")
+            logger.debug("Bridge(s) demolished.")
             return
 
         # Update the DB
-        logger.info("Removing bridge(s) from database...")
+        logger.debug("Removing bridge(s) from database...")
         close_after = False
         try:
             if not session:
@@ -718,7 +718,7 @@ class Bridges:
             session.commit()
             session.close()
 
-        logger.info("Bridge(s) demolished.")
+        logger.debug("Bridge(s) removed from database.")
 
     @beartype
     def get_one_way_bridge(
@@ -929,7 +929,7 @@ class Webhooks:
             validate_channels(channel=channel)
             channel = cast(discord.TextChannel | discord.Thread, channel)
 
-            logger.info(
+            logger.debug(
                 "Adding new webhook to #%s:%s (ID: %s)...",
                 channel.guild.name,
                 (
@@ -961,7 +961,7 @@ class Webhooks:
                     name="Channel Bridge Bot"
                 )
         else:
-            logger.info(
+            logger.debug(
                 "Adding webhook with ID %s to channel with ID %s...",
                 webhook.id,
                 channel_id,
@@ -977,7 +977,7 @@ class Webhooks:
         self._channels_per_webhook[webhook_id].add(channel_id)
         self._webhook_by_channel[channel_id] = webhook_id
 
-        logger.info("Webhook added to channel with ID %s.", channel_id)
+        logger.debug("Webhook added to channel with ID %s.", channel_id)
         return webhook
 
     @beartype
@@ -1029,7 +1029,7 @@ class Webhooks:
             - `channel_or_id`: The channel or ID to delete.
         """
         channel_id = globals.get_id_from_channel(channel_or_id)
-        logger.info("Deleting channel with ID %s from list of webhooks...", channel_id)
+        logger.debug("Deleting channel with ID %s from list of webhooks...", channel_id)
 
         webhook_id = self._webhook_by_channel.get(channel_id)
         if not webhook_id:
@@ -1044,7 +1044,7 @@ class Webhooks:
         except KeyError:
             pass
 
-        logger.info("Channel with ID %s deleted from list of webhooks.", channel_id)
+        logger.debug("Channel with ID %s deleted from list of webhooks.", channel_id)
         if (channels := self._channels_per_webhook.get(webhook_id)) and len(
             channels
         ) > 0:
@@ -1057,7 +1057,7 @@ class Webhooks:
             logger.debug("Couldn't find webhook being deleted.")
             return webhook_id
 
-        logger.info("Webhook associated with it no longer necessary, deleting it...")
+        logger.debug("Webhook associated with it no longer necessary, deleting it...")
         try:
             await webhook.delete(reason="Bridge demolition.")
         except discord.NotFound:
@@ -1075,7 +1075,7 @@ class Webhooks:
         del self._channels_per_webhook[webhook_id]
         del self._webhooks[webhook_id]
 
-        logger.info("Webhook deleted.")
+        logger.debug("Webhook with ID %s deleted.", webhook_id)
         return webhook_id
 
     @property

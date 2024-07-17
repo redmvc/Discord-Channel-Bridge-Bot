@@ -126,7 +126,7 @@ class EmojiHashMap:
         #### Returns:
             - `tuple[int, str]`: A tuple with the emoji ID and the hash of its image.
         """
-        logger.info("Adding emoji with ID %s to emoji hash map...", emoji_id)
+        logger.debug("Adding emoji with ID %s to emoji hash map...", emoji_id)
 
         if not is_internal and server_id:
             server_id = int(server_id)
@@ -161,7 +161,7 @@ class EmojiHashMap:
         if is_internal:
             self._hash_to_internal_emoji[image_hash] = emoji_id
 
-        logger.info("Emoji with ID %s added to map.", emoji_id)
+        logger.debug("Emoji with ID %s added to map.", emoji_id)
         return (emoji_id, image_hash)
 
     @beartype
@@ -203,7 +203,7 @@ class EmojiHashMap:
         emoji_id, emoji_name, emoji_animated_inferred, emoji_url = (
             globals.get_emoji_information(emoji, emoji_id, emoji_name)
         )
-        logger.info("Adding emoji with ID %s to database...", emoji_id)
+        logger.debug("Adding emoji with ID %s to database...", emoji_id)
 
         if emoji_animated is None:
             emoji_animated = emoji_animated_inferred
@@ -243,7 +243,7 @@ class EmojiHashMap:
             session.commit()
             session.close()
 
-        logger.info("Emoji with ID %s added to database.", emoji_id)
+        logger.debug("Emoji with ID %s added to database.", emoji_id)
 
     @beartype
     async def add_emoji(
@@ -400,7 +400,7 @@ class EmojiHashMap:
             )
             return
 
-        logger.info("Deleting emoji with ID %s from hash map...", emoji_id)
+        logger.debug("Deleting emoji with ID %s from hash map...", emoji_id)
 
         image_hash = self._emoji_to_hash[emoji_id]
         del self._emoji_to_hash[emoji_id]
@@ -420,10 +420,10 @@ class EmojiHashMap:
         if self._hash_to_internal_emoji.get(image_hash):
             del self._hash_to_internal_emoji[image_hash]
 
-        logger.info("Emoji with ID %s deleted from map.", emoji_id)
+        logger.debug("Emoji with ID %s deleted from map.", emoji_id)
 
         if session:
-            logger.info("Deleting emoji with ID %s from database...", emoji_id)
+            logger.debug("Deleting emoji with ID %s from database...", emoji_id)
             close_after = False
             try:
                 if isinstance(session, bool):
@@ -446,7 +446,7 @@ class EmojiHashMap:
                 session.commit()
                 session.close()
 
-            logger.info("Emoji with ID %s deleted from database.", emoji_id)
+            logger.debug("Emoji with ID %s deleted from database.", emoji_id)
 
     @beartype
     async def load_server_emoji(self, server_id: int | None = None):
