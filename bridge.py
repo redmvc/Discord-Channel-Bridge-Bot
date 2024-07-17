@@ -346,7 +346,7 @@ class Bridges:
             - `Bridge`: The created `Bridge`.
         """
         target_channel = await globals.get_channel_from_id(target)
-        source_channel = await globals.get_channel_from_id(target)
+        source_channel = await globals.get_channel_from_id(source)
         validate_channels(target_channel=target_channel, source_channel=source_channel)
         target_channel = cast(discord.TextChannel | discord.Thread, target_channel)
 
