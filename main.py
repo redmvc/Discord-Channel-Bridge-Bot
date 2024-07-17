@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import random
 import re
 from typing import Any, Coroutine, TypedDict, cast
-from warnings import warn
 
 import discord
 from beartype import beartype
@@ -27,6 +27,7 @@ from database import (
     engine,
     sql_retry,
 )
+from validations import logger
 
 
 class ThreadSplat(TypedDict, total=False):
@@ -50,6 +51,8 @@ async def on_ready():
     if globals.is_ready:
         return
 
+    logger.info("Client successfully connected. Running initial loading procedures...")
+
     session = None
     try:
         with SQLSession(engine) as session:
@@ -59,6 +62,7 @@ async def on_ready():
             emoji_hash_map.map = emoji_hash_map.EmojiHashMap(session)
 
             # Try to find all apps whitelisted per channel
+            logger.info("Loading whitelisted apps...")
             select_whitelisted_apps: SQLSelect[tuple[DBAppWhitelist]] = SQLSelect(
                 DBAppWhitelist
             )
@@ -72,17 +76,22 @@ async def on_ready():
                 if channel_id in inaccessible_channels:
                     continue
 
+                logger.debug(
+                    "Adding app with ID %s to whitelist associated with channel with ID %s.",
+                    whitelisted_app.application,
+                    channel_id,
+                )
+
                 if channel_id not in accessible_channels:
-                    channel = globals.client.get_channel(channel_id)
-                    if not channel:
-                        try:
-                            channel = await globals.client.fetch_channel(channel_id)
-                        except Exception:
-                            channel = None
+                    channel = await globals.get_channel_from_id(channel_id)
 
                     if channel:
                         accessible_channels.add(channel_id)
                     else:
+                        logger.debug(
+                            "Channel with ID %s not found when loading list of whitelisted apps.",
+                            channel_id,
+                        )
                         inaccessible_channels.add(channel_id)
                         continue
 
@@ -99,9 +108,11 @@ async def on_ready():
                 )
                 session.execute(delete_inaccessible_channels)
 
+            logger.info("Whitelists loaded.")
             session.commit()
 
             # Identify all automatically-thread-bridging channels
+            logger.info("Loading automatically-thread-bridging channels...")
             select_auto_bridge_thread_channels: SQLSelect[
                 tuple[DBAutoBridgeThreadChannels]
             ] = SQLSelect(DBAutoBridgeThreadChannels)
@@ -116,15 +127,18 @@ async def on_ready():
                     }
                 )
             )
+            logger.info("Auto-thread-bridging channels loaded.")
     except Exception as e:
         if session:
             session.rollback()
             session.close()
 
         await globals.client.close()
-        raise e
+        logger.error("An error occurred when performing bot startup procedures: %s", e)
+        raise
 
     # Finally I'll check whether I have a registered emoji server and save it if so
+    logger.info("Loading emoji server...")
     emoji_server_id_str = globals.settings.get("emoji_server_id")
     try:
         if emoji_server_id_str:
@@ -132,7 +146,7 @@ async def on_ready():
         else:
             emoji_server_id = None
     except Exception:
-        print(
+        logger.warning(
             "Emoji server ID stored in settings.json file does not resolve to a valid integer."
         )
         emoji_server_id = None
@@ -146,27 +160,48 @@ async def on_ready():
                 emoji_server = None
 
         if not emoji_server:
-            print("Couldn't find emoji server with ID registered in settings.json.")
+            logger.warning(
+                "Couldn't find emoji server with ID registered in settings.json."
+            )
         elif (
             not emoji_server.me.guild_permissions.manage_expressions
             or not emoji_server.me.guild_permissions.create_expressions
         ):
-            print(
+            logger.warning(
                 "I don't have Create Expressions or Manage Expressions permissions in the emoji server."
             )
         else:
             globals.emoji_server = emoji_server
 
+        logger.info("Emoji server loaded.")
+    else:
+        logger.info("Emoji server ID not set.")
+
+    logger.info("Syncing command tree...")
     sync_command_tree = [globals.command_tree.sync()]
     if globals.emoji_server:
         sync_command_tree.append(globals.command_tree.sync(guild=globals.emoji_server))
     await asyncio.gather(*sync_command_tree)
+    logger.info("Command tree synced.")
 
-    print(f"{globals.client.user} is connected to the following servers:\n")
-    for server in globals.client.guilds:
-        print(f"{server.name}(id: {server.id})")
+    if (connected_servers := globals.client.guilds) and len(connected_servers) > 0:
+        print(f"{globals.client.user} is connected to the following servers:\n")
+        connected_servers_listed: list[str] = []
+        for server in globals.client.guilds:
+            server_id_str = f"{server.name}(id: {server.id})"
+            print(server_id_str)
+            connected_servers_listed.append(server_id_str)
+
+        logger.info(
+            "Connected to the following servers:\n- %s",
+            "\n- ".join(connected_servers_listed),
+        )
+    else:
+        print("Bot is not connected to any servers.")
+        logger.info("Bot is not connected to any servers.")
 
     globals.is_ready = True
+    logger.info("Bot is ready.")
 
 
 @globals.client.event
@@ -266,16 +301,23 @@ async def bridge_message_helper(message: discord.Message):
         - `Forbidden`: The authorization token for one of the webhooks is incorrect.
         - `ValueError`: The length of embeds was invalid, there was no token associated with one of the webhooks or ephemeral was passed with the improper webhook type or there was no state attached with one of the webhooks when giving it a view.
     """
-    outbound_bridges = bridges.get_outbound_bridges(message.channel.id)
+    message_channel_id = message.channel.id
+    outbound_bridges = bridges.get_outbound_bridges(message_channel_id)
     if not outbound_bridges:
         return
+
+    logger.debug(
+        "Bridging message with ID %s from channel with ID %s.",
+        message.id,
+        message_channel_id,
+    )
 
     # Ensure that the message has emoji I have access to
     message_content = await replace_missing_emoji(message.content)
 
     # Get all channels reachable from this one via an unbroken sequence of outbound bridges as well as their webhooks
     reachable_channels = await bridges.get_reachable_channels(
-        message.channel.id,
+        message_channel_id,
         "outbound",
         include_webhooks=True,
     )
@@ -319,7 +361,7 @@ async def bridge_message_helper(message: discord.Message):
                     bridged_reply_to[reply_source_channel_id] = source_replied_to_id
                 else:
                     source_replied_to_id = replied_to_id
-                    reply_source_channel_id = message.channel.id
+                    reply_source_channel_id = message_channel_id
 
                 # Now find all other bridged versions of the message we're replying to
                 def get_bridged_reply_tos():
@@ -355,6 +397,11 @@ async def bridge_message_helper(message: discord.Message):
                 if target_id != webhook_channel.id:
                     # The target channel is not the same as the webhook's channel, so it should be a thread
                     if not isinstance(target_channel, discord.Thread):
+                        logger.warning(
+                            "Target channel for bridging (ID %s) does not match its associated webhook (ID %s).",
+                            target_id,
+                            webhook_channel.id,
+                        )
                         continue
                     thread_splat = {"thread": target_channel}
 
@@ -383,7 +430,7 @@ async def bridge_message_helper(message: discord.Message):
                 if bridged_message
             ]
             source_message_id_str = str(message.id)
-            source_channel_id_str = str(message.channel.id)
+            source_channel_id_str = str(message_channel_id)
 
             def insert_into_message_map():
                 session.add_all(
@@ -391,11 +438,11 @@ async def bridge_message_helper(message: discord.Message):
                         DBMessageMap(
                             source_message=source_message_id_str,
                             source_channel=source_channel_id_str,
-                            target_message=message.id,
-                            target_channel=message.channel.id,
-                            webhook=message.webhook_id,
+                            target_message=bridged_message.id,
+                            target_channel=bridged_message.channel.id,
+                            webhook=bridged_message.webhook_id,
                         )
-                        for message in bridged_messages
+                        for bridged_message in bridged_messages
                     ]
                 )
 
@@ -407,11 +454,17 @@ async def bridge_message_helper(message: discord.Message):
             session.close()
 
         if isinstance(e, SQLError):
-            warn("Ran into an SQL error while trying to bridge a message:\n" + str(e))
+            logger.warning(
+                "Ran into an SQL error while trying to bridge a message: %s", e
+            )
         else:
-            raise
+            logger.error(
+                "Ran into an unknown error while trying to bridge a message: %s", e
+            )
 
-        return
+        raise
+
+    logger.debug("Message with ID %s successfully bridged.", message.id)
 
 
 @beartype
@@ -442,6 +495,12 @@ async def bridge_message_to_target_channel(
     #### Returns:
         - `discord.WebhookMessage`: The message bridged.
     """
+    logger.debug(
+        "Bridging message with ID %s to channel with ID %s.",
+        message.id,
+        target_channel.id,
+    )
+
     # Try to find whether the user who sent this message is on the other side of the bridge and if so what their name and avatar would be
     bridged_member = await globals.get_channel_member(
         webhook_channel, message.author.id
@@ -516,10 +575,23 @@ async def bridge_message_to_target_channel(
         )
     except discord.NotFound:
         # Webhook is gone, delete this bridge
-        warn(
-            f"Webhook in {target_channel.guild.name}:{target_channel.name} (ID: {target_channel.id}) not found, demolishing bridges to this channel and its threads."
+        logger.warning(
+            "Webhook in %s:%s (ID: %s) not found, demolishing bridges to this channel and its threads.",
+            target_channel.guild.name,
+            target_channel.name,
+            target_channel.id,
         )
-        await bridges.demolish_bridges(target_channel=target_channel, session=session)
+
+        try:
+            await bridges.demolish_bridges(
+                target_channel=target_channel, session=session
+            )
+        except Exception as e:
+            logger.error(
+                "Exception occurred when trying to demolish an invalid bridge after bridging a message: %s",
+                e,
+            )
+            raise
         return None
 
 
@@ -547,6 +619,8 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
 
     if not bridges.get_outbound_bridges(payload.channel_id):
         return
+
+    logger.debug("Bridging edit to message with ID %s.", payload.message_id)
 
     # Ensure that the message has emoji I have access to
     updated_message_content = await replace_missing_emoji(updated_message_content)
@@ -626,12 +700,21 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
                             assert isinstance(
                                 bridged_channel, (discord.TextChannel, discord.Thread)
                             )
-                            warn(
-                                f"Webhook in {bridged_channel.guild.name}:{bridged_channel.name} (ID: {bridged_channel.id}) not found, demolishing bridges to this channel and its threads."
+                            logger.warning(
+                                "Webhook in %s:%s (ID: %s) not found, demolishing bridges to this channel and its threads.",
+                                bridged_channel.guild.name,
+                                bridged_channel.name,
+                                bridged_channel.id,
                             )
-                            await bridges.demolish_bridges(
-                                target_channel=bridged_channel, session=session
-                            )
+                            try:
+                                await bridges.demolish_bridges(
+                                    target_channel=bridged_channel, session=session
+                                )
+                            except Exception as e:
+                                logger.error(
+                                    "Exception occurred when trying to demolish an invalid bridge after bridging a message edit: %s",
+                                    e,
+                                )
 
                     async_message_edits.append(
                         edit_message(
@@ -641,7 +724,7 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
                         )
                     )
                 except discord.HTTPException as e:
-                    warn(
+                    logger.warning(
                         "Ran into a Discord exception while trying to edit a message across a bridge:\n"
                         + str(e)
                     )
@@ -649,9 +732,17 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
         await asyncio.gather(*async_message_edits)
     except Exception as e:
         if isinstance(e, SQLError):
-            warn("Ran into an SQL error while trying to edit a message:\n" + str(e))
+            logger.warning(
+                "Ran into an SQL error while trying to edit a message: %s", e
+            )
         else:
-            raise
+            logger.error(
+                "Ran into an unknown error while trying to edit a message: %s", e
+            )
+
+        raise
+
+    logger.debug("Successfully bridged edit to message with ID %s.", payload.message_id)
 
 
 @beartype
@@ -686,9 +777,17 @@ async def replace_missing_emoji(message_content: str) -> str:
             # I already have access to this emoji so it's fine
             continue
 
-        await emoji_hash_map.map.ensure_hash_map(
-            emoji_id=emoji_id, emoji_name=emoji_name
-        )
+        try:
+            await emoji_hash_map.map.ensure_hash_map(
+                emoji_id=emoji_id, emoji_name=emoji_name
+            )
+        except Exception as e:
+            logger.error(
+                "An error occurred when calling ensure_hash_map() from replace_missing_emoji(): %s",
+                e,
+            )
+            continue
+
         if emoji := emoji_hash_map.map.get_accessible_emoji(emoji_id, skip_self=True):
             # I don't have access to this emoji but I have a matching one in my emoji mappings
             emoji_to_replace[f"<{emoji_name}:{emoji_id_str}>"] = str(emoji)
@@ -727,6 +826,8 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
 
     if not bridges.get_outbound_bridges(payload.channel_id):
         return
+
+    logger.debug("Bridging deletion of message with ID %s.", payload.message_id)
 
     # Get all channels reachable from this one via an unbroken sequence of outbound bridges as well as their webhooks
     reachable_channels = await bridges.get_reachable_channels(
@@ -802,20 +903,31 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
                             assert isinstance(
                                 bridged_channel, (discord.TextChannel, discord.Thread)
                             )
-                            warn(
-                                f"Webhook in {bridged_channel.guild.name}:{bridged_channel.name} (ID: {bridged_channel.id}) not found, demolishing bridges to this channel and its threads."
+                            logger.warning(
+                                "Webhook in %s:%s (ID: %s) not found, demolishing bridges to this channel and its threads.",
+                                bridged_channel.guild.name,
+                                bridged_channel.name,
+                                bridged_channel.id,
                             )
-                            await bridges.demolish_bridges(
-                                target_channel=bridged_channel, session=session
-                            )
+                            try:
+                                await bridges.demolish_bridges(
+                                    target_channel=bridged_channel, session=session
+                                )
+                            except Exception as e:
+                                if not isinstance(e, discord.HTTPException):
+                                    logger.error(
+                                        "Exception occurred when trying to demolish an invalid bridge after bridging a message deletion: %s",
+                                        e,
+                                    )
+                                raise
 
                     async_message_deletes.append(
                         delete_message(message_row, target_channel_id, thread_splat)
                     )
                 except discord.HTTPException as e:
-                    warn(
-                        "Ran into a Discord exception while trying to delete a message across a bridge:\n"
-                        + str(e)
+                    logger.warning(
+                        "Ran into a Discord exception while trying to delete a message across a bridge: %s",
+                        e,
                     )
 
             # If the message was bridged, delete its row
@@ -838,12 +950,21 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
             session.close()
 
         if isinstance(e, SQLError):
-            warn("Ran into an SQL error while trying to delete a message:\n" + str(e))
+            logger.warning(
+                "Ran into an SQL error while trying to delete a message: %s", e
+            )
         else:
-            raise
-        return
+            logger.error(
+                "Ran into an unknown error while trying to delete a message: %s", e
+            )
+
+        raise
 
     await asyncio.gather(*async_message_deletes)
+
+    logger.debug(
+        "Successfully bridged deletion of message with ID %s.", payload.message_id
+    )
 
 
 @globals.client.event
@@ -872,12 +993,25 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         # Only bridge reactions across outbound bridges
         return
 
+    logger.debug(
+        "Bridging reaction add of %s to message with ID %s.",
+        payload.emoji,
+        payload.message_id,
+    )
+
     # Choose a "fallback emoji" to use in case I don't have access to the one being reacted and the message across the bridge doesn't already have it
     fallback_emoji: discord.Emoji | str | None
     if payload.emoji.is_custom_emoji():
         # Custom emoji, I need to check whether it exists and is available to me
         # I'll add this to my hash map if it's not there already
-        await emoji_hash_map.map.ensure_hash_map(emoji=payload.emoji)
+        try:
+            await emoji_hash_map.map.ensure_hash_map(emoji=payload.emoji)
+        except Exception as e:
+            logger.error(
+                "An error occurred when calling ensure_hash_map() from on_raw_reaction_add(): %s",
+                e,
+            )
+            raise
 
         # is_custom_emoji() guarantees that payload.emoji.id is not None
         emoji_id = cast(int, payload.emoji.id)
@@ -1048,10 +1182,16 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                             add_reaction_helper(source_channel, source_message_id)
                         )
                     except discord.HTTPException as e:
-                        warn(
-                            "Ran into a Discord exception while trying to add a reaction across a bridge:\n"
-                            + str(e)
+                        logger.warning(
+                            "Ran into a Discord exception while trying to add a reaction across a bridge: %s",
+                            e,
                         )
+                    except Exception as e:
+                        logger.error(
+                            "Ran into an unknown error while trying to add a reaction across a bridge: %s",
+                            e,
+                        )
+                        raise
             else:
                 # This message is (or might be) the source
                 source_message_id = payload.message_id
@@ -1095,10 +1235,16 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                         )
                     )
                 except discord.HTTPException as e:
-                    warn(
-                        "Ran into a Discord exception while trying to add a reaction across a bridge:\n"
-                        + str(e)
+                    logger.warning(
+                        "Ran into a Discord exception while trying to add a reaction across a bridge: %s",
+                        e,
                     )
+                except Exception as e:
+                    logger.error(
+                        "Ran into an unknown error while trying to add a reaction across a bridge: %s",
+                        e,
+                    )
+                    raise
 
         reactions_added = await asyncio.gather(*async_add_reactions)
 
@@ -1113,12 +1259,19 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
             session.close()
 
         if isinstance(e, SQLError):
-            warn(
-                "Ran into an SQL error while trying to add a reaction to a message:\n"
-                + str(e)
+            logger.warning(
+                "Ran into an SQL error while trying to add a reaction to a message: %s",
+                e,
             )
         else:
-            raise
+            logger.error(
+                "Ran into an unknown error while trying to add a reaction to a message: %s",
+                e,
+            )
+
+        raise
+
+    logger.debug("Reaction bridged.")
 
 
 @beartype
@@ -1148,6 +1301,11 @@ async def copy_emoji_into_server(
         return None
     emoji_server_id = globals.emoji_server.id
 
+    logger.debug(
+        "Copying emoji %s into emoji server.",
+        missing_emoji if missing_emoji else missing_emoji_id,
+    )
+
     missing_emoji_id, missing_emoji_name, _, missing_emoji_url = (
         globals.get_emoji_information(
             missing_emoji, missing_emoji_id, missing_emoji_name
@@ -1162,13 +1320,13 @@ async def copy_emoji_into_server(
         emoji = await globals.emoji_server.create_custom_emoji(
             name=missing_emoji_name, image=image, reason="Bridging reaction."
         )
-    except discord.Forbidden as e:
-        print("Emoji server permissions not set correctly.")
-        raise e
-    except discord.HTTPException as e:
+    except discord.Forbidden:
+        logger.warning("Emoji server permissions not set correctly.")
+        raise
+    except discord.HTTPException:
         if len(globals.emoji_server.emojis) < 50:
             # Something weird happened, the error was not due to a full server
-            raise e
+            raise
 
         # Try to delete an emoji from the server and then add this again.
         emoji_to_delete = random.choice(globals.emoji_server.emojis)
@@ -1179,16 +1337,24 @@ async def copy_emoji_into_server(
             emoji = await globals.emoji_server.create_custom_emoji(
                 name=missing_emoji_name, image=image, reason="Bridging reaction."
             )
-        except discord.Forbidden as e:
-            print("Emoji server permissions not set correctly.")
-            raise e
+        except discord.Forbidden:
+            logger.warning("Emoji server permissions not set correctly.")
+            raise
 
     # Copied the emoji, going to update my table
     session = None
     try:
         with SQLSession(engine) as session:
             if emoji_to_delete_id is not None:
-                await emoji_hash_map.map.delete_emoji(emoji_to_delete_id, session)
+                try:
+                    await emoji_hash_map.map.delete_emoji(emoji_to_delete_id, session)
+                except Exception as e:
+                    logger.error(
+                        "An error occurred when trying to delete an emoji from the hash map while running copy_emoji_into_server(): %s",
+                        e,
+                    )
+
+                    raise
 
             await emoji_hash_map.map.add_emoji(
                 emoji=emoji,
@@ -1216,13 +1382,23 @@ async def copy_emoji_into_server(
 
             session.commit()
     except Exception as e:
-        warn("Couldn't add emoji mapping to table.")
-        print(e)
-
         if session:
             session.rollback()
             session.close()
 
+        if isinstance(e, SQLError):
+            logger.warning(
+                "An SQL error occurred while trying to copy an emoji into the emoji server: %s",
+                e,
+            )
+        else:
+            logger.error(
+                "An SQL error occurred while trying to copy an emoji into the emoji server: %s",
+                e,
+            )
+            raise
+
+    logger.debug("%s added to emoji server.", emoji)
     return emoji
 
 
@@ -1253,6 +1429,12 @@ async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
         # This really shouldn't happen
         return
 
+    logger.debug(
+        "Bridging reaction removal of %s from message with ID %s.",
+        payload.emoji,
+        payload.message_id,
+    )
+
     # I will try to see if this emoji still has other reactions in it and, if so, stop doing this as I don't care anymore
     message = await channel.fetch_message(payload.message_id)
     reactions_with_emoji = {
@@ -1268,6 +1450,12 @@ async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
 
     # If I'm here, there are no remaining reactions of this kind on this message except perhaps for my own
     await unreact(payload)
+
+    logger.debug(
+        "Successfully bridged reaction removal of %s from message with ID %s.",
+        payload.emoji,
+        payload.message_id,
+    )
 
 
 @globals.client.event
@@ -1286,7 +1474,17 @@ async def on_raw_reaction_clear_emoji(payload: discord.RawReactionClearEmojiEven
         # Only remove reactions across outbound bridges
         return
 
+    logger.debug(
+        "Bridging reaction clear of %s from message with ID %s.",
+        payload.emoji,
+        payload.message_id,
+    )
     await unreact(payload)
+    logger.debug(
+        "Successfully bridged clear removal of %s from message with ID %s.",
+        payload.emoji,
+        payload.message_id,
+    )
 
 
 @globals.client.event
@@ -1305,7 +1503,12 @@ async def on_raw_reaction_clear(payload: discord.RawReactionClearEvent):
         # Only remove reactions across outbound bridges
         return
 
+    logger.debug("Bridging reaction clear from message with ID %s.", payload.message_id)
     await unreact(payload)
+    logger.debug(
+        "Successfully bridged clear removal from message with ID %s.",
+        payload.message_id,
+    )
 
 
 @beartype
@@ -1479,10 +1682,17 @@ async def unreact(
             session.close()
 
         if isinstance(e, SQLError):
-            warn("Ran into an SQL error while trying to remove a reaction:\n" + str(e))
+            logger.warning(
+                "Ran into an SQL error while running %s(): %s", inspect.stack()[1][3], e
+            )
         else:
-            raise
-        return
+            logger.error(
+                "Ran into an unknown error while running %s(): %s",
+                inspect.stack()[1][3],
+                e,
+            )
+
+        raise
 
 
 @globals.client.event
@@ -1517,7 +1727,13 @@ async def on_thread_create(thread: discord.Thread):
     if not thread.permissions_for(thread.guild.me).manage_webhooks:
         return
 
-    await commands.bridge_thread_helper(thread, thread.owner_id)
+    logger.debug("Automatically bridging thread with ID %s.", thread.id)
+
+    try:
+        await commands.bridge_thread_helper(thread, thread.owner_id)
+    except Exception as e:
+        logger.error("An error occurred while trying to bridge a thread: %s", e)
+        raise
 
     # The message that was used to create the thread will need to be bridged, as the bridge didn't exist at the time
     last_message = thread.last_message
@@ -1527,19 +1743,33 @@ async def on_thread_create(thread: discord.Thread):
     if last_message and last_message.content != "":
         await bridge_message_helper(last_message)
 
+    logger.debug("Thread with ID %s successfully bridged.", thread.id)
+
 
 @globals.client.event
 async def on_guild_join(server: discord.Guild):
-    print(f"Just joined server '{server.name}'. Hashing emoji...")
-    await emoji_hash_map.map.load_server_emoji(server.id)
-    print("Emoji hashed!")
+    joined_server_msg = f"Just joined server '{server.name}'."
+    logger.info(f"{joined_server_msg} Hashing emoji...")
+    print(joined_server_msg)
+    try:
+        await emoji_hash_map.map.load_server_emoji(server.id)
+        logger.info("Emoji hashed!")
+    except Exception as e:
+        logger.error(
+            "An unknown error occurred when trying to hash emoji on joining a new server: %s",
+            e,
+        )
+        raise
 
 
 @globals.client.event
 async def on_guild_remove(server: discord.Guild):
-    print(f"Just left server '{server.name}'.")
+    left_server_msg = f"Just left server '{server.name}'."
+    logger.info(left_server_msg)
+    print(left_server_msg)
 
 
 app_token = globals.settings.get("app_token")
 assert isinstance(app_token, str)
+logger.info("Connecting client...")
 globals.client.run(app_token, reconnect=True)

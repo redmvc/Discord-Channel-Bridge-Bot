@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import io
 import json
 from hashlib import md5
-from logging import warn
 from typing import Any, Callable, Literal, SupportsInt, TypedDict, TypeVar, cast
 
 import aiohttp
@@ -13,7 +13,7 @@ from aiolimiter import AsyncLimiter
 from beartype import beartype
 from typing_extensions import NotRequired
 
-from validations import ArgumentError, HTTPResponseError
+from validations import ArgumentError, HTTPResponseError, logger
 
 # discord.guild.GuildChannel isn't working in commands.py for some reason
 GuildChannel = (
@@ -162,7 +162,11 @@ def get_id_from_channel(
     if channel_or_id.id:
         return channel_or_id.id
 
-    raise ValueError("Argument passed was not a valid channel nor an ID.")
+    err = ValueError(
+        f"Error in function {inspect.stack()[1][3]}(): argument passed to function get_id_from_channel() was not a valid channel nor an ID."
+    )
+    logger.error(err)
+    raise err
 
 
 @beartype
@@ -204,15 +208,19 @@ async def get_image_from_URL(url: str) -> bytes:
     ) as session:
         async with session.get(url) as response:
             if response.status != 200:
-                raise HTTPResponseError(
-                    f"Failed to retrieve image from URL: HTTP status {response.status}."
+                err = HTTPResponseError(
+                    f"Error in function {inspect.stack()[1][3]}(): failed to retrieve image from URL. HTTP status {response.status}."
                 )
+                logger.error(err)
+                raise err
 
             response_buffer = await response.read()
             image_bytes = io.BytesIO(response_buffer)
 
     if not image_bytes:
-        raise Exception("Unknown problem occurred trying to fetch image.")
+        err = Exception("Unknown problem occurred trying to fetch image.")
+        logger.error(err)
+        raise err
 
     return image_bytes.read()
 
@@ -237,17 +245,25 @@ def get_emoji_information(
     if not emoji:
         if emoji_id:
             if not emoji_name:
-                raise ArgumentError(
-                    "If emoji_id is passed as argument, emoji_name must also be."
+                err = ArgumentError(
+                    f"Error in function {inspect.stack()[1][3]}(): if emoji_id is passed as argument to get_emoji_information(), emoji_name must also be."
                 )
+                logger.error(err)
+                raise err
         else:
-            raise ArgumentError(
-                "At least one of emoji or emoji_id must be passed as argument."
+            err = ArgumentError(
+                f"Error in function {inspect.stack()[1][3]}(): at least one of emoji or emoji_id must be passed as argument to get_emoji_information()."
             )
+            logger.error(err)
+            raise err
 
     if emoji:
         if not emoji.id:
-            raise ValueError("PartialEmoji passed as argument is not a custom emoji.")
+            err = ValueError(
+                f"Error in function {inspect.stack()[1][3]}(): PartialEmoji passed as argument to get_emoji_information() is not a custom emoji."
+            )
+            logger.error(err)
+            raise err
 
         emoji_id = emoji.id
         emoji_name = emoji.name
@@ -271,9 +287,11 @@ def get_emoji_information(
     try:
         emoji_id_int = int(emoji_id)
     except ValueError:
-        raise ValueError(
-            "emoji_id was passed as an argument and had type str but was not convertible to an ID."
+        err = ValueError(
+            f"Error in function {inspect.stack()[1][3]}(): emoji_id was passed as an argument to get_emoji_information() and had type str but was not convertible to an ID."
         )
+        logger.error(err)
+        raise err
 
     return (emoji_id_int, emoji_name, emoji_animated, emoji_url)
 
@@ -310,7 +328,7 @@ async def wait_until_ready(
         time_waited += polling_rate
 
     if time_waited >= time_to_wait:
-        warn("Taking forever to get ready.")
+        logger.warning("Taking forever to get ready.")
         return False
     return True
 
@@ -349,4 +367,8 @@ async def run_retries(
             else:
                 raise e
 
-    raise Exception("Couldn't run the function in number of retries.")
+    err = ValueError(
+        f"Error in function {inspect.stack()[1][3]}(): couldn't run function {fun.__name__}() in {num_retries} retries."
+    )
+    logger.error(err)
+    raise err

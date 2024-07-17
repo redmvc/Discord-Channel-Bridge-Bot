@@ -1,6 +1,5 @@
 import asyncio
 import re
-from logging import warn
 from typing import Any, AsyncIterator, Coroutine, Iterable, Literal, cast
 
 import discord
@@ -21,6 +20,7 @@ from database import (
     engine,
     sql_retry,
 )
+from validations import logger
 
 
 @globals.command_tree.command(
@@ -44,6 +44,13 @@ async def help(
         | None
     ) = None,
 ):
+    logger.debug(
+        "User with ID %s ran command /help%s from channel with ID %s.",
+        interaction.user.id,
+        f" {command}" if command else "",
+        interaction.channel_id,
+    )
+
     if (
         globals.emoji_server
         and interaction.guild
@@ -157,6 +164,15 @@ async def bridge(
     target: str,
     direction: Literal["outbound", "inbound"] | None = None,
 ):
+    logger.debug(
+        "User with ID %s ran command /bridge %s%s from channel with ID %s. Interaction ID: %s.",
+        interaction.user.id,
+        target,
+        f" {direction}" if direction else "",
+        interaction.channel_id,
+        interaction.id,
+    )
+
     message_channel = interaction.channel
     if not isinstance(message_channel, (discord.TextChannel, discord.Thread)):
         await interaction.response.send_message(
@@ -241,14 +257,17 @@ async def bridge(
                 "❌ There was an issue with the connection to the database; bridge creation failed.",
                 ephemeral=True,
             )
+            logger.warning("An SQL error occurred while running command /bridge: %s", e)
         else:
             await interaction.followup.send(
                 "❌ An unknown error occurred.",
                 ephemeral=True,
             )
-            warn("An error occurred while running command bridge():\n" + str(e))
+            logger.error(
+                "An unknown error occurred while running command /bridge: %s", e
+            )
 
-        return
+        raise
 
     if not direction:
         direction_str = "either"
@@ -263,6 +282,8 @@ async def bridge(
 
     await asyncio.gather(*join_threads)
 
+    logger.debug("Call to /bridge with interaction ID %s successful.", interaction.id)
+
 
 @discord.app_commands.default_permissions(
     manage_webhooks=True, create_public_threads=True
@@ -273,6 +294,13 @@ async def bridge(
     description="Create threads across the bridge matching this one and bridge them.",
 )
 async def bridge_thread(interaction: discord.Interaction):
+    logger.debug(
+        "User with ID %s ran command /bridge_thread from channel with ID %s. Interaction ID: %s.",
+        interaction.user.id,
+        interaction.channel_id,
+        interaction.id,
+    )
+
     message_thread = interaction.channel
     if not isinstance(message_thread, discord.Thread):
         await interaction.response.send_message(
@@ -304,7 +332,33 @@ async def bridge_thread(interaction: discord.Interaction):
         )
         return
 
-    await bridge_thread_helper(message_thread, interaction.user.id, interaction)
+    try:
+        await bridge_thread_helper(message_thread, interaction.user.id, interaction)
+    except Exception as e:
+        if isinstance(e, SQLError):
+            await interaction.followup.send(
+                "❌ There was an issue with the connection to the database; thread and bridge creation failed.",
+                ephemeral=True,
+            )
+            logger.warning(
+                "An SQL error occurred while running command /bridge_thread: %s",
+                e,
+            )
+        else:
+            await interaction.followup.send(
+                "❌ An unknown error occurred.",
+                ephemeral=True,
+            )
+            logger.error(
+                "An unknown error occurred while running command /bridge_thread: %s",
+                e,
+            )
+
+        raise
+
+    logger.debug(
+        "Call to /bridge_thread with interaction ID %s successful.", interaction.id
+    )
 
 
 @discord.app_commands.default_permissions(
@@ -318,6 +372,13 @@ async def bridge_thread(interaction: discord.Interaction):
 async def auto_bridge_threads(
     interaction: discord.Interaction,
 ):
+    logger.debug(
+        "User with ID %s ran command /auto_bridge_threads from channel with ID %s. Interaction ID: %s.",
+        interaction.user.id,
+        interaction.channel_id,
+        interaction.id,
+    )
+
     message_channel = interaction.channel
     if not isinstance(message_channel, discord.TextChannel):
         await interaction.response.send_message(
@@ -400,19 +461,27 @@ async def auto_bridge_threads(
                 "❌ There was an issue with the connection to the database; setting or unsetting automatic thread creation across bridges failed.",
                 ephemeral=True,
             )
+            logger.warning(
+                "An SQL error occurred while running command /auto_bridge_threads: %s",
+                e,
+            )
         else:
             await interaction.followup.send(
                 "❌ An unknown error occurred.",
                 ephemeral=True,
             )
-            warn(
-                "An error occurred while running command auto_bridge_threads():\n"
-                + str(e)
+            logger.error(
+                "An error occurred while running command /auto_bridge_threads: %s", e
             )
 
-        return
+        raise
 
     await interaction.followup.send(response, ephemeral=True)
+
+    logger.debug(
+        "Call to /auto_bridge_threads with interaction ID %s successful.",
+        interaction.id,
+    )
 
 
 @beartype
@@ -456,6 +525,14 @@ async def mention_to_channel(
     target="The channel to and from whose bridges to destroy."
 )
 async def demolish(interaction: discord.Interaction, target: str):
+    logger.debug(
+        "User with ID %s ran command /demolish %s from channel with ID %s. Interaction ID: %s.",
+        interaction.user.id,
+        target,
+        interaction.channel_id,
+        interaction.id,
+    )
+
     message_channel = interaction.channel
     if not isinstance(message_channel, (discord.TextChannel, discord.Thread)):
         await interaction.response.send_message(
@@ -522,19 +599,26 @@ async def demolish(interaction: discord.Interaction, target: str):
                 "❌ There was an issue with the connection to the database; thread and bridge creation failed.",
                 ephemeral=True,
             )
+            logger.warning(
+                "An SQL error occurred while running command /demolish: %s", e
+            )
         else:
             await interaction.followup.send(
                 "❌ An unknown error occurred.",
                 ephemeral=True,
             )
-            warn("An error occurred while running command demolish():\n" + str(e))
+            logger.error(
+                "An unknown error occurred while running command /demolish: %s", e
+            )
 
-        return
+        raise
 
     await interaction.followup.send(
         "✅ Bridges demolished!",
         ephemeral=True,
     )
+
+    logger.debug("Call to /demolish with interaction ID %s successful.", interaction.id)
 
 
 @discord.app_commands.default_permissions(manage_webhooks=True)
@@ -549,6 +633,14 @@ async def demolish(interaction: discord.Interaction, target: str):
 async def demolish_all(
     interaction: discord.Interaction, channel_and_threads: bool | None = None
 ):
+    logger.debug(
+        "User with ID %s ran command /demolish_all%s from channel with ID %s. Interaction ID: %s.",
+        interaction.user.id,
+        " True" if channel_and_threads else "",
+        interaction.channel_id,
+        interaction.id,
+    )
+
     message_channel = interaction.channel
     if not isinstance(message_channel, (discord.TextChannel, discord.Thread)):
         await interaction.response.send_message(
@@ -673,14 +765,19 @@ async def demolish_all(
                 "❌ There was an issue with the connection to the database; bridge demolition failed.",
                 ephemeral=True,
             )
+            logger.warning(
+                "An SQL error occurred while running command /demolish_all: %s", e
+            )
         else:
             await interaction.followup.send(
                 "❌ An unknown error occurred.",
                 ephemeral=True,
             )
-            warn("An error occurred while running command demolish_all():\n" + str(e))
+            logger.error(
+                "An unknown error occurred while running command /demolish_all: %s", e
+            )
 
-        return
+        raise
 
     if len(exceptions) == 0:
         await interaction.followup.send(
@@ -693,6 +790,10 @@ async def demolish_all(
             ephemeral=True,
         )
 
+    logger.debug(
+        "Call to /demolish_all with interaction ID %s successful.", interaction.id
+    )
+
 
 @discord.app_commands.default_permissions(manage_webhooks=True)
 @discord.app_commands.guild_only()
@@ -704,6 +805,14 @@ async def demolish_all(
     apps="Mentions or IDs of the app or apps to add to or remove from the whitelist."
 )
 async def whitelist(interaction: discord.Interaction, apps: str):
+    logger.debug(
+        "User with ID %s ran command /whitelist %s from channel with ID %s. Interaction ID: %s.",
+        interaction.user.id,
+        apps,
+        interaction.channel_id,
+        interaction.id,
+    )
+
     channel = interaction.channel
     if not channel or not isinstance(channel, (discord.TextChannel, discord.Thread)):
         await interaction.response.send_message(
@@ -833,16 +942,25 @@ async def whitelist(interaction: discord.Interaction, apps: str):
                 "❌ There was a problem accessing the database.",
                 ephemeral=True,
             )
+            logger.warning(
+                "An SQL error occurred while running command whitelist: %s", e
+            )
         else:
             await interaction.followup.send(
                 "❌ An unknown error occurred.",
                 ephemeral=True,
             )
-            warn("An error occurred while running command whitelist():\n" + str(e))
+            logger.error(
+                "An unknown error occurred while running command whitelist: %s", e
+            )
 
-        return
+        raise
 
     await interaction.followup.send("\n".join(response), ephemeral=True)
+
+    logger.debug(
+        "Call to /whitelist with interaction ID %s successful.", interaction.id
+    )
 
 
 @discord.app_commands.default_permissions(
@@ -865,6 +983,15 @@ async def map_emoji(
     internal_emoji_id_str: str,
     external_emojis: str,
 ):
+    logger.debug(
+        "User with ID %s ran command /map_emoji %s %s from channel with ID %s and arguments. Interaction ID: %s.",
+        interaction.user.id,
+        internal_emoji_id_str,
+        external_emojis,
+        interaction.channel_id,
+        interaction.id,
+    )
+
     if not globals.settings.get("emoji_server_id"):
         await interaction.response.send_message(
             "❌ Bot doesn't have an emoji server registered.", ephemeral=True
@@ -918,17 +1045,29 @@ async def map_emoji(
                     for name, id in external_emojis_set
                 ]
             )
-    except Exception:
-        await interaction.followup.send(
-            f"❌ There was a database error trying to map emoji to {str(internal_emoji)}.",
-            ephemeral=True,
-        )
-
+    except Exception as e:
         if session:
             session.rollback()
             session.close()
 
-        return
+        if isinstance(e, SQLError):
+            await interaction.followup.send(
+                f"❌ There was a database error trying to map emoji to {str(internal_emoji)}.",
+                ephemeral=True,
+            )
+            logger.warning(
+                "An SQL error occurred when running command /map_emoji: %s", e
+            )
+        else:
+            await interaction.followup.send(
+                f"❌ There was an unknown error trying to map emoji to {str(internal_emoji)}.",
+                ephemeral=True,
+            )
+            logger.error(
+                "An unknown error occurred when running command /map_emoji: %s", e
+            )
+
+        raise
 
     if not max(map_emojis):
         await interaction.followup.send(
@@ -945,6 +1084,10 @@ async def map_emoji(
             f"✅ All emoji mappings to {str(internal_emoji)} created!",
             ephemeral=True,
         )
+
+    logger.debug(
+        "Call to /map_emoji with interaction ID %s successful.", interaction.id
+    )
 
 
 @discord.app_commands.default_permissions(
@@ -964,6 +1107,14 @@ async def map_emoji(
 async def hash_server_emoji(
     interaction: discord.Interaction, server_id_str: str | None = None
 ):
+    logger.debug(
+        "User with ID %s ran command /hash_server_emoji%s from channel with ID %s. Interaction ID: %s.",
+        interaction.user.id,
+        f" {server_id_str}" if server_id_str else "",
+        interaction.channel_id,
+        interaction.id,
+    )
+
     if server_id_str:
         try:
             server_id = int(server_id_str)
@@ -1008,6 +1159,10 @@ class CancelHashServer(discord.ui.Button[Any]):
         await self._original_interaction.edit_original_response(
             view=None, content="Request cancelled."
         )
+        logger.debug(
+            "Call to /hash_server_emoji with interaction ID %s cancelled.",
+            interaction.id,
+        )
 
 
 class ConfirmHashServer(discord.ui.Button[Any]):
@@ -1038,22 +1193,31 @@ class ConfirmHashServer(discord.ui.Button[Any]):
                 ephemeral=True,
             )
             return
-        except SQLError as e:
-            await interaction.followup.send(
-                "❌ There was a problem with the database connection.",
-                ephemeral=True,
-            )
-            warn(e)
-            return
         except Exception as e:
-            await interaction.followup.send(
-                "❌ An unknown error occurred.",
-                ephemeral=True,
-            )
-            warn(e)
-            return
+            if isinstance(e, SQLError):
+                await interaction.followup.send(
+                    "❌ There was a problem with the database connection.",
+                    ephemeral=True,
+                )
+                logger.warning(
+                    "An SQL error occurred while trying to hash a server: %s", e
+                )
+            else:
+                await interaction.followup.send(
+                    "❌ An unknown error occurred.",
+                    ephemeral=True,
+                )
+                logger.error(
+                    "An unknown error occurred while trying to hash a server: %s", e
+                )
+            raise
 
         await interaction.followup.send("✅ Successfully hashed emoji!", ephemeral=True)
+
+        logger.debug(
+            "Call to /hash_server_emoji with interaction ID %s successful.",
+            interaction.id,
+        )
 
 
 @beartype
@@ -1236,29 +1400,12 @@ async def bridge_thread_helper(
             await asyncio.gather(*(create_bridges + add_user_to_threads))
 
             session.commit()
-    except Exception as e:
+    except Exception:
         if session:
             session.rollback()
             session.close()
 
-        if isinstance(e, SQLError):
-            if interaction:
-                await interaction.followup.send(
-                    "❌ There was an issue with the connection to the database; thread and bridge creation failed.",
-                    ephemeral=True,
-                )
-        else:
-            if interaction:
-                await interaction.followup.send(
-                    "❌ An unknown error occurred.",
-                    ephemeral=True,
-                )
-            warn(
-                "An error occurred while running command bridge_thread_helper():\n"
-                + str(e)
-            )
-
-        return
+        raise
 
     if interaction:
         if succeeded_at_least_once:
@@ -1435,12 +1582,12 @@ async def map_emoji_helper(
             accessible=external_emoji_accessible,
             session=session,
         )
-    except Exception as e:
+    except Exception:
         if close_after and session:
             session.rollback()
             session.close()
 
-        raise e
+        raise
 
     if close_after:
         session.commit()
@@ -1452,6 +1599,14 @@ async def map_emoji_helper(
 @globals.command_tree.context_menu(name="List Reactions")
 async def list_reactions(interaction: discord.Interaction, message: discord.Message):
     """List all reactions and users who reacted on all sides of a bridge."""
+    logger.debug(
+        "User with ID %s requested a list of reactions attached to message with ID %s in channel with ID %s. Interaction ID: %s.",
+        interaction.user.id,
+        message.id,
+        interaction.channel_id,
+        interaction.id,
+    )
+
     assert globals.client.user
     bot_user_id = globals.client.user.id
 
@@ -1590,12 +1745,18 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
                 "❌ There was a problem accessing the database.",
                 ephemeral=True,
             )
+            logger.warning(
+                "There was a problem accessing the database when trying to list reactions: %s",
+                e,
+            )
         else:
             await interaction.followup.send(
                 "❌ An unknown error occurred.",
                 ephemeral=True,
             )
-        warn(e)
+            logger.error(
+                "An unknown error occurred when trying to list reactions: %s", e
+            )
         return
 
     # Now we resolve all of the async calls to get the final list of users per reaction
@@ -1622,12 +1783,25 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
             )
             if len(users) > 0
         }
-    except discord.errors.HTTPException:
-        await interaction.followup.send(
-            "❌ There was a problem requesting the reactions from the Discord API. Please make sure that the bot has access to the channel you are trying to run this command from and try again in a few minutes.",
-            ephemeral=True,
-        )
-        return
+    except Exception as e:
+        if isinstance(e, discord.errors.HTTPException):
+            await interaction.followup.send(
+                "❌ There was a problem requesting the reactions from the Discord API. Please make sure that the bot has access to the channel you are trying to run this command from and try again in a few minutes.",
+                ephemeral=True,
+            )
+            logger.warning(
+                "There was a problem requesting reactions from the Discord API when running /list_reactions: %s",
+                e,
+            )
+        else:
+            await interaction.followup.send(
+                "❌ An unknown error occurred.",
+                ephemeral=True,
+            )
+            logger.error(
+                "An unknown error occurred when running /list_reactions: %s", e
+            )
+        raise
 
     if len(all_reactions) == 0:
         await interaction.followup.send(
@@ -1646,4 +1820,8 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
             ]
         ),
         ephemeral=True,
+    )
+
+    logger.debug(
+        "Reaction list request with interaction ID %s successful.", interaction.id
     )

@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session as SQLSession
 
 import globals
 from database import DBEmoji, engine, sql_retry, sql_upsert
+from validations import logger
 
 
 class EmojiHashMap:
@@ -27,6 +28,8 @@ class EmojiHashMap:
         #### Args:
             - `session`: A connection to the database. Defaults to None.
         """
+        logger.info("Initialising emoji hash map...")
+
         self._emoji_to_hash: dict[int, str] = {}
         self._hash_to_emoji: dict[str, set[int]] = {}
         self._hash_to_available_emoji: dict[str, set[int]] = {}
@@ -58,6 +61,7 @@ class EmojiHashMap:
                     and not emoji_actually_accessible
                 ):
                     # Emoji isn't accessible despite me being in its guild, it was probably deleted
+                    logger.debug("Emoji with ID %s was not found.", emoji_id_str)
                     emoji_ids_to_delete.add(emoji_id_str)
                     continue
 
@@ -83,16 +87,19 @@ class EmojiHashMap:
                     .where(DBEmoji.id.in_(accessibility_flips))
                     .values(accessible=sql_not(DBEmoji.accessible))
                 )
-        except Exception:
+        except Exception as e:
             if close_after and session:
                 session.rollback()
                 session.close()
 
+            logger.error("An error occurred while creating an EmojiHashMap: %s", e)
             raise
 
         if close_after:
             session.commit()
             session.close()
+
+        logger.info("Emoji hash map initialised.")
 
     @beartype
     def _add_emoji_to_map(
@@ -119,6 +126,8 @@ class EmojiHashMap:
         #### Returns:
             - `tuple[int, str]`: A tuple with the emoji ID and the hash of its image.
         """
+        logger.debug("Adding emoji with ID %s to emoji hash map...", emoji_id)
+
         if not is_internal and server_id:
             server_id = int(server_id)
             if (
@@ -152,6 +161,7 @@ class EmojiHashMap:
         if is_internal:
             self._hash_to_internal_emoji[image_hash] = emoji_id
 
+        logger.debug("Emoji with ID %s added to map.", emoji_id)
         return (emoji_id, image_hash)
 
     @beartype
@@ -193,13 +203,18 @@ class EmojiHashMap:
         emoji_id, emoji_name, emoji_animated_inferred, emoji_url = (
             globals.get_emoji_information(emoji, emoji_id, emoji_name)
         )
+        logger.debug("Adding emoji with ID %s to database...", emoji_id)
 
         if emoji_animated is None:
             emoji_animated = emoji_animated_inferred
 
         if not image_hash:
             if not image:
+                logger.debug("Getting image for emoji with ID %s from URL...", emoji_id)
                 image = await globals.get_image_from_URL(emoji_url)
+                logger.debug(
+                    "Image for emoji with ID %s successfully loaded from URL.", emoji_id
+                )
             image_hash = globals.hash_image(image)
 
         close_after = False
@@ -227,6 +242,8 @@ class EmojiHashMap:
         if close_after:
             session.commit()
             session.close()
+
+        logger.debug("Emoji with ID %s added to database.", emoji_id)
 
     @beartype
     async def add_emoji(
@@ -269,13 +286,21 @@ class EmojiHashMap:
         #### Returns:
             - `tuple[int, str]`: A tuple with the emoji ID and the hash of its image.
         """
+        logger.debug("Adding %s to hash map.", emoji if emoji else emoji_id)
         if not emoji_id or not image_hash:
             emoji_id, emoji_name, _, emoji_url = globals.get_emoji_information(
                 emoji, emoji_id, emoji_name
             )
             if not image_hash:
                 if not image:
+                    logger.debug(
+                        "Getting image for emoji with ID %s from URL...", emoji_id
+                    )
                     image = await globals.get_image_from_URL(emoji_url)
+                    logger.debug(
+                        "Image for emoji with ID %s successfully loaded from URL.",
+                        emoji_id,
+                    )
                 image_hash = globals.hash_image(image)
 
         if is_internal:
@@ -369,7 +394,13 @@ class EmojiHashMap:
             - `session`: A connection to the database, or True in case a new one should be created.
         """
         if not self._emoji_to_hash.get(emoji_id):
+            logger.debug(
+                "Attempted to delete emoji with ID %s but it was not in the emoji hash map.",
+                emoji_id,
+            )
             return
+
+        logger.debug("Deleting emoji with ID %s from hash map...", emoji_id)
 
         image_hash = self._emoji_to_hash[emoji_id]
         del self._emoji_to_hash[emoji_id]
@@ -389,7 +420,10 @@ class EmojiHashMap:
         if self._hash_to_internal_emoji.get(image_hash):
             del self._hash_to_internal_emoji[image_hash]
 
+        logger.debug("Emoji with ID %s deleted from map.", emoji_id)
+
         if session:
+            logger.debug("Deleting emoji with ID %s from database...", emoji_id)
             close_after = False
             try:
                 if isinstance(session, bool):
@@ -412,6 +446,8 @@ class EmojiHashMap:
                 session.commit()
                 session.close()
 
+            logger.debug("Emoji with ID %s deleted from database.", emoji_id)
+
     @beartype
     async def load_server_emoji(self, server_id: int | None = None):
         """Load all emoji in a server (or in all servers the bot is connected to) into the hash map.
@@ -432,8 +468,12 @@ class EmojiHashMap:
                 raise ValueError("Bot is not in server.")
 
             servers: Sequence[discord.Guild] = [server]
+            logger.info("Loading emoji from server %s into hash map...", server.name)
+            ending_info_message = "Emoji from server %s loaded."
         else:
             servers = globals.client.guilds
+            logger.info("Loading emoji from all available servers into hash map...")
+            ending_info_message = "Emoji from all available servers loaded."
 
         async def update_emoji(
             server_id: int | str, is_internal: bool, emoji: discord.Emoji
@@ -459,6 +499,8 @@ class EmojiHashMap:
         try:
             with SQLSession(engine) as session:
                 for server in servers:
+                    logger.debug("Loading server %s...", server.name)
+
                     update_emoji_async: list[Coroutine[Any, Any, UpdateBase]] = []
 
                     is_internal = (
@@ -475,6 +517,8 @@ class EmojiHashMap:
                     for upsert in upserts:
                         session.execute(upsert)
 
+                    logger.debug("Server %s loaded.", server.name)
+
                 session.commit()
         except Exception:
             if session:
@@ -482,6 +526,8 @@ class EmojiHashMap:
                 session.close()
 
             raise
+
+        logger.info(ending_info_message)
 
     @overload
     def get_matches(
@@ -520,17 +566,26 @@ class EmojiHashMap:
             - `only_accessible`: If set to True will return only emoji that are accessible by the bot. Defaults to False.
             - `return_str`: If set to True will return a frozenset of stringified IDs. Defaults to False.
         """
+        logger.debug("Fetching matches for emoji %s.", emoji)
+
         if isinstance(emoji, discord.PartialEmoji):
             if not emoji.id:
+                logger.debug(
+                    "PartialEmoji passed as argument to get_matches() was not a custom emoji."
+                )
                 return None
             emoji_id = emoji.id
         else:
             try:
                 emoji_id = int(emoji)
             except ValueError:
+                logger.debug(
+                    "ID passed to get_matches() was a string that could not be converted into an integer."
+                )
                 return None
 
         if not (image_hash := self._emoji_to_hash.get(emoji_id)):
+            logger.debug("No matches found for emoji with ID %s.", emoji_id)
             return None
 
         if only_accessible:
@@ -553,14 +608,12 @@ class EmojiHashMap:
         #### Args:
             - `emoji_id`: The ID of the emoji to check.
         """
-        if not self._emoji_to_hash.get(emoji_id):
+        logger.debug("Fetching internal equivalent to emoji with ID %s.", emoji_id)
+
+        if not (image_hash := self._emoji_to_hash.get(emoji_id)):
             return None
 
-        image_hash = self._emoji_to_hash[emoji_id]
-        if not self._hash_to_internal_emoji.get(image_hash):
-            return None
-
-        return self._hash_to_internal_emoji[image_hash]
+        return self._hash_to_internal_emoji.get(image_hash)
 
     @beartype
     def get_accessible_emoji(
@@ -572,6 +625,12 @@ class EmojiHashMap:
             - `emoji_id`: The ID of the emoji to get.
             - `skip_self`: Whether the function should ignore the attempt to get an emoji associated with the ID itself. Defaults to False.
         """
+        logger.debug(
+            "Fetching accessible emoji matching ID %s with skip_self = %s.",
+            emoji_id,
+            skip_self,
+        )
+
         if (
             not skip_self
             and (emoji := globals.client.get_emoji(emoji_id))
@@ -620,11 +679,10 @@ class EmojiHashMap:
             - `RuntimeError`: Session connection failed.
             - `ServerTimeoutError`: Connection to server timed out.
         """
+        logger.debug("Getting hash for emoji %s.", emoji if emoji else emoji_id)
+
         if not emoji and emoji_id and not emoji_name:
-            emoji_id = int(emoji_id)
-            if self._emoji_to_hash.get(emoji_id):
-                return self._emoji_to_hash[emoji_id]
-            return None
+            return self._emoji_to_hash.get(int(emoji_id))
 
         return await self.ensure_hash_map(
             emoji=emoji, emoji_id=emoji_id, emoji_name=emoji_name, session=session
@@ -638,7 +696,7 @@ class EmojiHashMap:
         emoji_id: int | str | None = None,
         emoji_name: str | None = None,
         session: SQLSession | None = None,
-    ) -> str | None:
+    ) -> str:
         """Check that the emoji is in the hash map and, if not, add it to the map and to the database, then return the hash.
 
         #### Args:
@@ -655,12 +713,16 @@ class EmojiHashMap:
             - `RuntimeError`: Session connection failed.
             - `ServerTimeoutError`: Connection to server timed out.
         """
+        logger.debug(
+            "Ensuring that emoji %s is in hash map.", emoji if emoji else emoji_id
+        )
+
         emoji_id, emoji_name, _, _ = globals.get_emoji_information(
             emoji, emoji_id, emoji_name
         )
 
-        if self._emoji_to_hash.get(emoji_id):
-            return self._emoji_to_hash[emoji_id]
+        if already_existing_hash := self._emoji_to_hash.get(emoji_id):
+            return already_existing_hash
 
         _, image_hash = await self.add_emoji(
             emoji=emoji, emoji_id=emoji_id, emoji_name=emoji_name, session=session
