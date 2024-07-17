@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session as SQLSession
 
 import globals
 from database import DBEmoji, engine, sql_retry, sql_upsert
-from validations import beartype
+from validations import beartype, logger
 
 
 class EmojiHashMap:
@@ -83,11 +83,12 @@ class EmojiHashMap:
                     .where(DBEmoji.id.in_(accessibility_flips))
                     .values(accessible=sql_not(DBEmoji.accessible))
                 )
-        except Exception:
+        except Exception as e:
             if close_after and session:
                 session.rollback()
                 session.close()
 
+            logger.error("An error occurred while creating an EmojiHashMap: %s", e)
             raise
 
         if close_after:
@@ -621,10 +622,7 @@ class EmojiHashMap:
             - `ServerTimeoutError`: Connection to server timed out.
         """
         if not emoji and emoji_id and not emoji_name:
-            emoji_id = int(emoji_id)
-            if self._emoji_to_hash.get(emoji_id):
-                return self._emoji_to_hash[emoji_id]
-            return None
+            return self._emoji_to_hash.get(int(emoji_id))
 
         return await self.ensure_hash_map(
             emoji=emoji, emoji_id=emoji_id, emoji_name=emoji_name, session=session
@@ -638,7 +636,7 @@ class EmojiHashMap:
         emoji_id: int | str | None = None,
         emoji_name: str | None = None,
         session: SQLSession | None = None,
-    ) -> str | None:
+    ) -> str:
         """Check that the emoji is in the hash map and, if not, add it to the map and to the database, then return the hash.
 
         #### Args:
@@ -659,8 +657,8 @@ class EmojiHashMap:
             emoji, emoji_id, emoji_name
         )
 
-        if self._emoji_to_hash.get(emoji_id):
-            return self._emoji_to_hash[emoji_id]
+        if already_existing_hash := self._emoji_to_hash.get(emoji_id):
+            return already_existing_hash
 
         _, image_hash = await self.add_emoji(
             emoji=emoji, emoji_id=emoji_id, emoji_name=emoji_name, session=session
