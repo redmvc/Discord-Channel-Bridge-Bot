@@ -1619,7 +1619,7 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
         )
         return
 
-    if not message.guild:
+    if not (message_server := message.guild):
         await interaction.response.send_message(
             "❌ Please run this command from a text channel or a thread off one in a server the bot is in.",
             ephemeral=True,
@@ -1627,6 +1627,12 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
         return
 
     bot_user_id = globals.client.user.id
+    if not message_server.get_member(bot_user_id):
+        await interaction.response.send_message(
+            "❌ The bot is not in this server.",
+            ephemeral=True,
+        )
+        return
 
     channel = message.channel
     if not isinstance(channel, (discord.TextChannel, discord.Thread)):
