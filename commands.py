@@ -1590,20 +1590,41 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
         return reactions
 
     # This function gets the equivalent ID of an emoji, matching it to an internal one if possible
-    def get_mapped_emoji_id(emoji: discord.PartialEmoji | discord.Emoji | str):
-        if (
-            not isinstance(emoji, str)
-            and emoji.id
-            and (mapped_emoji := emoji_hash_map.map.get_accessible_emoji(emoji.id))
-        ):
-            return str(mapped_emoji)
+    async def get_mapped_emoji_id(emoji: discord.PartialEmoji | discord.Emoji | str):
+        if isinstance(emoji, str):
+            return emoji
 
+        if not emoji.id:
+            # Non-custom emoji
+            return str(emoji)
+
+        # Custom emoji
+        if mapped_emoji := emoji_hash_map.map.get_accessible_emoji(emoji.id):
+            # If there is an emoji I have access to that matches this one, return it
+            return str(mapped_emoji)
+        elif not globals.emoji_server:
+            # I don't have an emoji server to copy the emoji into so I'll just return its string
+            return str(emoji)
+
+        # Try to copy this emoji into my emoji server
+        if isinstance(emoji, discord.PartialEmoji):
+            copied_emoji = await emoji_hash_map.map.copy_emoji_into_server(
+                missing_emoji=emoji
+            )
+        else:
+            copied_emoji = await emoji_hash_map.map.copy_emoji_into_server(
+                missing_emoji_id=emoji.id, missing_emoji_name=emoji.name
+            )
+        if copied_emoji:
+            return str(copied_emoji)
+
+        # Failed to copy the emoji
         return str(emoji)
 
     # First get the reactions on this message itself
-    def append_users_to_reactions_list(message: discord.Message):
+    async def append_users_to_reactions_list(message: discord.Message):
         for reaction in message.reactions:
-            reaction_emoji_id = get_mapped_emoji_id(reaction.emoji)
+            reaction_emoji_id = await get_mapped_emoji_id(reaction.emoji)
 
             if not all_reactions_async.get(reaction_emoji_id):
                 all_reactions_async[reaction_emoji_id] = []
@@ -1612,7 +1633,7 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
                 get_users_from_iterator(reaction.users())
             )
 
-    append_users_to_reactions_list(message)
+    await append_users_to_reactions_list(message)
 
     # Then get the bridged ones
     session = None
@@ -1646,7 +1667,7 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
                         source_message = await source_channel.fetch_message(
                             source_message_id
                         )
-                        append_users_to_reactions_list(source_message)
+                        await append_users_to_reactions_list(source_message)
             else:
                 # This message is (or might be) the source
                 source_message_id = message.id
@@ -1685,7 +1706,7 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
                     bridged_message = await bridged_channel.fetch_message(
                         target_message_id
                     )
-                    append_users_to_reactions_list(bridged_message)
+                    await append_users_to_reactions_list(bridged_message)
     except Exception as e:
         if session:
             session.rollback()
