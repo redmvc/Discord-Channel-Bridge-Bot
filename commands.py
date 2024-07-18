@@ -1787,6 +1787,10 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
             f"[↪](<{message.jump_url}>) This message doesn't have any reactions.",
             ephemeral=True,
         )
+
+        logger.debug(
+            "Reaction list request with interaction ID %s successful.", interaction.id
+        )
         return
 
     await interaction.followup.send(
