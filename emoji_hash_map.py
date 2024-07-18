@@ -260,7 +260,8 @@ class EmojiHashMap:
         image_hash: str | None = None,
         accessible: bool = False,
         is_internal: bool | None = None,
-        session: SQLSession | Literal[True] | None = None,
+        update_db: bool = False,
+        session: SQLSession | None = None,
     ) -> tuple[int, str]:
         """Insert an emoji into the hash map and, optionally, into the `emoji` database table.
 
@@ -274,7 +275,8 @@ class EmojiHashMap:
             - `image_hash`: The hash of the emoji image. Defaults to None, in which case it will be calculated from the other arguments.
             - `accessible`: Whether the bot can access the emoji. Defaults to False.
             - `is_internal`: If set to True, will set `accessible` to True and add the emoji to the internal emoji hash map.
-            - `session`: A connection to the database. If set to None, the emoji will not be inserted into the database; if set to True, a new session will be created to perform the database operations.
+            - `update_db`: Whether the emoji should be inserted into the database. Defaults to False. Including `session` is equivalent to setting this variable to True.
+            - `session`: A connection to the database. If set to None and `update_db` is True, a new session will be created to perform the database operations. Defaults to None.
 
         #### Raises:
             - `ArgumentError`: The number of arguments passed is incorrect.
@@ -317,10 +319,10 @@ class EmojiHashMap:
             is_internal=is_internal,
         )
 
-        if session:
+        if update_db or session:
             close_after = False
             try:
-                if isinstance(session, bool):
+                if not session:
                     session = SQLSession(engine)
                     close_after = True
 
@@ -335,7 +337,7 @@ class EmojiHashMap:
                     session=session,
                 )
             except Exception:
-                if close_after and isinstance(session, SQLSession):
+                if close_after and session:
                     session.rollback()
                     session.close()
 
@@ -387,13 +389,14 @@ class EmojiHashMap:
 
     @beartype
     async def delete_emoji(
-        self, emoji_id: int, session: SQLSession | Literal[True] | None = None
+        self, emoji_id: int, update_db: bool = False, session: SQLSession | None = None
     ):
         """Delete an emoji from the hash map. If `session` is included, delete it from the database also.
 
         #### Args:
             - `emoji_id`: The ID of the emoji to delete.
-            - `session`: A connection to the database, or True in case a new one should be created.
+            - `update_db`: Whether the emoji should be deleted from the database. Defaults to False. Including `session` is equivalent to setting this variable to True.
+            - `session`: A connection to the database. If set to None and `update_db` is True, a new session will be created to perform the database operations. Defaults to None.
         """
         if not self._emoji_to_hash.get(emoji_id):
             logger.debug(
@@ -424,11 +427,11 @@ class EmojiHashMap:
 
         logger.debug("Emoji with ID %s deleted from map.", emoji_id)
 
-        if session:
+        if update_db or session:
             logger.debug("Deleting emoji with ID %s from database...", emoji_id)
             close_after = False
             try:
-                if isinstance(session, bool):
+                if not session:
                     session = SQLSession(engine)
                     close_after = True
 
@@ -438,7 +441,7 @@ class EmojiHashMap:
                     )
                 )
             except Exception:
-                if close_after and isinstance(session, SQLSession):
+                if close_after and session:
                     session.rollback()
                     session.close()
 
@@ -605,7 +608,7 @@ class EmojiHashMap:
             with SQLSession(engine) as session:
                 if emoji_to_delete_id is not None:
                     try:
-                        await self.delete_emoji(emoji_to_delete_id, session)
+                        await self.delete_emoji(emoji_to_delete_id, session=session)
                     except Exception as e:
                         logger.error(
                             "An error occurred when trying to delete an emoji from the hash map while running copy_emoji_into_server(): %s",
