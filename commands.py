@@ -1627,7 +1627,7 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
         return
 
     bot_user_id = globals.client.user.id
-    if not message_server.get_member(bot_user_id):
+    if not (bot_member := message_server.get_member(bot_user_id)):
         await interaction.response.send_message(
             "❌ The bot is not in this server.",
             ephemeral=True,
@@ -1635,6 +1635,13 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
         return
 
     channel = message.channel
+    if not channel.permissions_for(bot_member).read_messages:
+        await interaction.response.send_message(
+            "❌ The bot does not have access to this message.",
+            ephemeral=True,
+        )
+        return
+
     if not isinstance(channel, (discord.TextChannel, discord.Thread)):
         await interaction.response.send_message(
             "❌ Please run this command from a text channel or a thread.",
