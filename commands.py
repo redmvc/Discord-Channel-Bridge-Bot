@@ -20,7 +20,7 @@ from database import (
     engine,
     sql_retry,
 )
-from validations import logger
+from validations import ChannelTypeError, logger, validate_channels
 
 
 @globals.command_tree.command(
@@ -1035,7 +1035,7 @@ async def map_emoji(
             )
             map_emojis = await asyncio.gather(
                 *[
-                    map_emoji_helper(
+                    emoji_hash_map.map.map_emoji(
                         external_emoji_id=id,
                         external_emoji_name=name,
                         internal_emoji=internal_emoji,
@@ -1514,88 +1514,8 @@ async def validate_auto_bridge_thread_channels(
     await stop_auto_bridging_threads_helper(channel_ids_to_remove, session)
 
 
-@beartype
-async def map_emoji_helper(
-    *,
-    external_emoji: discord.PartialEmoji | None = None,
-    external_emoji_id: int | str | None = None,
-    external_emoji_name: str | None = None,
-    internal_emoji: discord.Emoji,
-    image_hash: str | None = None,
-    session: SQLSession | None = None,
-) -> bool:
-    """Create a mapping between external and internal emoji, recording it locally and saving it in the emoji table.
-
-    #### Args:
-        - `external_emoji`: The custom emoji that is not present in any servers the bot is in. Defaults to None.
-        - `external_emoji_id`: The ID of the external emoji. Defaults to None.
-        - `external_emoji_name`: The name of the external emoji. Defaults to None.
-        - `internal_emoji`: An emoji the bot has in its emoji server.
-        - `image_hash`: The hash of the image associated with this emoji. Defaults to None, in which case will use the hash associated with `internal_emoji`.
-        - `session`: A connection to the database. Defaults to None, in which case a new one will be created.
-
-    #### Raises:
-        - `ValueError`: Incorrect number of arguments passed.
-        - `SQLError`: SQL statement inferred from arguments was invalid or database connection failed.
-        - `HTTPResponseError`: HTTP request to fetch image returned a status other than 200.
-        - `InvalidURL`: URL generated from emoji was not valid.
-        - `RuntimeError`: Session connection failed.
-        - `ServerTimeoutError`: Connection to server timed out.
-    """
-    external_emoji_id, external_emoji_name, external_emoji_animated, _ = (
-        globals.get_emoji_information(
-            external_emoji, external_emoji_id, external_emoji_name
-        )
-    )
-
-    full_emoji = globals.client.get_emoji(external_emoji_id)
-    if full_emoji and full_emoji.guild:
-        external_emoji_server_id = full_emoji.guild_id
-    else:
-        external_emoji_server_id = None
-
-    close_after = False
-    try:
-        if not session:
-            session = SQLSession(engine)
-            close_after = True
-        if not image_hash:
-            if external_emoji or full_emoji:
-                # Get the hash of the external emoji's image if we have access to it
-                partial_or_full_emoji = cast(
-                    discord.PartialEmoji | discord.Emoji,
-                    (external_emoji if external_emoji else full_emoji),
-                )
-                image = await globals.get_image_from_URL(partial_or_full_emoji.url)
-            else:
-                image = await globals.get_image_from_URL(internal_emoji.url)
-
-            image_hash = globals.hash_image(image)
-
-        external_emoji_accessible = not not full_emoji
-        await emoji_hash_map.map.add_emoji(
-            emoji_id=external_emoji_id,
-            emoji_name=external_emoji_name,
-            emoji_server_id=external_emoji_server_id,
-            emoji_animated=external_emoji_animated,
-            image_hash=image_hash,
-            accessible=external_emoji_accessible,
-            session=session,
-        )
-    except Exception:
-        if close_after and session:
-            session.rollback()
-            session.close()
-
-        raise
-
-    if close_after:
-        session.commit()
-        session.close()
-
-    return True
-
-
+@discord.app_commands.default_permissions(read_messages=True)
+@discord.app_commands.guild_only()
 @globals.command_tree.context_menu(name="List Reactions")
 async def list_reactions(interaction: discord.Interaction, message: discord.Message):
     """List all reactions and users who reacted on all sides of a bridge."""
@@ -1607,13 +1527,44 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
         interaction.id,
     )
 
-    assert globals.client.user
+    if not globals.client.user:
+        await interaction.response.send_message(
+            "❌ Bot is not logged in.",
+            ephemeral=True,
+        )
+        logger.warning(
+            "'List Reactions' command was called before the bot was logged in."
+        )
+        return
+
+    if not (message_server := message.guild):
+        await interaction.response.send_message(
+            "❌ Please run this command from a text channel or a thread off one in a server the bot is in.",
+            ephemeral=True,
+        )
+        return
+
     bot_user_id = globals.client.user.id
+    if not (bot_member := message_server.get_member(bot_user_id)):
+        await interaction.response.send_message(
+            "❌ The bot is not in this server.",
+            ephemeral=True,
+        )
+        return
 
     channel = message.channel
-    if not isinstance(channel, (discord.TextChannel, discord.Thread)):
+    if not channel.permissions_for(bot_member).read_messages:
         await interaction.response.send_message(
-            "❌ Please run this command from a text channel or a thread.",
+            "❌ The bot does not have access to this message.",
+            ephemeral=True,
+        )
+        return
+
+    try:
+        validate_channels(channel=channel, log_error=False)
+    except ChannelTypeError:
+        await interaction.response.send_message(
+            "❌ Please run this command from a text channel or a thread off one.",
             ephemeral=True,
         )
         return
@@ -1639,20 +1590,41 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
         return reactions
 
     # This function gets the equivalent ID of an emoji, matching it to an internal one if possible
-    def get_mapped_emoji_id(emoji: discord.PartialEmoji | discord.Emoji | str):
-        if (
-            not isinstance(emoji, str)
-            and emoji.id
-            and (mapped_emoji := emoji_hash_map.map.get_accessible_emoji(emoji.id))
-        ):
-            return str(mapped_emoji)
+    async def get_mapped_emoji_id(emoji: discord.PartialEmoji | discord.Emoji | str):
+        if isinstance(emoji, str):
+            return emoji
 
+        if not emoji.id:
+            # Non-custom emoji
+            return str(emoji)
+
+        # Custom emoji
+        if mapped_emoji := emoji_hash_map.map.get_accessible_emoji(emoji.id):
+            # If there is an emoji I have access to that matches this one, return it
+            return str(mapped_emoji)
+        elif not globals.emoji_server:
+            # I don't have an emoji server to copy the emoji into so I'll just return its string
+            return str(emoji)
+
+        # Try to copy this emoji into my emoji server
+        if isinstance(emoji, discord.PartialEmoji):
+            copied_emoji = await emoji_hash_map.map.copy_emoji_into_server(
+                missing_emoji=emoji
+            )
+        else:
+            copied_emoji = await emoji_hash_map.map.copy_emoji_into_server(
+                missing_emoji_id=emoji.id, missing_emoji_name=emoji.name
+            )
+        if copied_emoji:
+            return str(copied_emoji)
+
+        # Failed to copy the emoji
         return str(emoji)
 
     # First get the reactions on this message itself
-    def append_users_to_reactions_list(message: discord.Message):
+    async def append_users_to_reactions_list(message: discord.Message):
         for reaction in message.reactions:
-            reaction_emoji_id = get_mapped_emoji_id(reaction.emoji)
+            reaction_emoji_id = await get_mapped_emoji_id(reaction.emoji)
 
             if not all_reactions_async.get(reaction_emoji_id):
                 all_reactions_async[reaction_emoji_id] = []
@@ -1661,7 +1633,7 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
                 get_users_from_iterator(reaction.users())
             )
 
-    append_users_to_reactions_list(message)
+    await append_users_to_reactions_list(message)
 
     # Then get the bridged ones
     session = None
@@ -1695,7 +1667,7 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
                         source_message = await source_channel.fetch_message(
                             source_message_id
                         )
-                        append_users_to_reactions_list(source_message)
+                        await append_users_to_reactions_list(source_message)
             else:
                 # This message is (or might be) the source
                 source_message_id = message.id
@@ -1734,7 +1706,7 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
                     bridged_message = await bridged_channel.fetch_message(
                         target_message_id
                     )
-                    append_users_to_reactions_list(bridged_message)
+                    await append_users_to_reactions_list(bridged_message)
     except Exception as e:
         if session:
             session.rollback()
@@ -1786,7 +1758,7 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
     except Exception as e:
         if isinstance(e, discord.errors.HTTPException):
             await interaction.followup.send(
-                "❌ There was a problem requesting the reactions from the Discord API. Please make sure that the bot has access to the channel you are trying to run this command from and try again in a few minutes.",
+                "❌ There was a problem requesting the reactions from the Discord API. Please make sure that the bot has access to the channel you are trying to run this command from or try again in a few minutes.",
                 ephemeral=True,
             )
             logger.warning(
@@ -1805,7 +1777,7 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
 
     if len(all_reactions) == 0:
         await interaction.followup.send(
-            "❌ This message doesn't have any reactions.",
+            f"[↪](<{message.jump_url}>) This message doesn't have any reactions.",
             ephemeral=True,
         )
         return
