@@ -1807,7 +1807,7 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
 
     if len(all_reactions) == 0:
         await interaction.followup.send(
-            "❌ This message doesn't have any reactions.",
+            f"[↪](<{message.jump_url}>) This message doesn't have any reactions.",
             ephemeral=True,
         )
         return
