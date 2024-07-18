@@ -649,15 +649,21 @@ class Bridges:
         # First we delete the Bridges from memory, and webhooks if necessary
         webhooks_deleted: set[str] = set()
         for sid, tid in bridges_to_demolish:
-            del self._outbound_bridges[sid][tid]
-            if len(self._outbound_bridges[sid]) == 0:
-                del self._outbound_bridges[sid]
+            if from_source := self._outbound_bridges.get(sid):
+                if from_source.get(tid):
+                    del self._outbound_bridges[sid][tid]
 
-            del self._inbound_bridges[tid][sid]
-            if len(self._inbound_bridges[tid]) == 0:
-                del self._inbound_bridges[tid]
-                if deleted_webhook_id := await self.webhooks.delete_channel(tid):
-                    webhooks_deleted.add(str(deleted_webhook_id))
+                if len(self._outbound_bridges[sid]) == 0:
+                    del self._outbound_bridges[sid]
+
+            if to_target := self._inbound_bridges.get(tid):
+                if to_target.get(sid):
+                    del self._inbound_bridges[tid][sid]
+
+                if len(self._inbound_bridges[tid]) == 0:
+                    del self._inbound_bridges[tid]
+                    if deleted_webhook_id := await self.webhooks.delete_channel(tid):
+                        webhooks_deleted.add(str(deleted_webhook_id))
 
         # Return if we're not meant to update the DB
         if not update_db:
