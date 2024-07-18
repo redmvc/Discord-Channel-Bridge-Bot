@@ -1788,7 +1788,7 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
     except Exception as e:
         if isinstance(e, discord.errors.HTTPException):
             await interaction.followup.send(
-                "❌ There was a problem requesting the reactions from the Discord API. Please make sure that the bot has access to the channel you are trying to run this command from and try again in a few minutes.",
+                "❌ There was a problem requesting the reactions from the Discord API. Please make sure that the bot has access to the channel you are trying to run this command from or try again in a few minutes.",
                 ephemeral=True,
             )
             logger.warning(
