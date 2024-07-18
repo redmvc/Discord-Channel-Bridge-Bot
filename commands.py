@@ -1633,10 +1633,18 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
                 get_users_from_iterator(reaction.users())
             )
 
-    await append_users_to_reactions_list(message)
+    try:
+        await append_users_to_reactions_list(message)
+    except discord.Forbidden:
+        await interaction.followup.send(
+            "❌ The bot does not have access to this message.",
+            ephemeral=True,
+        )
+        return
 
     # Then get the bridged ones
     session = None
+    at_least_one_inaccessible_bridge = False
     try:
         with SQLSession(engine) as session:
             # We need to see whether this message is a bridged message and, if so, find its source
@@ -1664,10 +1672,13 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
                     if isinstance(
                         source_channel, (discord.TextChannel, discord.Thread)
                     ):
-                        source_message = await source_channel.fetch_message(
-                            source_message_id
-                        )
-                        await append_users_to_reactions_list(source_message)
+                        try:
+                            source_message = await source_channel.fetch_message(
+                                source_message_id
+                            )
+                            await append_users_to_reactions_list(source_message)
+                        except discord.Forbidden:
+                            at_least_one_inaccessible_bridge = True
             else:
                 # This message is (or might be) the source
                 source_message_id = message.id
@@ -1706,7 +1717,10 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
                     bridged_message = await bridged_channel.fetch_message(
                         target_message_id
                     )
-                    await append_users_to_reactions_list(bridged_message)
+                    try:
+                        await append_users_to_reactions_list(bridged_message)
+                    except discord.Forbidden:
+                        at_least_one_inaccessible_bridge = True
     except Exception as e:
         if session:
             session.rollback()
@@ -1776,13 +1790,20 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
         raise
 
     if len(all_reactions) == 0:
-        await interaction.followup.send(
-            f"[↪](<{message.jump_url}>) This message doesn't have any reactions.",
-            ephemeral=True,
+        if not at_least_one_inaccessible_bridge:
+            followup_message = (
+                f"[↪](<{message.jump_url}>) This message doesn't have any reactions."
+            )
+        else:
+            followup_message = f"[↪](<{message.jump_url}>) Did not find any reactions to this message but at least one of its bridged versions could not be accessed by the bot."
+        await interaction.followup.send(followup_message, ephemeral=True)
+
+        logger.debug(
+            "Reaction list request with interaction ID %s successful.", interaction.id
         )
         return
 
-    await interaction.followup.send(
+    followup_message = (
         f"[↪](<{message.jump_url}>) This message has the following reactions:\n\n"
         + "\n\n".join(
             [
@@ -1790,9 +1811,11 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
                 + " ".join([f"<@{user_id}>" for user_id in reaction_user_ids])
                 for reaction_emoji_id, reaction_user_ids in all_reactions.items()
             ]
-        ),
-        ephemeral=True,
+        )
     )
+    if at_least_one_inaccessible_bridge:
+        followup_message = f"{followup_message}\n\nHowever, at least one of the message's bridged versions could not be accessed by the bot, so there might be more reactions than just these."
+    await interaction.followup.send(followup_message, ephemeral=True)
 
     logger.debug(
         "Reaction list request with interaction ID %s successful.", interaction.id
