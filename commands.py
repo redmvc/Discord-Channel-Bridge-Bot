@@ -1596,6 +1596,8 @@ async def map_emoji_helper(
     return True
 
 
+@discord.app_commands.default_permissions(read_messages=True)
+@discord.app_commands.guild_only()
 @globals.command_tree.context_menu(name="List Reactions")
 async def list_reactions(interaction: discord.Interaction, message: discord.Message):
     """List all reactions and users who reacted on all sides of a bridge."""
