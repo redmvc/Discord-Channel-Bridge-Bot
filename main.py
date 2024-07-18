@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-import random
 import re
 from typing import Any, Coroutine, TypedDict, cast
 
@@ -794,7 +793,7 @@ async def replace_missing_emoji(message_content: str) -> str:
             continue
 
         try:
-            emoji = await copy_emoji_into_server(
+            emoji = await emoji_hash_map.map.copy_emoji_into_server(
                 missing_emoji_id=emoji_id_str, missing_emoji_name=emoji_name
             )
             if emoji:
@@ -1027,7 +1026,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         if not fallback_emoji:
             # I don't have the emoji mapped locally, I'll add it to my server and update my map
             try:
-                fallback_emoji = await copy_emoji_into_server(
+                fallback_emoji = await emoji_hash_map.map.copy_emoji_into_server(
                     missing_emoji=payload.emoji
                 )
             except Exception:
@@ -1272,134 +1271,6 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         raise
 
     logger.debug("Reaction bridged.")
-
-
-@beartype
-async def copy_emoji_into_server(
-    *,
-    missing_emoji: discord.PartialEmoji | None = None,
-    missing_emoji_id: str | int | None = None,
-    missing_emoji_name: str | None = None,
-) -> discord.Emoji | None:
-    """Try to create an emoji in the emoji server and, if successful, return it.
-
-    #### Args:
-        - `missing_emoji`: The emoji we are trying to copy into our emoji server. Defaults to None, in which case `missing_emoji_name` and `missing_emoji_id` are used instead.
-        - `missing_emoji_id`: The ID of the missing emoji. Defaults to None, in which case `missing_emoji` is used instead.
-        - `missing_emoji_name`: The name of a missing emoji, optionally preceded by an `"a:"` in case it's animated. Defaults to None, but must be included if `missing_emoji_id` is.
-
-    #### Raises:
-        - `ArgumentError`: The number of arguments passed is incorrect.
-        - `ValueError`: `missing_emoji` argument was passed and had type `PartialEmoji` but it was not a custom emoji, or `missing_emoji_id` argument was passed and had type `str` but it was not a valid numerical ID.
-        - `Forbidden`: Emoji server permissions not set correctly.
-        - `HTTPResponseError`: HTTP request to fetch emoji image returned a status other than 200.
-        - `InvalidURL`: URL generated from emoji ID was not valid.
-        - `RuntimeError`: Session connection to the server to fetch image from URL failed.
-        - `ServerTimeoutError`: Connection to server to fetch image from URL timed out.
-    """
-    if not globals.emoji_server:
-        return None
-    emoji_server_id = globals.emoji_server.id
-
-    logger.debug(
-        "Copying emoji %s into emoji server.",
-        missing_emoji if missing_emoji else missing_emoji_id,
-    )
-
-    missing_emoji_id, missing_emoji_name, _, missing_emoji_url = (
-        globals.get_emoji_information(
-            missing_emoji, missing_emoji_id, missing_emoji_name
-        )
-    )
-
-    image = await globals.get_image_from_URL(missing_emoji_url)
-    image_hash = globals.hash_image(image)
-
-    emoji_to_delete_id = None
-    try:
-        emoji = await globals.emoji_server.create_custom_emoji(
-            name=missing_emoji_name, image=image, reason="Bridging reaction."
-        )
-    except discord.Forbidden:
-        logger.warning("Emoji server permissions not set correctly.")
-        raise
-    except discord.HTTPException:
-        if len(globals.emoji_server.emojis) < 50:
-            # Something weird happened, the error was not due to a full server
-            raise
-
-        # Try to delete an emoji from the server and then add this again.
-        emoji_to_delete = random.choice(globals.emoji_server.emojis)
-        emoji_to_delete_id = emoji_to_delete.id
-        await emoji_to_delete.delete()
-
-        try:
-            emoji = await globals.emoji_server.create_custom_emoji(
-                name=missing_emoji_name, image=image, reason="Bridging reaction."
-            )
-        except discord.Forbidden:
-            logger.warning("Emoji server permissions not set correctly.")
-            raise
-
-    # Copied the emoji, going to update my table
-    session = None
-    try:
-        with SQLSession(engine) as session:
-            if emoji_to_delete_id is not None:
-                try:
-                    await emoji_hash_map.map.delete_emoji(emoji_to_delete_id, session)
-                except Exception as e:
-                    logger.error(
-                        "An error occurred when trying to delete an emoji from the hash map while running copy_emoji_into_server(): %s",
-                        e,
-                    )
-
-                    raise
-
-            await emoji_hash_map.map.add_emoji(
-                emoji=emoji,
-                emoji_server_id=emoji_server_id,
-                image_hash=image_hash,
-                is_internal=True,
-                session=session,
-            )
-
-            if missing_emoji:
-                await commands.map_emoji_helper(
-                    external_emoji=missing_emoji,
-                    internal_emoji=emoji,
-                    image_hash=image_hash,
-                    session=session,
-                )
-            else:
-                await commands.map_emoji_helper(
-                    external_emoji_id=missing_emoji_id,
-                    external_emoji_name=missing_emoji_name,
-                    internal_emoji=emoji,
-                    image_hash=image_hash,
-                    session=session,
-                )
-
-            session.commit()
-    except Exception as e:
-        if session:
-            session.rollback()
-            session.close()
-
-        if isinstance(e, SQLError):
-            logger.warning(
-                "An SQL error occurred while trying to copy an emoji into the emoji server: %s",
-                e,
-            )
-        else:
-            logger.error(
-                "An SQL error occurred while trying to copy an emoji into the emoji server: %s",
-                e,
-            )
-            raise
-
-    logger.debug("%s added to emoji server.", emoji)
-    return emoji
 
 
 @globals.client.event

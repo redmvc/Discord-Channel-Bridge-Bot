@@ -33,13 +33,19 @@ class ArgumentError(ValueError):
 
 
 def validate_channels(
+    log_error: bool = True,
     **kwargs: (
-        discord.guild.GuildChannel | discord.Thread | discord.abc.PrivateChannel | None
+        discord.guild.GuildChannel
+        | discord.Thread
+        | discord.abc.PrivateChannel
+        | discord.abc.MessageableChannel
+        | None
     ),
 ):
     """Raise `ChannelTypeError` if the channels passed as arguments are not the right channel types.
 
     #### Args:
+        - `log_error`: Whether to register this error in the logger. Defaults to True.
         - `kwargs`: The channels to validate.
     """
     for channel_name, channel in kwargs.items():
@@ -48,9 +54,10 @@ def validate_channels(
             or not isinstance(channel.parent, discord.TextChannel)
         ) and not isinstance(channel, discord.TextChannel):
             err = ChannelTypeError(
-                f"Invalid {channel_name} channel passed to function {inspect.stack()[1][3]}(). It must be text channel or text channel thread, not {type(channel).__name__}."
+                f"Invalid channel '{channel_name}' passed to function {inspect.stack()[1][3]}(). It must be text channel or text channel thread, not {type(channel).__name__}."
             )
-            logger.error(err)
+            if log_error:
+                logger.error(err)
             raise err
 
 

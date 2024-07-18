@@ -1,4 +1,5 @@
 import asyncio
+import random
 from typing import Any, Coroutine, Literal, Sequence, overload
 
 import discord
@@ -9,6 +10,7 @@ from sqlalchemy import Select as SQLSelect
 from sqlalchemy import Update as SQLUpdate
 from sqlalchemy import UpdateBase
 from sqlalchemy import not_ as sql_not
+from sqlalchemy.exc import StatementError as SQLError
 from sqlalchemy.orm import Session as SQLSession
 
 import globals
@@ -258,7 +260,8 @@ class EmojiHashMap:
         image_hash: str | None = None,
         accessible: bool = False,
         is_internal: bool | None = None,
-        session: SQLSession | Literal[True] | None = None,
+        update_db: bool = False,
+        session: SQLSession | None = None,
     ) -> tuple[int, str]:
         """Insert an emoji into the hash map and, optionally, into the `emoji` database table.
 
@@ -272,7 +275,8 @@ class EmojiHashMap:
             - `image_hash`: The hash of the emoji image. Defaults to None, in which case it will be calculated from the other arguments.
             - `accessible`: Whether the bot can access the emoji. Defaults to False.
             - `is_internal`: If set to True, will set `accessible` to True and add the emoji to the internal emoji hash map.
-            - `session`: A connection to the database. If set to None, the emoji will not be inserted into the database; if set to True, a new session will be created to perform the database operations.
+            - `update_db`: Whether the emoji should be inserted into the database. Defaults to False. Including `session` is equivalent to setting this variable to True.
+            - `session`: A connection to the database. If set to None and `update_db` is True, a new session will be created to perform the database operations. Defaults to None.
 
         #### Raises:
             - `ArgumentError`: The number of arguments passed is incorrect.
@@ -315,10 +319,10 @@ class EmojiHashMap:
             is_internal=is_internal,
         )
 
-        if session:
+        if update_db or session:
             close_after = False
             try:
-                if isinstance(session, bool):
+                if not session:
                     session = SQLSession(engine)
                     close_after = True
 
@@ -333,7 +337,7 @@ class EmojiHashMap:
                     session=session,
                 )
             except Exception:
-                if close_after and isinstance(session, SQLSession):
+                if close_after and session:
                     session.rollback()
                     session.close()
 
@@ -385,13 +389,14 @@ class EmojiHashMap:
 
     @beartype
     async def delete_emoji(
-        self, emoji_id: int, session: SQLSession | Literal[True] | None = None
+        self, emoji_id: int, update_db: bool = False, session: SQLSession | None = None
     ):
         """Delete an emoji from the hash map. If `session` is included, delete it from the database also.
 
         #### Args:
             - `emoji_id`: The ID of the emoji to delete.
-            - `session`: A connection to the database, or True in case a new one should be created.
+            - `update_db`: Whether the emoji should be deleted from the database. Defaults to False. Including `session` is equivalent to setting this variable to True.
+            - `session`: A connection to the database. If set to None and `update_db` is True, a new session will be created to perform the database operations. Defaults to None.
         """
         if not self._emoji_to_hash.get(emoji_id):
             logger.debug(
@@ -422,11 +427,11 @@ class EmojiHashMap:
 
         logger.debug("Emoji with ID %s deleted from map.", emoji_id)
 
-        if session:
+        if update_db or session:
             logger.debug("Deleting emoji with ID %s from database...", emoji_id)
             close_after = False
             try:
-                if isinstance(session, bool):
+                if not session:
                     session = SQLSession(engine)
                     close_after = True
 
@@ -436,7 +441,7 @@ class EmojiHashMap:
                     )
                 )
             except Exception:
-                if close_after and isinstance(session, SQLSession):
+                if close_after and session:
                     session.rollback()
                     session.close()
 
@@ -528,6 +533,212 @@ class EmojiHashMap:
             raise
 
         logger.info(ending_info_message)
+
+    @beartype
+    async def copy_emoji_into_server(
+        self,
+        *,
+        missing_emoji: discord.PartialEmoji | None = None,
+        missing_emoji_id: str | int | None = None,
+        missing_emoji_name: str | None = None,
+    ) -> discord.Emoji | None:
+        """Try to create an emoji in the emoji server and, if successful, return it.
+
+        #### Args:
+            - `missing_emoji`: The emoji we are trying to copy into our emoji server. Defaults to None, in which case `missing_emoji_name` and `missing_emoji_id` are used instead.
+            - `missing_emoji_id`: The ID of the missing emoji. Defaults to None, in which case `missing_emoji` is used instead.
+            - `missing_emoji_name`: The name of a missing emoji, optionally preceded by an `"a:"` in case it's animated. Defaults to None, but must be included if `missing_emoji_id` is.
+
+        #### Raises:
+            - `ArgumentError`: The number of arguments passed is incorrect.
+            - `ValueError`: `missing_emoji` argument was passed and had type `PartialEmoji` but it was not a custom emoji, or `missing_emoji_id` argument was passed and had type `str` but it was not a valid numerical ID.
+            - `Forbidden`: Emoji server permissions not set correctly.
+            - `HTTPResponseError`: HTTP request to fetch emoji image returned a status other than 200.
+            - `InvalidURL`: URL generated from emoji ID was not valid.
+            - `RuntimeError`: Session connection to the server to fetch image from URL failed.
+            - `ServerTimeoutError`: Connection to server to fetch image from URL timed out.
+        """
+        if not globals.emoji_server:
+            return None
+        emoji_server_id = globals.emoji_server.id
+
+        logger.debug(
+            "Copying emoji %s into emoji server.",
+            missing_emoji if missing_emoji else missing_emoji_id,
+        )
+
+        missing_emoji_id, missing_emoji_name, _, missing_emoji_url = (
+            globals.get_emoji_information(
+                missing_emoji, missing_emoji_id, missing_emoji_name
+            )
+        )
+
+        image = await globals.get_image_from_URL(missing_emoji_url)
+        image_hash = globals.hash_image(image)
+
+        emoji_to_delete_id = None
+        try:
+            emoji = await globals.emoji_server.create_custom_emoji(
+                name=missing_emoji_name, image=image, reason="Bridging reaction."
+            )
+        except discord.Forbidden:
+            logger.warning("Emoji server permissions not set correctly.")
+            raise
+        except discord.HTTPException:
+            if len(globals.emoji_server.emojis) < 50:
+                # Something weird happened, the error was not due to a full server
+                raise
+
+            # Try to delete an emoji from the server and then add this again.
+            emoji_to_delete = random.choice(globals.emoji_server.emojis)
+            emoji_to_delete_id = emoji_to_delete.id
+            await emoji_to_delete.delete()
+
+            try:
+                emoji = await globals.emoji_server.create_custom_emoji(
+                    name=missing_emoji_name, image=image, reason="Bridging reaction."
+                )
+            except discord.Forbidden:
+                logger.warning("Emoji server permissions not set correctly.")
+                raise
+
+        # Copied the emoji, going to update my table
+        session = None
+        try:
+            with SQLSession(engine) as session:
+                if emoji_to_delete_id is not None:
+                    try:
+                        await self.delete_emoji(emoji_to_delete_id, session=session)
+                    except Exception as e:
+                        logger.error(
+                            "An error occurred when trying to delete an emoji from the hash map while running copy_emoji_into_server(): %s",
+                            e,
+                        )
+
+                        raise
+
+                await self.add_emoji(
+                    emoji=emoji,
+                    emoji_server_id=emoji_server_id,
+                    image_hash=image_hash,
+                    is_internal=True,
+                    session=session,
+                )
+
+                if missing_emoji:
+                    await self.map_emoji(
+                        external_emoji=missing_emoji,
+                        internal_emoji=emoji,
+                        image_hash=image_hash,
+                        session=session,
+                    )
+                else:
+                    await self.map_emoji(
+                        external_emoji_id=missing_emoji_id,
+                        external_emoji_name=missing_emoji_name,
+                        internal_emoji=emoji,
+                        image_hash=image_hash,
+                        session=session,
+                    )
+
+                session.commit()
+        except Exception as e:
+            if session:
+                session.rollback()
+                session.close()
+
+            if isinstance(e, SQLError):
+                logger.warning(
+                    "An SQL error occurred while trying to copy an emoji into the emoji server: %s",
+                    e,
+                )
+            else:
+                logger.error(
+                    "An SQL error occurred while trying to copy an emoji into the emoji server: %s",
+                    e,
+                )
+                raise
+
+        logger.debug("%s added to emoji server.", emoji)
+        return emoji
+
+    @beartype
+    async def map_emoji(
+        self,
+        *,
+        external_emoji: discord.PartialEmoji | None = None,
+        external_emoji_id: int | str | None = None,
+        external_emoji_name: str | None = None,
+        internal_emoji: discord.Emoji,
+        image_hash: str | None = None,
+        session: SQLSession | None = None,
+    ) -> bool:
+        """Create a mapping between external and internal emoji, recording it locally and saving it in the emoji table.
+
+        #### Args:
+            - `external_emoji`: The custom emoji that is not present in any servers the bot is in. Defaults to None.
+            - `external_emoji_id`: The ID of the external emoji. Defaults to None.
+            - `external_emoji_name`: The name of the external emoji. Defaults to None.
+            - `internal_emoji`: An emoji the bot has in its emoji server.
+            - `image_hash`: The hash of the image associated with this emoji. Defaults to None, in which case will use the hash associated with `internal_emoji`.
+            - `session`: A connection to the database. Defaults to None, in which case a new one will be created.
+
+        #### Raises:
+            - `ValueError`: Incorrect number of arguments passed.
+            - `SQLError`: SQL statement inferred from arguments was invalid or database connection failed.
+            - `HTTPResponseError`: HTTP request to fetch image returned a status other than 200.
+            - `InvalidURL`: URL generated from emoji was not valid.
+            - `RuntimeError`: Session connection failed.
+            - `ServerTimeoutError`: Connection to server timed out.
+        """
+        external_emoji_id, external_emoji_name, external_emoji_animated, _ = (
+            globals.get_emoji_information(
+                external_emoji, external_emoji_id, external_emoji_name
+            )
+        )
+
+        full_emoji = globals.client.get_emoji(external_emoji_id)
+        if full_emoji and full_emoji.guild:
+            external_emoji_server_id = full_emoji.guild_id
+        else:
+            external_emoji_server_id = None
+
+        close_after = False
+        try:
+            if not session:
+                session = SQLSession(engine)
+                close_after = True
+            if not image_hash:
+                if partial_or_full_emoji := (external_emoji or full_emoji):
+                    # Get the hash of the external emoji's image if we have access to it
+                    image = await globals.get_image_from_URL(partial_or_full_emoji.url)
+                else:
+                    image = await globals.get_image_from_URL(internal_emoji.url)
+
+                image_hash = globals.hash_image(image)
+
+            external_emoji_accessible = not not full_emoji
+            await self.add_emoji(
+                emoji_id=external_emoji_id,
+                emoji_name=external_emoji_name,
+                emoji_server_id=external_emoji_server_id,
+                emoji_animated=external_emoji_animated,
+                image_hash=image_hash,
+                accessible=external_emoji_accessible,
+                session=session,
+            )
+        except Exception:
+            if close_after and session:
+                session.rollback()
+                session.close()
+
+            raise
+
+        if close_after:
+            session.commit()
+            session.close()
+
+        return True
 
     @overload
     def get_matches(
