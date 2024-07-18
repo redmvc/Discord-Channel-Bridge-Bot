@@ -20,7 +20,7 @@ from database import (
     engine,
     sql_retry,
 )
-from validations import logger
+from validations import ChannelTypeError, logger, validate_channels
 
 
 @globals.command_tree.command(
@@ -1642,9 +1642,11 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
         )
         return
 
-    if not isinstance(channel, (discord.TextChannel, discord.Thread)):
+    try:
+        validate_channels(channel=channel, log_error=False)
+    except ChannelTypeError:
         await interaction.response.send_message(
-            "❌ Please run this command from a text channel or a thread.",
+            "❌ Please run this command from a text channel or a thread off one.",
             ephemeral=True,
         )
         return
