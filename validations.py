@@ -35,7 +35,11 @@ class ArgumentError(ValueError):
 def validate_channels(
     log_error: bool = True,
     **kwargs: (
-        discord.guild.GuildChannel | discord.Thread | discord.abc.PrivateChannel | None
+        discord.guild.GuildChannel
+        | discord.Thread
+        | discord.abc.PrivateChannel
+        | discord.abc.MessageableChannel
+        | None
     ),
 ):
     """Raise `ChannelTypeError` if the channels passed as arguments are not the right channel types.
