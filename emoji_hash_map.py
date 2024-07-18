@@ -529,6 +529,84 @@ class EmojiHashMap:
 
         logger.info(ending_info_message)
 
+    @beartype
+    async def map_emoji(
+        self,
+        *,
+        external_emoji: discord.PartialEmoji | None = None,
+        external_emoji_id: int | str | None = None,
+        external_emoji_name: str | None = None,
+        internal_emoji: discord.Emoji,
+        image_hash: str | None = None,
+        session: SQLSession | None = None,
+    ) -> bool:
+        """Create a mapping between external and internal emoji, recording it locally and saving it in the emoji table.
+
+        #### Args:
+            - `external_emoji`: The custom emoji that is not present in any servers the bot is in. Defaults to None.
+            - `external_emoji_id`: The ID of the external emoji. Defaults to None.
+            - `external_emoji_name`: The name of the external emoji. Defaults to None.
+            - `internal_emoji`: An emoji the bot has in its emoji server.
+            - `image_hash`: The hash of the image associated with this emoji. Defaults to None, in which case will use the hash associated with `internal_emoji`.
+            - `session`: A connection to the database. Defaults to None, in which case a new one will be created.
+
+        #### Raises:
+            - `ValueError`: Incorrect number of arguments passed.
+            - `SQLError`: SQL statement inferred from arguments was invalid or database connection failed.
+            - `HTTPResponseError`: HTTP request to fetch image returned a status other than 200.
+            - `InvalidURL`: URL generated from emoji was not valid.
+            - `RuntimeError`: Session connection failed.
+            - `ServerTimeoutError`: Connection to server timed out.
+        """
+        external_emoji_id, external_emoji_name, external_emoji_animated, _ = (
+            globals.get_emoji_information(
+                external_emoji, external_emoji_id, external_emoji_name
+            )
+        )
+
+        full_emoji = globals.client.get_emoji(external_emoji_id)
+        if full_emoji and full_emoji.guild:
+            external_emoji_server_id = full_emoji.guild_id
+        else:
+            external_emoji_server_id = None
+
+        close_after = False
+        try:
+            if not session:
+                session = SQLSession(engine)
+                close_after = True
+            if not image_hash:
+                if partial_or_full_emoji := (external_emoji or full_emoji):
+                    # Get the hash of the external emoji's image if we have access to it
+                    image = await globals.get_image_from_URL(partial_or_full_emoji.url)
+                else:
+                    image = await globals.get_image_from_URL(internal_emoji.url)
+
+                image_hash = globals.hash_image(image)
+
+            external_emoji_accessible = not not full_emoji
+            await self.add_emoji(
+                emoji_id=external_emoji_id,
+                emoji_name=external_emoji_name,
+                emoji_server_id=external_emoji_server_id,
+                emoji_animated=external_emoji_animated,
+                image_hash=image_hash,
+                accessible=external_emoji_accessible,
+                session=session,
+            )
+        except Exception:
+            if close_after and session:
+                session.rollback()
+                session.close()
+
+            raise
+
+        if close_after:
+            session.commit()
+            session.close()
+
+        return True
+
     @overload
     def get_matches(
         self,
