@@ -1633,7 +1633,14 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
                 get_users_from_iterator(reaction.users())
             )
 
-    await append_users_to_reactions_list(message)
+    try:
+        await append_users_to_reactions_list(message)
+    except discord.Forbidden:
+        await interaction.followup.send(
+            "❌ The bot does not have access to this message.",
+            ephemeral=True,
+        )
+        return
 
     # Then get the bridged ones
     session = None
