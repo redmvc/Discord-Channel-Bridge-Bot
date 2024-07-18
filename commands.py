@@ -1618,6 +1618,14 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
             "'List Reactions' command was called before the bot was logged in."
         )
         return
+
+    if not message.guild:
+        await interaction.response.send_message(
+            "❌ Please run this command from a text channel or a thread off one in a server the bot is in.",
+            ephemeral=True,
+        )
+        return
+
     bot_user_id = globals.client.user.id
 
     channel = message.channel
