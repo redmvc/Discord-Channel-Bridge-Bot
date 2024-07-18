@@ -720,14 +720,15 @@ async def demolish_all(
                 if outbound_bridges:
                     for target_id in outbound_bridges.keys():
                         target_channel = await globals.get_channel_from_id(target_id)
-                        assert isinstance(
-                            target_channel, (discord.TextChannel, discord.Thread)
-                        )
-                        target_channel_member = await globals.get_channel_member(
-                            target_channel, interaction.user.id
-                        )
                         if (
-                            not target_channel_member
+                            not isinstance(
+                                target_channel, (discord.TextChannel, discord.Thread)
+                            )
+                            or not (
+                                target_channel_member := await globals.get_channel_member(
+                                    target_channel, interaction.user.id
+                                )
+                            )
                             or not target_channel.permissions_for(
                                 target_channel_member
                             ).manage_webhooks
@@ -742,14 +743,18 @@ async def demolish_all(
 
                 channels_affected = channels_affected.union(paired_channels)
 
-                for paired_channel_id in paired_channels:
-                    bridges_being_demolished.append(
-                        bridges.demolish_bridges(
-                            source_channel=paired_channel_id,
-                            target_channel=channel_to_demolish_id,
-                            session=session,
-                        )
+                bridges_being_demolished.append(
+                    bridges.demolish_bridges(
+                        source_channel=channel_to_demolish_id,
+                        session=session,
                     )
+                )
+                bridges_being_demolished.append(
+                    bridges.demolish_bridges(
+                        target_channel=channel_to_demolish_id,
+                        session=session,
+                    )
+                )
 
             await asyncio.gather(*bridges_being_demolished)
             await validate_auto_bridge_thread_channels(channels_affected, session)
