@@ -743,14 +743,18 @@ async def demolish_all(
 
                 channels_affected = channels_affected.union(paired_channels)
 
-                for paired_channel_id in paired_channels:
-                    bridges_being_demolished.append(
-                        bridges.demolish_bridges(
-                            source_channel=paired_channel_id,
-                            target_channel=channel_to_demolish_id,
-                            session=session,
-                        )
+                bridges_being_demolished.append(
+                    bridges.demolish_bridges(
+                        source_channel=channel_to_demolish_id,
+                        session=session,
                     )
+                )
+                bridges_being_demolished.append(
+                    bridges.demolish_bridges(
+                        target_channel=channel_to_demolish_id,
+                        session=session,
+                    )
+                )
 
             await asyncio.gather(*bridges_being_demolished)
             await validate_auto_bridge_thread_channels(channels_affected, session)
