@@ -1609,7 +1609,15 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
         interaction.id,
     )
 
-    assert globals.client.user
+    if not globals.client.user:
+        await interaction.response.send_message(
+            "❌ Bot is not logged in.",
+            ephemeral=True,
+        )
+        logger.warning(
+            "'List Reactions' command was called before the bot was logged in."
+        )
+        return
     bot_user_id = globals.client.user.id
 
     channel = message.channel
