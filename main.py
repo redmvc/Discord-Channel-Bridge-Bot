@@ -313,7 +313,42 @@ async def bridge_message_helper(message: discord.Message):
     )
 
     # Ensure that the message has emoji I have access to
-    message_content = await replace_missing_emoji(message.content)
+    if message.message_snapshots and len(message.message_snapshots) > 0:
+        # This message is a forwarded message, so there is a message snapshot
+        logger.debug("Message with ID %s has snapshots, is forwarded.", message.id)
+
+        is_forwarded = True
+        forwarded_message_emoji = (
+            f"<:forwarded_message:{emoji_hash_map.map.forward_message_emoji_id}> "
+            if emoji_hash_map.map.forward_message_emoji_id
+            else ""
+        )
+        message_content = f"-# {forwarded_message_emoji}***Forwarded***"
+
+        snapshot = message.message_snapshots[0]
+        snapshot_content = await replace_missing_emoji(snapshot.content)
+
+        message_attachments = snapshot.attachments
+        message_embeds = list(
+            [
+                discord.Embed(
+                    colour=discord.Colour.from_str("#2b2d31"),
+                    description=snapshot_content,
+                )
+            ]
+            + snapshot.embeds
+        )
+    else:
+        # Regular message with content (probably)
+        logger.debug(
+            "Message with ID %s doesn't have snapshots, is probably not forwarded.",
+            message.id,
+        )
+
+        is_forwarded = False
+        message_content = await replace_missing_emoji(message.content)
+        message_attachments = message.attachments
+        message_embeds = message.embeds
 
     # Get all channels reachable from this one via an unbroken sequence of outbound bridges as well as their webhooks
     reachable_channels = await bridges.get_reachable_channels(
@@ -327,9 +362,10 @@ async def bridge_message_helper(message: discord.Message):
         with SQLSession(engine) as session:
             bridged_reply_to: dict[int, int] = {}
             reply_has_ping = False
-            if message.reference and message.reference.message_id:
+            if not is_forwarded and message.reference and message.reference.message_id:
                 # This message is a reply to another message, so we should try to link to its match on the other side of bridges
-                # bridged_reply_to will be a dict whose keys are channel IDs and whose values are the IDs of messages matching the message I'm replying to in those channels
+                # bridged_reply_to will be a dict whose keys are channel IDs and whose values are the IDs of messages matching the
+                # message I'm replying to in those channels
                 replied_to_id = message.reference.message_id
 
                 # identify if this reply "pinged" the target, to know whether to add the @ symbol UI
@@ -410,6 +446,8 @@ async def bridge_message_helper(message: discord.Message):
                     bridge_message_to_target_channel(
                         message,
                         message_content,
+                        message_attachments,
+                        message_embeds,
                         target_channel,
                         webhook,
                         webhook_channel,
@@ -471,6 +509,8 @@ async def bridge_message_helper(message: discord.Message):
 async def bridge_message_to_target_channel(
     message: discord.Message,
     message_content: str,
+    message_attachments: list[discord.Attachment],
+    message_embeds: list[discord.Embed],
     target_channel: discord.TextChannel | discord.Thread,
     webhook: discord.Webhook,
     webhook_channel: discord.TextChannel,
@@ -483,7 +523,9 @@ async def bridge_message_to_target_channel(
 
     #### Args:
         - `message`: The message being bridged.
-        - `message_content`: Its contents
+        - `message_content`: Its contents.
+        - `message_attachments`: Its attachments.
+        - `message_embneds`: Its embeds.
         - `target_channel`: The channel the message is being bridged to.
         - `webhook`: The webhook that will send the message.
         - `webhook_channel`: The parent channel the webhook is attached to.
@@ -557,7 +599,7 @@ async def bridge_message_to_target_channel(
         reply_embed = []
 
     attachments = await asyncio.gather(
-        *[attachment.to_file() for attachment in message.attachments]
+        *[attachment.to_file() for attachment in message_attachments]
     )
 
     try:
@@ -568,7 +610,7 @@ async def bridge_message_to_target_channel(
             ),
             avatar_url=bridged_avatar_url,
             username=bridged_member_name,
-            embeds=list(message.embeds + reply_embed),
+            embeds=list(message_embeds + reply_embed),
             files=attachments,  # TODO might throw HHTPException if too large?
             wait=True,
             **thread_splat,
