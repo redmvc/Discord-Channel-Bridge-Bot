@@ -647,8 +647,23 @@ class EmojiHashMap:
                 raise
 
             # Try to delete an emoji from the server and then add this again.
-            emoji_to_delete = random.choice(globals.emoji_server.emojis)
-            emoji_to_delete_id = emoji_to_delete.id
+            num_tries = 0
+            max_tries = 5
+            emoji_to_delete: discord.Emoji | None = None
+            while num_tries < max_tries:
+                emoji_to_delete = random.choice(globals.emoji_server.emojis)
+                emoji_to_delete_id = emoji_to_delete.id
+                if emoji_to_delete_id != self.forward_message_emoji_id:
+                    break
+                num_tries += 1
+            if not emoji_to_delete:
+                raise Exception("emoji_to_delete failed to be fetched somehow.")
+            elif num_tries == max_tries:
+                logger.warning(
+                    f"Tried to delete an emoji other than the forward message emoji {max_tries} times and failed."
+                )
+                self.forward_message_emoji_id = None
+
             await emoji_to_delete.delete()
 
             try:
