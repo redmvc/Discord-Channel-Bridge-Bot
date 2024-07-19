@@ -794,7 +794,7 @@ async def replace_missing_emoji(message_content: str) -> str:
 
         try:
             emoji = await emoji_hash_map.map.copy_emoji_into_server(
-                missing_emoji_id=emoji_id_str, missing_emoji_name=emoji_name
+                emoji_to_copy_id=emoji_id_str, emoji_to_copy_name=emoji_name
             )
             if emoji:
                 emoji_to_replace[f"<{emoji_name}:{emoji_id_str}>"] = str(emoji)
@@ -1027,7 +1027,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
             # I don't have the emoji mapped locally, I'll add it to my server and update my map
             try:
                 fallback_emoji = await emoji_hash_map.map.copy_emoji_into_server(
-                    missing_emoji=payload.emoji
+                    emoji_to_copy=payload.emoji
                 )
             except Exception:
                 fallback_emoji = None

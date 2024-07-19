@@ -538,20 +538,20 @@ class EmojiHashMap:
     async def copy_emoji_into_server(
         self,
         *,
-        missing_emoji: discord.PartialEmoji | None = None,
-        missing_emoji_id: str | int | None = None,
-        missing_emoji_name: str | None = None,
+        emoji_to_copy: discord.PartialEmoji | None = None,
+        emoji_to_copy_id: str | int | None = None,
+        emoji_to_copy_name: str | None = None,
     ) -> discord.Emoji | None:
         """Try to create an emoji in the emoji server and, if successful, return it.
 
         #### Args:
-            - `missing_emoji`: The emoji we are trying to copy into our emoji server. Defaults to None, in which case `missing_emoji_name` and `missing_emoji_id` are used instead.
-            - `missing_emoji_id`: The ID of the missing emoji. Defaults to None, in which case `missing_emoji` is used instead.
-            - `missing_emoji_name`: The name of a missing emoji, optionally preceded by an `"a:"` in case it's animated. Defaults to None, but must be included if `missing_emoji_id` is.
+            - `emoji_to_copy`: The emoji we are trying to copy into our emoji server. Defaults to None, in which case `emoji_to_copy_name` and `emoji_to_copy_id` are used instead.
+            - `emoji_to_copy_id`: The ID of the missing emoji. Defaults to None, in which case `emoji_to_copy` is used instead.
+            - `emoji_to_copy_name`: The name of a missing emoji, optionally preceded by an `"a:"` in case it's animated. Defaults to None, but must be included if `emoji_to_copy_id` is.
 
         #### Raises:
             - `ArgumentError`: The number of arguments passed is incorrect.
-            - `ValueError`: `missing_emoji` argument was passed and had type `PartialEmoji` but it was not a custom emoji, or `missing_emoji_id` argument was passed and had type `str` but it was not a valid numerical ID.
+            - `ValueError`: `emoji_to_copy` argument was passed and had type `PartialEmoji` but it was not a custom emoji, or `emoji_to_copy_id` argument was passed and had type `str` but it was not a valid numerical ID.
             - `Forbidden`: Emoji server permissions not set correctly.
             - `HTTPResponseError`: HTTP request to fetch emoji image returned a status other than 200.
             - `InvalidURL`: URL generated from emoji ID was not valid.
@@ -564,22 +564,22 @@ class EmojiHashMap:
 
         logger.debug(
             "Copying emoji %s into emoji server.",
-            missing_emoji if missing_emoji else missing_emoji_id,
+            emoji_to_copy if emoji_to_copy else emoji_to_copy_id,
         )
 
-        missing_emoji_id, missing_emoji_name, _, missing_emoji_url = (
+        emoji_to_copy_id, emoji_to_copy_name, _, emoji_to_copy_url = (
             globals.get_emoji_information(
-                missing_emoji, missing_emoji_id, missing_emoji_name
+                emoji_to_copy, emoji_to_copy_id, emoji_to_copy_name
             )
         )
 
-        image = await globals.get_image_from_URL(missing_emoji_url)
+        image = await globals.get_image_from_URL(emoji_to_copy_url)
         image_hash = globals.hash_image(image)
 
         emoji_to_delete_id = None
         try:
             emoji = await globals.emoji_server.create_custom_emoji(
-                name=missing_emoji_name, image=image, reason="Bridging reaction."
+                name=emoji_to_copy_name, image=image, reason="Bridging reaction."
             )
         except discord.Forbidden:
             logger.warning("Emoji server permissions not set correctly.")
@@ -596,7 +596,7 @@ class EmojiHashMap:
 
             try:
                 emoji = await globals.emoji_server.create_custom_emoji(
-                    name=missing_emoji_name, image=image, reason="Bridging reaction."
+                    name=emoji_to_copy_name, image=image, reason="Bridging reaction."
                 )
             except discord.Forbidden:
                 logger.warning("Emoji server permissions not set correctly.")
@@ -625,17 +625,17 @@ class EmojiHashMap:
                     session=session,
                 )
 
-                if missing_emoji:
+                if emoji_to_copy:
                     await self.map_emoji(
-                        external_emoji=missing_emoji,
+                        external_emoji=emoji_to_copy,
                         internal_emoji=emoji,
                         image_hash=image_hash,
                         session=session,
                     )
                 else:
                     await self.map_emoji(
-                        external_emoji_id=missing_emoji_id,
-                        external_emoji_name=missing_emoji_name,
+                        external_emoji_id=emoji_to_copy_id,
+                        external_emoji_name=emoji_to_copy_name,
                         internal_emoji=emoji,
                         image_hash=image_hash,
                         session=session,
