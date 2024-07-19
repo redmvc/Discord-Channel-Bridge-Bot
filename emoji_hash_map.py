@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session as SQLSession
 
 import globals
 from database import DBEmoji, engine, sql_retry, sql_upsert
-from validations import logger
+from validations import ArgumentError, logger
 
 
 class EmojiHashMap:
@@ -540,14 +540,18 @@ class EmojiHashMap:
         *,
         emoji_to_copy: discord.PartialEmoji | None = None,
         emoji_to_copy_id: str | int | None = None,
+        emoji_image: bytes | None = None,
+        emoji_image_hash: str | None = None,
         emoji_to_copy_name: str | None = None,
     ) -> discord.Emoji | None:
         """Try to create an emoji in the emoji server and, if successful, return it.
 
         #### Args:
-            - `emoji_to_copy`: The emoji we are trying to copy into our emoji server. Defaults to None, in which case `emoji_to_copy_name` and `emoji_to_copy_id` are used instead.
-            - `emoji_to_copy_id`: The ID of the missing emoji. Defaults to None, in which case `emoji_to_copy` is used instead.
-            - `emoji_to_copy_name`: The name of a missing emoji, optionally preceded by an `"a:"` in case it's animated. Defaults to None, but must be included if `emoji_to_copy_id` is.
+            - `emoji_to_copy`: The emoji we are trying to copy into our emoji server. Defaults to None, in which case `emoji_to_copy_name` and either `emoji_to_copy_id` or `emoji_image` are used instead.
+            - `emoji_to_copy_id`: The ID of the missing emoji. Defaults to None, in which case either `emoji_to_copy` or `emoji_image` is used instead.
+            - `emoji_image`: An image to be directly loaded into the server. Defaults to None, in which case either `emoji_to_copy` or `emoji_to_copy_id` is used instead.
+            - `emoji_image_hash`: The hash of `emoji_image`. Defaults to none, in which case it will be calculated from `emoji_image`.
+            - `emoji_to_copy_name`: The name of a missing emoji, optionally preceded by an `"a:"` in case it's animated. Defaults to None, but must be included if either `emoji_to_copy_id` or `emoji_image` is.
 
         #### Raises:
             - `ArgumentError`: The number of arguments passed is incorrect.
@@ -562,24 +566,34 @@ class EmojiHashMap:
             return None
         emoji_server_id = globals.emoji_server.id
 
-        logger.debug(
-            "Copying emoji %s into emoji server.",
-            emoji_to_copy if emoji_to_copy else emoji_to_copy_id,
-        )
-
-        emoji_to_copy_id, emoji_to_copy_name, _, emoji_to_copy_url = (
-            globals.get_emoji_information(
-                emoji_to_copy, emoji_to_copy_id, emoji_to_copy_name
+        if not emoji_image:
+            logger.debug(
+                "Copying emoji %s into emoji server.",
+                emoji_to_copy if emoji_to_copy else emoji_to_copy_id,
             )
-        )
 
-        image = await globals.get_image_from_URL(emoji_to_copy_url)
-        image_hash = globals.hash_image(image)
+            emoji_to_copy_id, emoji_to_copy_name, _, emoji_to_copy_url = (
+                globals.get_emoji_information(
+                    emoji_to_copy, emoji_to_copy_id, emoji_to_copy_name
+                )
+            )
+
+            emoji_image = await globals.get_image_from_URL(emoji_to_copy_url)
+        else:
+            if not emoji_to_copy_name:
+                raise ArgumentError(
+                    "emoji_image was passed as argument to copy_emoji_into_server() but emoji_to_copy_name was not."
+                )
+
+            logger.debug("Inserting emoji from image directly into emoji server.")
+
+        if not emoji_image_hash:
+            emoji_image_hash = globals.hash_image(emoji_image)
 
         emoji_to_delete_id = None
         try:
             emoji = await globals.emoji_server.create_custom_emoji(
-                name=emoji_to_copy_name, image=image, reason="Bridging reaction."
+                name=emoji_to_copy_name, image=emoji_image, reason="Bridging reaction."
             )
         except discord.Forbidden:
             logger.warning("Emoji server permissions not set correctly.")
@@ -596,7 +610,9 @@ class EmojiHashMap:
 
             try:
                 emoji = await globals.emoji_server.create_custom_emoji(
-                    name=emoji_to_copy_name, image=image, reason="Bridging reaction."
+                    name=emoji_to_copy_name,
+                    image=emoji_image,
+                    reason="Bridging reaction.",
                 )
             except discord.Forbidden:
                 logger.warning("Emoji server permissions not set correctly.")
@@ -620,7 +636,7 @@ class EmojiHashMap:
                 await self.add_emoji(
                     emoji=emoji,
                     emoji_server_id=emoji_server_id,
-                    image_hash=image_hash,
+                    image_hash=emoji_image_hash,
                     is_internal=True,
                     session=session,
                 )
@@ -629,7 +645,7 @@ class EmojiHashMap:
                     await self.map_emoji(
                         external_emoji=emoji_to_copy,
                         internal_emoji=emoji,
-                        image_hash=image_hash,
+                        image_hash=emoji_image_hash,
                         session=session,
                     )
                 else:
@@ -637,7 +653,7 @@ class EmojiHashMap:
                         external_emoji_id=emoji_to_copy_id,
                         external_emoji_name=emoji_to_copy_name,
                         internal_emoji=emoji,
-                        image_hash=image_hash,
+                        image_hash=emoji_image_hash,
                         session=session,
                     )
 
