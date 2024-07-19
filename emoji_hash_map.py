@@ -36,6 +36,7 @@ class EmojiHashMap:
         self._hash_to_emoji: dict[str, set[int]] = {}
         self._hash_to_available_emoji: dict[str, set[int]] = {}
         self._hash_to_internal_emoji: dict[str, int] = {}
+        self.forward_message_emoji_id: int | None = None
 
         close_after = False
         try:
@@ -102,6 +103,48 @@ class EmojiHashMap:
             session.close()
 
         logger.info("Emoji hash map initialised.")
+
+    async def load_forwarded_message_emoji(self):
+        """Load the icon used by forwarded messages as an emoji."""
+        logger.info("Loading forwarded message emoji...")
+
+        try:
+            forwarded_message_icon = await globals.get_image_from_URL(
+                globals.forwarded_message_icon_url
+            )
+        except Exception as e:
+            logger.error(
+                "An error occurred while trying to fetch forwarded message icon image from URL: %s",
+                e,
+            )
+            return
+
+        forwarded_message_icon_hash = globals.hash_image(forwarded_message_icon)
+
+        if emoji_id := self._hash_to_internal_emoji.get(forwarded_message_icon_hash):
+            self.forward_message_emoji_id = emoji_id
+            logger.info("Loaded forwarded message emoji from emoji server.")
+            return
+
+        if (
+            available_forward_message_emoji := self._hash_to_available_emoji.get(
+                forwarded_message_icon_hash
+            )
+        ) and (emoji_id := next(iter(available_forward_message_emoji), None)):
+            self.forward_message_emoji_id = emoji_id
+            logger.info("Loaded forwarded message emoji from available server.")
+            return
+
+        emoji = await self.copy_emoji_into_server(
+            emoji_image=forwarded_message_icon,
+            emoji_image_hash=forwarded_message_icon_hash,
+            emoji_to_copy_name="forwarded_message",
+        )
+        if emoji:
+            self.forward_message_emoji_id = emoji.id
+            logger.info("Created forwarded message emoji in emoji server.")
+        else:
+            logger.info("Could not load forwarded message emoji.")
 
     @beartype
     def _add_emoji_to_map(

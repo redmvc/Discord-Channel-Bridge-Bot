@@ -167,10 +167,11 @@ async def on_ready():
             or not emoji_server.me.guild_permissions.create_expressions
         ):
             logger.warning(
-                "I don't have Create Expressions or Manage Expressions permissions in the emoji server."
+                "I don't have Create Expressions and Manage Expressions permissions in the emoji server."
             )
         else:
             globals.emoji_server = emoji_server
+            await emoji_hash_map.map.load_forwarded_message_emoji()
 
         logger.info("Emoji server loaded.")
     else:
