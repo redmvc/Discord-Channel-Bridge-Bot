@@ -318,26 +318,21 @@ async def bridge_message_helper(message: discord.Message):
         logger.debug("Message with ID %s has snapshots, is forwarded.", message.id)
 
         is_forwarded = True
-        forwarded_message_emoji = (
-            f"<:forwarded_message:{emoji_hash_map.map.forward_message_emoji_id}> "
-            if emoji_hash_map.map.forward_message_emoji_id
-            else ""
-        )
-        message_content = f"-# {forwarded_message_emoji}***Forwarded***"
-
         snapshot = message.message_snapshots[0]
         snapshot_content = await replace_missing_emoji(snapshot.content)
+        message_content = (
+            "-# "
+            + (
+                f"<:forwarded_message:{emoji_hash_map.map.forward_message_emoji_id}> "
+                if emoji_hash_map.map.forward_message_emoji_id
+                else ""
+            )
+            + "***Forwarded***\n"
+            + snapshot_content
+        )
 
         message_attachments = snapshot.attachments
-        message_embeds = list(
-            [
-                discord.Embed(
-                    colour=discord.Colour.from_str("#2b2d31"),
-                    description=snapshot_content,
-                )
-            ]
-            + snapshot.embeds
-        )
+        message_embeds = snapshot.embeds
     else:
         # Regular message with content (probably)
         logger.debug(
@@ -346,7 +341,10 @@ async def bridge_message_helper(message: discord.Message):
         )
 
         is_forwarded = False
-        message_content = await replace_missing_emoji(message.content)
+        message_content = await replace_missing_emoji(
+            non_forwarded_message_start(message.content)
+        )
+
         message_attachments = message.attachments
         message_embeds = message.embeds
 
@@ -665,7 +663,9 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
     logger.debug("Bridging edit to message with ID %s.", payload.message_id)
 
     # Ensure that the message has emoji I have access to
-    updated_message_content = await replace_missing_emoji(updated_message_content)
+    updated_message_content = await replace_missing_emoji(
+        non_forwarded_message_start(updated_message_content)
+    )
 
     # Get all channels reachable from this one via an unbroken sequence of outbound bridges as well as their webhooks
     reachable_channels = await bridges.get_reachable_channels(
@@ -846,6 +846,34 @@ async def replace_missing_emoji(message_content: str) -> str:
 
     for missing_emoji_str, new_emoji_str in emoji_to_replace.items():
         message_content = message_content.replace(missing_emoji_str, new_emoji_str)
+    return message_content
+
+
+@beartype
+def non_forwarded_message_start(message_content: str):
+    """Check whether the start of a message has the forwarded message header and, if it does, add a disclaimer at the top clarifying it is not forwarded. Then, return it.
+
+    #### Args:
+        - `message_content`: The message content to validate.
+    """
+    if (
+        message_content.startswith("-# ")
+        and (first_line := message_content.split("\n")[0])
+        and first_line.endswith(" ***Forwarded***")
+        and (first_line_split := first_line.split())
+        and (
+            len(first_line_split) == 2
+            or (
+                len(first_line_split) == 3
+                and re.match(r"<(a?:[^:]+):(\d+)>", first_line_split[1])
+            )
+        )
+    ):
+        return (
+            "-# (This message was not actually forwarded; the header was added by the user who wrote it.)\n"
+            + message_content
+        )
+
     return message_content
 
 

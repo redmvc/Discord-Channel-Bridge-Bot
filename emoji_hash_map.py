@@ -706,7 +706,7 @@ class EmojiHashMap:
                         image_hash=emoji_image_hash,
                         session=session,
                     )
-                else:
+                elif emoji_to_copy_id:
                     await self.map_emoji(
                         external_emoji_id=emoji_to_copy_id,
                         external_emoji_name=emoji_to_copy_name,
