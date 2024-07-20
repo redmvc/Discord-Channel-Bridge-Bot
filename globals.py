@@ -109,6 +109,9 @@ auto_bridge_thread_channels: set[int] = set()
 # Server which can be used to store unknown emoji for mirroring reactions
 emoji_server: discord.Guild | None = None
 
+# URL of an image of the icon used by forwarded messages
+forwarded_message_icon_url = "https://cdn.discordapp.com/emojis/1263880469750091918.png"
+
 # Dictionary listing all apps whitelisted per channel
 per_channel_whitelist: dict[int, set[int]] = {}
 

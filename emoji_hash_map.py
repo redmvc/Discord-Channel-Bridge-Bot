@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session as SQLSession
 
 import globals
 from database import DBEmoji, engine, sql_retry, sql_upsert
-from validations import logger
+from validations import ArgumentError, logger
 
 
 class EmojiHashMap:
@@ -36,6 +36,7 @@ class EmojiHashMap:
         self._hash_to_emoji: dict[str, set[int]] = {}
         self._hash_to_available_emoji: dict[str, set[int]] = {}
         self._hash_to_internal_emoji: dict[str, int] = {}
+        self.forward_message_emoji_id: int | None = None
 
         close_after = False
         try:
@@ -102,6 +103,48 @@ class EmojiHashMap:
             session.close()
 
         logger.info("Emoji hash map initialised.")
+
+    async def load_forwarded_message_emoji(self):
+        """Load the icon used by forwarded messages as an emoji."""
+        logger.info("Loading forwarded message emoji...")
+
+        try:
+            forwarded_message_icon = await globals.get_image_from_URL(
+                globals.forwarded_message_icon_url
+            )
+        except Exception as e:
+            logger.error(
+                "An error occurred while trying to fetch forwarded message icon image from URL: %s",
+                e,
+            )
+            return
+
+        forwarded_message_icon_hash = globals.hash_image(forwarded_message_icon)
+
+        if emoji_id := self._hash_to_internal_emoji.get(forwarded_message_icon_hash):
+            self.forward_message_emoji_id = emoji_id
+            logger.info("Loaded forwarded message emoji from emoji server.")
+            return
+
+        if (
+            available_forward_message_emoji := self._hash_to_available_emoji.get(
+                forwarded_message_icon_hash
+            )
+        ) and (emoji_id := next(iter(available_forward_message_emoji), None)):
+            self.forward_message_emoji_id = emoji_id
+            logger.info("Loaded forwarded message emoji from available server.")
+            return
+
+        emoji = await self.copy_emoji_into_server(
+            emoji_image=forwarded_message_icon,
+            emoji_image_hash=forwarded_message_icon_hash,
+            emoji_to_copy_name="forwarded_message",
+        )
+        if emoji:
+            self.forward_message_emoji_id = emoji.id
+            logger.info("Created forwarded message emoji in emoji server.")
+        else:
+            logger.info("Could not load forwarded message emoji.")
 
     @beartype
     def _add_emoji_to_map(
@@ -538,20 +581,24 @@ class EmojiHashMap:
     async def copy_emoji_into_server(
         self,
         *,
-        missing_emoji: discord.PartialEmoji | None = None,
-        missing_emoji_id: str | int | None = None,
-        missing_emoji_name: str | None = None,
+        emoji_to_copy: discord.PartialEmoji | None = None,
+        emoji_to_copy_id: str | int | None = None,
+        emoji_image: bytes | None = None,
+        emoji_image_hash: str | None = None,
+        emoji_to_copy_name: str | None = None,
     ) -> discord.Emoji | None:
         """Try to create an emoji in the emoji server and, if successful, return it.
 
         #### Args:
-            - `missing_emoji`: The emoji we are trying to copy into our emoji server. Defaults to None, in which case `missing_emoji_name` and `missing_emoji_id` are used instead.
-            - `missing_emoji_id`: The ID of the missing emoji. Defaults to None, in which case `missing_emoji` is used instead.
-            - `missing_emoji_name`: The name of a missing emoji, optionally preceded by an `"a:"` in case it's animated. Defaults to None, but must be included if `missing_emoji_id` is.
+            - `emoji_to_copy`: The emoji we are trying to copy into our emoji server. Defaults to None, in which case `emoji_to_copy_name` and either `emoji_to_copy_id` or `emoji_image` are used instead.
+            - `emoji_to_copy_id`: The ID of the missing emoji. Defaults to None, in which case either `emoji_to_copy` or `emoji_image` is used instead.
+            - `emoji_image`: An image to be directly loaded into the server. Defaults to None, in which case either `emoji_to_copy` or `emoji_to_copy_id` is used instead.
+            - `emoji_image_hash`: The hash of `emoji_image`. Defaults to none, in which case it will be calculated from `emoji_image`.
+            - `emoji_to_copy_name`: The name of a missing emoji, optionally preceded by an `"a:"` in case it's animated. Defaults to None, but must be included if either `emoji_to_copy_id` or `emoji_image` is.
 
         #### Raises:
             - `ArgumentError`: The number of arguments passed is incorrect.
-            - `ValueError`: `missing_emoji` argument was passed and had type `PartialEmoji` but it was not a custom emoji, or `missing_emoji_id` argument was passed and had type `str` but it was not a valid numerical ID.
+            - `ValueError`: `emoji_to_copy` argument was passed and had type `PartialEmoji` but it was not a custom emoji, or `emoji_to_copy_id` argument was passed and had type `str` but it was not a valid numerical ID.
             - `Forbidden`: Emoji server permissions not set correctly.
             - `HTTPResponseError`: HTTP request to fetch emoji image returned a status other than 200.
             - `InvalidURL`: URL generated from emoji ID was not valid.
@@ -562,24 +609,34 @@ class EmojiHashMap:
             return None
         emoji_server_id = globals.emoji_server.id
 
-        logger.debug(
-            "Copying emoji %s into emoji server.",
-            missing_emoji if missing_emoji else missing_emoji_id,
-        )
-
-        missing_emoji_id, missing_emoji_name, _, missing_emoji_url = (
-            globals.get_emoji_information(
-                missing_emoji, missing_emoji_id, missing_emoji_name
+        if not emoji_image:
+            logger.debug(
+                "Copying emoji %s into emoji server.",
+                emoji_to_copy if emoji_to_copy else emoji_to_copy_id,
             )
-        )
 
-        image = await globals.get_image_from_URL(missing_emoji_url)
-        image_hash = globals.hash_image(image)
+            emoji_to_copy_id, emoji_to_copy_name, _, emoji_to_copy_url = (
+                globals.get_emoji_information(
+                    emoji_to_copy, emoji_to_copy_id, emoji_to_copy_name
+                )
+            )
+
+            emoji_image = await globals.get_image_from_URL(emoji_to_copy_url)
+        else:
+            if not emoji_to_copy_name:
+                raise ArgumentError(
+                    "emoji_image was passed as argument to copy_emoji_into_server() but emoji_to_copy_name was not."
+                )
+
+            logger.debug("Inserting emoji from image directly into emoji server.")
+
+        if not emoji_image_hash:
+            emoji_image_hash = globals.hash_image(emoji_image)
 
         emoji_to_delete_id = None
         try:
             emoji = await globals.emoji_server.create_custom_emoji(
-                name=missing_emoji_name, image=image, reason="Bridging reaction."
+                name=emoji_to_copy_name, image=emoji_image, reason="Bridging reaction."
             )
         except discord.Forbidden:
             logger.warning("Emoji server permissions not set correctly.")
@@ -590,13 +647,30 @@ class EmojiHashMap:
                 raise
 
             # Try to delete an emoji from the server and then add this again.
-            emoji_to_delete = random.choice(globals.emoji_server.emojis)
-            emoji_to_delete_id = emoji_to_delete.id
+            num_tries = 0
+            max_tries = 5
+            emoji_to_delete: discord.Emoji | None = None
+            while num_tries < max_tries:
+                emoji_to_delete = random.choice(globals.emoji_server.emojis)
+                emoji_to_delete_id = emoji_to_delete.id
+                if emoji_to_delete_id != self.forward_message_emoji_id:
+                    break
+                num_tries += 1
+            if not emoji_to_delete:
+                raise Exception("emoji_to_delete failed to be fetched somehow.")
+            elif num_tries == max_tries:
+                logger.warning(
+                    f"Tried to delete an emoji other than the forward message emoji {max_tries} times and failed."
+                )
+                self.forward_message_emoji_id = None
+
             await emoji_to_delete.delete()
 
             try:
                 emoji = await globals.emoji_server.create_custom_emoji(
-                    name=missing_emoji_name, image=image, reason="Bridging reaction."
+                    name=emoji_to_copy_name,
+                    image=emoji_image,
+                    reason="Bridging reaction.",
                 )
             except discord.Forbidden:
                 logger.warning("Emoji server permissions not set correctly.")
@@ -620,24 +694,24 @@ class EmojiHashMap:
                 await self.add_emoji(
                     emoji=emoji,
                     emoji_server_id=emoji_server_id,
-                    image_hash=image_hash,
+                    image_hash=emoji_image_hash,
                     is_internal=True,
                     session=session,
                 )
 
-                if missing_emoji:
+                if emoji_to_copy:
                     await self.map_emoji(
-                        external_emoji=missing_emoji,
+                        external_emoji=emoji_to_copy,
                         internal_emoji=emoji,
-                        image_hash=image_hash,
+                        image_hash=emoji_image_hash,
                         session=session,
                     )
-                else:
+                elif emoji_to_copy_id:
                     await self.map_emoji(
-                        external_emoji_id=missing_emoji_id,
-                        external_emoji_name=missing_emoji_name,
+                        external_emoji_id=emoji_to_copy_id,
+                        external_emoji_name=emoji_to_copy_name,
                         internal_emoji=emoji,
-                        image_hash=image_hash,
+                        image_hash=emoji_image_hash,
                         session=session,
                     )
 

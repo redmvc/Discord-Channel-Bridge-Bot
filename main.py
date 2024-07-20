@@ -167,10 +167,11 @@ async def on_ready():
             or not emoji_server.me.guild_permissions.create_expressions
         ):
             logger.warning(
-                "I don't have Create Expressions or Manage Expressions permissions in the emoji server."
+                "I don't have Create Expressions and Manage Expressions permissions in the emoji server."
             )
         else:
             globals.emoji_server = emoji_server
+            await emoji_hash_map.map.load_forwarded_message_emoji()
 
         logger.info("Emoji server loaded.")
     else:
@@ -312,7 +313,45 @@ async def bridge_message_helper(message: discord.Message):
     )
 
     # Ensure that the message has emoji I have access to
-    message_content = await replace_missing_emoji(message.content)
+    if message.message_snapshots and len(message.message_snapshots) > 0:
+        # This message is a forwarded message, so there is a message snapshot
+        logger.debug("Message with ID %s has snapshots, is forwarded.", message.id)
+
+        is_forwarded = True
+        forwarded_message_header = (
+            "-# "
+            + (
+                f"<:forwarded_message:{emoji_hash_map.map.forward_message_emoji_id}> "
+                if emoji_hash_map.map.forward_message_emoji_id
+                else ""
+            )
+            + "***Forwarded***"
+        )
+        snapshot = message.message_snapshots[0]
+        snapshot_content = await replace_missing_emoji(snapshot.content)
+
+        message_content = ""
+        message_attachments = snapshot.attachments
+        message_embeds = [
+            discord.Embed(
+                colour=discord.Colour.from_str("#414348"),
+                description=forwarded_message_header + "\n" + snapshot_content,
+            )
+        ] + snapshot.embeds
+    else:
+        # Regular message with content (probably)
+        logger.debug(
+            "Message with ID %s doesn't have snapshots, is probably not forwarded.",
+            message.id,
+        )
+
+        is_forwarded = False
+
+        message_content = await replace_missing_emoji(
+            non_forwarded_message_start(message.content)
+        )
+        message_attachments = message.attachments
+        message_embeds = message.embeds
 
     # Get all channels reachable from this one via an unbroken sequence of outbound bridges as well as their webhooks
     reachable_channels = await bridges.get_reachable_channels(
@@ -326,9 +365,10 @@ async def bridge_message_helper(message: discord.Message):
         with SQLSession(engine) as session:
             bridged_reply_to: dict[int, int] = {}
             reply_has_ping = False
-            if message.reference and message.reference.message_id:
+            if not is_forwarded and message.reference and message.reference.message_id:
                 # This message is a reply to another message, so we should try to link to its match on the other side of bridges
-                # bridged_reply_to will be a dict whose keys are channel IDs and whose values are the IDs of messages matching the message I'm replying to in those channels
+                # bridged_reply_to will be a dict whose keys are channel IDs and whose values are the IDs of messages matching the
+                # message I'm replying to in those channels
                 replied_to_id = message.reference.message_id
 
                 # identify if this reply "pinged" the target, to know whether to add the @ symbol UI
@@ -409,6 +449,8 @@ async def bridge_message_helper(message: discord.Message):
                     bridge_message_to_target_channel(
                         message,
                         message_content,
+                        message_attachments,
+                        message_embeds,
                         target_channel,
                         webhook,
                         webhook_channel,
@@ -470,6 +512,8 @@ async def bridge_message_helper(message: discord.Message):
 async def bridge_message_to_target_channel(
     message: discord.Message,
     message_content: str,
+    message_attachments: list[discord.Attachment],
+    message_embeds: list[discord.Embed],
     target_channel: discord.TextChannel | discord.Thread,
     webhook: discord.Webhook,
     webhook_channel: discord.TextChannel,
@@ -482,7 +526,9 @@ async def bridge_message_to_target_channel(
 
     #### Args:
         - `message`: The message being bridged.
-        - `message_content`: Its contents
+        - `message_content`: Its contents.
+        - `message_attachments`: Its attachments.
+        - `message_embneds`: Its embeds.
         - `target_channel`: The channel the message is being bridged to.
         - `webhook`: The webhook that will send the message.
         - `webhook_channel`: The parent channel the webhook is attached to.
@@ -556,7 +602,7 @@ async def bridge_message_to_target_channel(
         reply_embed = []
 
     attachments = await asyncio.gather(
-        *[attachment.to_file() for attachment in message.attachments]
+        *[attachment.to_file() for attachment in message_attachments]
     )
 
     try:
@@ -567,7 +613,7 @@ async def bridge_message_to_target_channel(
             ),
             avatar_url=bridged_avatar_url,
             username=bridged_member_name,
-            embeds=list(message.embeds + reply_embed),
+            embeds=list(message_embeds + reply_embed),
             files=attachments,  # TODO might throw HHTPException if too large?
             wait=True,
             **thread_splat,
@@ -622,7 +668,9 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
     logger.debug("Bridging edit to message with ID %s.", payload.message_id)
 
     # Ensure that the message has emoji I have access to
-    updated_message_content = await replace_missing_emoji(updated_message_content)
+    updated_message_content = await replace_missing_emoji(
+        non_forwarded_message_start(updated_message_content)
+    )
 
     # Get all channels reachable from this one via an unbroken sequence of outbound bridges as well as their webhooks
     reachable_channels = await bridges.get_reachable_channels(
@@ -794,7 +842,7 @@ async def replace_missing_emoji(message_content: str) -> str:
 
         try:
             emoji = await emoji_hash_map.map.copy_emoji_into_server(
-                missing_emoji_id=emoji_id_str, missing_emoji_name=emoji_name
+                emoji_to_copy_id=emoji_id_str, emoji_to_copy_name=emoji_name
             )
             if emoji:
                 emoji_to_replace[f"<{emoji_name}:{emoji_id_str}>"] = str(emoji)
@@ -803,6 +851,34 @@ async def replace_missing_emoji(message_content: str) -> str:
 
     for missing_emoji_str, new_emoji_str in emoji_to_replace.items():
         message_content = message_content.replace(missing_emoji_str, new_emoji_str)
+    return message_content
+
+
+@beartype
+def non_forwarded_message_start(message_content: str):
+    """Check whether the start of a message has the forwarded message header and, if it does, add a disclaimer at the top clarifying it is not forwarded. Then, return it.
+
+    #### Args:
+        - `message_content`: The message content to validate.
+    """
+    if (
+        message_content.startswith("-# ")
+        and (first_line := message_content.split("\n")[0])
+        and first_line.endswith(" ***Forwarded***")
+        and (first_line_split := first_line.split())
+        and (
+            len(first_line_split) == 2
+            or (
+                len(first_line_split) == 3
+                and re.match(r"<(a?:[^:]+):(\d+)>", first_line_split[1])
+            )
+        )
+    ):
+        return (
+            "-# (This message was not actually forwarded; the header was added by the user who wrote it.)\n"
+            + message_content
+        )
+
     return message_content
 
 
@@ -1027,7 +1103,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
             # I don't have the emoji mapped locally, I'll add it to my server and update my map
             try:
                 fallback_emoji = await emoji_hash_map.map.copy_emoji_into_server(
-                    missing_emoji=payload.emoji
+                    emoji_to_copy=payload.emoji
                 )
             except Exception:
                 fallback_emoji = None
