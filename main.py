@@ -318,21 +318,26 @@ async def bridge_message_helper(message: discord.Message):
         logger.debug("Message with ID %s has snapshots, is forwarded.", message.id)
 
         is_forwarded = True
-        snapshot = message.message_snapshots[0]
-        snapshot_content = await replace_missing_emoji(snapshot.content)
-        message_content = (
+        forwarded_message_header = (
             "-# "
             + (
                 f"<:forwarded_message:{emoji_hash_map.map.forward_message_emoji_id}> "
                 if emoji_hash_map.map.forward_message_emoji_id
                 else ""
             )
-            + "***Forwarded***\n"
-            + snapshot_content
+            + "***Forwarded***"
         )
+        snapshot = message.message_snapshots[0]
+        snapshot_content = await replace_missing_emoji(snapshot.content)
 
+        message_content = ""
         message_attachments = snapshot.attachments
-        message_embeds = snapshot.embeds
+        message_embeds = [
+            discord.Embed(
+                colour=discord.Colour.from_str("#414348"),
+                description=forwarded_message_header + "\n" + snapshot_content,
+            )
+        ] + snapshot.embeds
     else:
         # Regular message with content (probably)
         logger.debug(
@@ -341,10 +346,10 @@ async def bridge_message_helper(message: discord.Message):
         )
 
         is_forwarded = False
+
         message_content = await replace_missing_emoji(
             non_forwarded_message_start(message.content)
         )
-
         message_attachments = message.attachments
         message_embeds = message.embeds
 
