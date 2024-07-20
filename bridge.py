@@ -652,18 +652,40 @@ class Bridges:
             if from_source := self._outbound_bridges.get(sid):
                 if from_source.get(tid):
                     del self._outbound_bridges[sid][tid]
+                else:
+                    logger.debug(
+                        "Tried to demolish bridge from channel with ID %s to channel with ID %s but it was not in the list of outbound bridges.",
+                        sid,
+                        tid,
+                    )
 
                 if len(self._outbound_bridges[sid]) == 0:
                     del self._outbound_bridges[sid]
+            else:
+                logger.debug(
+                    "Tried to demolish bridge from channel with ID %s but it was not in the list of outbound bridges.",
+                    sid,
+                )
 
             if to_target := self._inbound_bridges.get(tid):
                 if to_target.get(sid):
                     del self._inbound_bridges[tid][sid]
+                else:
+                    logger.debug(
+                        "Tried to demolish bridge to channel with ID %s from channel with ID %s but it was not in the list of inbound bridges.",
+                        tid,
+                        sid,
+                    )
 
                 if len(self._inbound_bridges[tid]) == 0:
                     del self._inbound_bridges[tid]
                     if deleted_webhook_id := await self.webhooks.delete_channel(tid):
                         webhooks_deleted.add(str(deleted_webhook_id))
+            else:
+                logger.debug(
+                    "Tried to demolish bridge to channel with ID %s but it was not in the list of inbound bridges.",
+                    tid,
+                )
 
         # Return if we're not meant to update the DB
         if not update_db:

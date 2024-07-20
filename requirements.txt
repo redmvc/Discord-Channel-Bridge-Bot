@@ -1,4 +1,4 @@
-discord.py @ git+https://github.com/Rapptz/discord.py@c055fd3
+discord.py @ git+https://github.com/redmvc/discord.py@7b7dd83a
 typing_extensions==4.12.2
 # Uncomment one of the lines below depending on which SQL dialect your server will be using and make sure to use the correct one in your settings.json file
 # PyMySQL
