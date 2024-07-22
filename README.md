@@ -19,6 +19,8 @@ There are, however, many more commands than just that, as well as some options f
     - Alternatively, you can run the command `/bridge_thread` from within a thread and it will try to create threads in all channels with inbound bridges from the parent channel following the same bridge rules present in it.
     - Another option is running the command `/auto_bridge_threads` from a channel; this will cause thread creation in that channel to be mirrored (though you'll need to run that command on each side of each bridge for automatic thread creation to work in all directions). Running this command again will revert to the default behaviour.
   - When bridging a reaction emoji, if the bot doesn't have access to the emoji being bridged, it will attempt to copy that emoji into an emoji server and then react with the copied emoji.
+  - When bridging a message that is a reply to another message, the bot will attempt to find its equivalent across the bridge and add an embed to the reply with a link to it.
+  - When bridging a forwarded message, the bot will add an embed clarifying that it is a message forward.
 - You can run the command `/demolish target` to demolish all bridges between the current and target channels/threads.
   - You can run the command `/demolish_all` to demolish all bridges to and from the current channel/thread (and, optionally, its threads or its parent channel's threads).
 - Messages sent from most other bots or webhooks are not bridged; the only current global exception is [Tupperbox](https://tupperbox.app/). However, it is possible to add local exceptions—that is, bots whose messages will be bridged from a given specific channel—by running the command `/whitelist @bot [@bot_2 [@bot_3 ...]]`.
