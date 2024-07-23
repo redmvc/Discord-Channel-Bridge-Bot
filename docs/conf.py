@@ -6,10 +6,10 @@
 # -- Project information -----------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 
-project = 'Discord Channel Bridge Bot'
-copyright = '2024, Red'
-author = 'Red'
-version = '1.0'
+project = "Discord Channel Bridge Bot"
+copyright = "2024, Red"
+author = "Red"
+version = "1.0"
 release = version
 
 # -- General configuration ---------------------------------------------------
@@ -17,13 +17,12 @@ release = version
 
 extensions = []
 
-templates_path = ['_templates']
-exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
-
+templates_path = ["_templates"]
+exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
 
 
 # -- Options for HTML output -------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output
 
-html_theme = 'alabaster'
-html_static_path = ['_static']
+html_theme = "alabaster"
+html_static_path = ["_static"]
