@@ -435,13 +435,11 @@ async def auto_bridge_threads(
     try:
         with SQLSession(engine) as session:
             if message_channel.id not in globals.auto_bridge_thread_channels:
-
-                def add_to_table():
-                    session.add(
+                await sql_retry(
+                    lambda: session.add(
                         DBAutoBridgeThreadChannels(channel=str(message_channel.id))
                     )
-
-                await sql_retry(add_to_table)
+                )
                 globals.auto_bridge_thread_channels.add(message_channel.id)
 
                 response = "✅ Threads will now be automatically created across bridges when they are created in this channel."
@@ -885,21 +883,21 @@ async def whitelist(interaction: discord.Interaction, apps: str):
     try:
         channel_id_str = str(channel.id)
         with SQLSession(engine) as session:
-            run_queries: list[Coroutine[Any, Any, None]] = []
+            run_queries: list[Coroutine[Any, Any, Any]] = []
             if len(apps_to_add) > 0:
-
-                def whitelist_apps():
-                    session.add_all(
-                        [
-                            DBAppWhitelist(
-                                channel=channel_id_str,
-                                application=str(app_id),
-                            )
-                            for app_id in apps_to_add
-                        ]
+                run_queries.append(
+                    sql_retry(
+                        lambda: session.add_all(
+                            [
+                                DBAppWhitelist(
+                                    channel=channel_id_str,
+                                    application=str(app_id),
+                                )
+                                for app_id in apps_to_add
+                            ]
+                        )
                     )
-
-                run_queries.append(sql_retry(whitelist_apps))
+                )
 
                 apps_to_add_str = ", ".join([f"<@{app_id}>" for app_id in apps_to_add])
                 response.append(
@@ -907,17 +905,13 @@ async def whitelist(interaction: discord.Interaction, apps: str):
                 )
 
             if len(apps_to_remove) > 0:
-
-                def un_whitelist_apps():
-                    remove_apps = SQLDelete(DBAppWhitelist).where(
-                        DBAppWhitelist.channel == channel_id_str,
-                        DBAppWhitelist.application.in_(
-                            [str(app_id) for app_id in apps_to_remove]
-                        ),
-                    )
-                    session.execute(remove_apps)
-
-                run_queries.append(sql_retry(un_whitelist_apps))
+                remove_apps = SQLDelete(DBAppWhitelist).where(
+                    DBAppWhitelist.channel == channel_id_str,
+                    DBAppWhitelist.application.in_(
+                        [str(app_id) for app_id in apps_to_remove]
+                    ),
+                )
+                run_queries.append(sql_retry(lambda: session.execute(remove_apps)))
 
                 apps_to_remove_str = ", ".join(
                     [f"<@{app_id}>" for app_id in apps_to_remove]
@@ -1277,15 +1271,11 @@ async def bridge_thread_helper(
             try:
                 # I don't need to store it I just need to know whether it exists
                 await thread_parent.fetch_message(thread_to_bridge.id)
-
-                def get_source_starting_message():
-                    select_message_map: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
-                        DBMessageMap
-                    ).where(DBMessageMap.target_message == str(thread_to_bridge.id))
-                    return session.scalars(select_message_map).first()
-
+                select_message_map: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
+                    DBMessageMap
+                ).where(DBMessageMap.target_message == str(thread_to_bridge.id))
                 source_starting_message: DBMessageMap | None = await sql_retry(
-                    get_source_starting_message
+                    lambda: session.scalars(select_message_map).first()
                 )
                 if isinstance(source_starting_message, DBMessageMap):
                     # The message that's starting this thread is bridged
@@ -1296,14 +1286,11 @@ async def bridge_thread_helper(
                     source_channel_id = thread_parent.id
                     source_message_id = thread_to_bridge.id
 
-                def get_target_starting_messages():
-                    select_message_map: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
-                        DBMessageMap
-                    ).where(DBMessageMap.source_message == str(source_message_id))
-                    return session.scalars(select_message_map)
-
+                select_message_map: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
+                    DBMessageMap
+                ).where(DBMessageMap.source_message == str(source_message_id))
                 target_starting_messages: ScalarResult[DBMessageMap] = await sql_retry(
-                    get_target_starting_messages
+                    lambda: session.scalars(select_message_map)
                 )
                 for target_starting_message in target_starting_messages:
                     matching_starting_messages[
@@ -1462,16 +1449,15 @@ async def stop_auto_bridging_threads_helper(
             session = SQLSession(engine)
             close_after = True
 
-        def execute_query():
-            session.execute(
+        await sql_retry(
+            lambda: session.execute(
                 SQLDelete(DBAutoBridgeThreadChannels).where(
                     DBAutoBridgeThreadChannels.channel.in_(
                         [str(id) for id in channel_ids_to_remove]
                     )
                 )
             )
-
-        await sql_retry(execute_query)
+        )
 
         globals.auto_bridge_thread_channels -= channel_ids_to_remove
     except Exception:
@@ -1653,16 +1639,13 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
     try:
         with SQLSession(engine) as session:
             # We need to see whether this message is a bridged message and, if so, find its source
-            def get_source_message_map():
-                select_message_map: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
-                    DBMessageMap
-                ).where(
-                    DBMessageMap.target_message == str(message.id),
-                )
-                return session.scalars(select_message_map).first()
-
+            select_message_map: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
+                DBMessageMap
+            ).where(
+                DBMessageMap.target_message == str(message.id),
+            )
             source_message_map: DBMessageMap | None = await sql_retry(
-                get_source_message_map
+                lambda: session.scalars(select_message_map).first()
             )
             if isinstance(source_message_map, DBMessageMap):
                 # This message was bridged, so find the original one and then find any other bridged messages from it
@@ -1692,15 +1675,11 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
             # Then we find all messages bridged from the source
             outbound_bridges = bridges.get_outbound_bridges(source_channel_id)
             if outbound_bridges:
-
-                def get_bridged_messages():
-                    select_message_map: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
-                        DBMessageMap
-                    ).where(DBMessageMap.source_message == str(source_message_id))
-                    return session.scalars(select_message_map)
-
+                select_message_map: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
+                    DBMessageMap
+                ).where(DBMessageMap.source_message == str(source_message_id))
                 bridged_messages: ScalarResult[DBMessageMap] = await sql_retry(
-                    get_bridged_messages
+                    lambda: session.scalars(select_message_map)
                 )
                 for message_row in bridged_messages:
                     target_channel_id = int(message_row.target_channel)
