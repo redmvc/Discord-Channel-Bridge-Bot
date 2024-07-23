@@ -1,5 +1,6 @@
 aiolimiter==1.1.0
 beartype==0.18.5
+cryptography==43.0.0
 discord.py @ git+https://github.com/redmvc/discord.py@7b7dd83a
 sphinx==7.4.7
 SQLAlchemy==2.0.31

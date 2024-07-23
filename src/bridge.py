@@ -503,11 +503,8 @@ class Bridges:
                 webhook=str(bridge_webhook.id),
             )
 
-            def execute_query():
-                session.execute(insert_bridge_row)
-                session.execute(insert_webhook_row)
-
-            await sql_retry(execute_query)
+            await sql_retry(lambda: session.execute(insert_bridge_row))
+            await sql_retry(lambda: session.execute(insert_webhook_row))
         except Exception as e:
             if close_after and session:
                 session.rollback()
@@ -728,13 +725,10 @@ class Bridges:
             else:
                 delete_invalid_webhooks = None
 
-            def execute_queries():
-                for delete_query in delete_demolished_bridges_and_messages:
-                    session.execute(delete_query)
-                if delete_invalid_webhooks is not None:
-                    session.execute(delete_invalid_webhooks)
-
-            await sql_retry(execute_queries)
+            for delete_query in delete_demolished_bridges_and_messages:
+                await sql_retry(lambda: session.execute(delete_query))
+            if delete_invalid_webhooks is not None:
+                await sql_retry(lambda: session.execute(delete_invalid_webhooks))
         except Exception:
             if close_after and session:
                 session.rollback()
