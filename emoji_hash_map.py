@@ -884,7 +884,8 @@ class EmojiHashMap:
             emoji_set = frozenset(hash_to_emoji)
             return emoji_set
 
-        return frozenset({str(id) for id in hash_to_emoji})
+        emoji_set = frozenset({str(id) for id in hash_to_emoji})
+        return emoji_set
 
     @beartype
     def get_internal_equivalent(self, emoji_id: int) -> int | None:
