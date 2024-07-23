@@ -312,47 +312,6 @@ async def bridge_message_helper(message: discord.Message):
         message_channel_id,
     )
 
-    # Ensure that the message has emoji I have access to
-    if message.message_snapshots and len(message.message_snapshots) > 0:
-        # This message is a forwarded message, so there is a message snapshot
-        logger.debug("Message with ID %s has snapshots, is forwarded.", message.id)
-
-        is_forwarded = True
-        forwarded_message_header = (
-            "-# "
-            + (
-                f"<:forwarded_message:{emoji_hash_map.map.forward_message_emoji_id}> "
-                if emoji_hash_map.map.forward_message_emoji_id
-                else ""
-            )
-            + "***Forwarded***"
-        )
-        snapshot = message.message_snapshots[0]
-        snapshot_content = await replace_missing_emoji(snapshot.content)
-
-        message_content = ""
-        message_attachments = snapshot.attachments
-        message_embeds = [
-            discord.Embed(
-                colour=discord.Colour.from_str("#414348"),
-                description=forwarded_message_header + "\n" + snapshot_content,
-            )
-        ] + snapshot.embeds
-    else:
-        # Regular message with content (probably)
-        logger.debug(
-            "Message with ID %s doesn't have snapshots, is probably not forwarded.",
-            message.id,
-        )
-
-        is_forwarded = False
-
-        message_content = await replace_missing_emoji(
-            non_forwarded_message_start(message.content)
-        )
-        message_attachments = message.attachments
-        message_embeds = message.embeds
-
     # Get all channels reachable from this one via an unbroken sequence of outbound bridges as well as their webhooks
     reachable_channels = await bridges.get_reachable_channels(
         message_channel_id,
@@ -363,6 +322,71 @@ async def bridge_message_helper(message: discord.Message):
     session = None
     try:
         with SQLSession(engine) as session:
+            if (
+                not message.message_snapshots
+                or len(message.message_snapshots) == 0
+                or not message.reference
+            ):
+                # Regular message with content (probably)
+                logger.debug(
+                    "Message with ID %s doesn't have snapshots, is probably not forwarded.",
+                    message.id,
+                )
+
+                is_forwarded = False
+                message_content = await replace_missing_emoji(
+                    non_forwarded_message_start(message.content)
+                )
+                message_attachments = message.attachments
+                message_embeds = message.embeds
+            else:
+                # There is a message snapshot, so this message was forwarded
+                logger.debug(
+                    "Message with ID %s has snapshots, is forwarded.", message.id
+                )
+
+                is_forwarded = True
+                snapshot = message.message_snapshots[0]
+                message_content = ""
+                message_attachments = snapshot.attachments
+
+                # If the original message being forwarded was created by me and it was, itself,
+                # a bridge of another forwarded message, I need to treat it differently
+                forwarded_message_id = message.reference.message_id
+                select_forwarded_message: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
+                    DBMessageMap
+                ).where(
+                    DBMessageMap.target_message == str(forwarded_message_id),
+                    DBMessageMap.forwarded,
+                )
+                query_result: ScalarResult[DBMessageMap] = await sql_retry(
+                    lambda: session.scalars(select_forwarded_message)
+                )
+                if not query_result.first():
+                    # The forwarded message was not a bridged forwarded message
+                    # so I'll just add an embed with its contents
+                    forwarded_message_header = (
+                        "-# "
+                        + (
+                            f"<:forwarded_message:{emoji_hash_map.map.forward_message_emoji_id}> "
+                            if emoji_hash_map.map.forward_message_emoji_id
+                            else ""
+                        )
+                        + "***Forwarded***"
+                    )
+
+                    message_embeds = [
+                        discord.Embed(
+                            colour=discord.Colour.from_str("#414348"),
+                            description=f"{forwarded_message_header}\n{snapshot.content}",
+                        )
+                    ] + snapshot.embeds
+                else:
+                    # The forwarded message was originally bridged
+                    # That means that its only content is the embeds, which were originally generated
+                    # by the code above
+                    message_embeds = snapshot.embeds
+
             bridged_reply_to: dict[int, int] = {}
             reply_has_ping = False
             if not is_forwarded and message.reference and message.reference.message_id:
