@@ -312,47 +312,6 @@ async def bridge_message_helper(message: discord.Message):
         message_channel_id,
     )
 
-    # Ensure that the message has emoji I have access to
-    if message.message_snapshots and len(message.message_snapshots) > 0:
-        # This message is a forwarded message, so there is a message snapshot
-        logger.debug("Message with ID %s has snapshots, is forwarded.", message.id)
-
-        is_forwarded = True
-        forwarded_message_header = (
-            "-# "
-            + (
-                f"<:forwarded_message:{emoji_hash_map.map.forward_message_emoji_id}> "
-                if emoji_hash_map.map.forward_message_emoji_id
-                else ""
-            )
-            + "***Forwarded***"
-        )
-        snapshot = message.message_snapshots[0]
-        snapshot_content = await replace_missing_emoji(snapshot.content)
-
-        message_content = ""
-        message_attachments = snapshot.attachments
-        message_embeds = [
-            discord.Embed(
-                colour=discord.Colour.from_str("#414348"),
-                description=forwarded_message_header + "\n" + snapshot_content,
-            )
-        ] + snapshot.embeds
-    else:
-        # Regular message with content (probably)
-        logger.debug(
-            "Message with ID %s doesn't have snapshots, is probably not forwarded.",
-            message.id,
-        )
-
-        is_forwarded = False
-
-        message_content = await replace_missing_emoji(
-            non_forwarded_message_start(message.content)
-        )
-        message_attachments = message.attachments
-        message_embeds = message.embeds
-
     # Get all channels reachable from this one via an unbroken sequence of outbound bridges as well as their webhooks
     reachable_channels = await bridges.get_reachable_channels(
         message_channel_id,
@@ -363,6 +322,71 @@ async def bridge_message_helper(message: discord.Message):
     session = None
     try:
         with SQLSession(engine) as session:
+            if (
+                not message.message_snapshots
+                or len(message.message_snapshots) == 0
+                or not message.reference
+            ):
+                # Regular message with content (probably)
+                logger.debug(
+                    "Message with ID %s doesn't have snapshots, is probably not forwarded.",
+                    message.id,
+                )
+
+                is_forwarded = False
+                message_content = await replace_missing_emoji(
+                    non_forwarded_message_start(message.content)
+                )
+                message_attachments = message.attachments
+                message_embeds = message.embeds
+            else:
+                # There is a message snapshot, so this message was forwarded
+                logger.debug(
+                    "Message with ID %s has snapshots, is forwarded.", message.id
+                )
+
+                is_forwarded = True
+                snapshot = message.message_snapshots[0]
+                message_content = ""
+                message_attachments = snapshot.attachments
+
+                # If the original message being forwarded was created by me and it was, itself,
+                # a bridge of another forwarded message, I need to treat it differently
+                forwarded_message_id = message.reference.message_id
+                select_forwarded_message: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
+                    DBMessageMap
+                ).where(
+                    DBMessageMap.target_message == str(forwarded_message_id),
+                    DBMessageMap.forwarded,
+                )
+                query_result: ScalarResult[DBMessageMap] = await sql_retry(
+                    lambda: session.scalars(select_forwarded_message)
+                )
+                if not query_result.first():
+                    # The forwarded message was not a bridged forwarded message
+                    # so I'll just add an embed with its contents
+                    forwarded_message_header = (
+                        "-# "
+                        + (
+                            f"<:forwarded_message:{emoji_hash_map.map.forward_message_emoji_id}> "
+                            if emoji_hash_map.map.forward_message_emoji_id
+                            else ""
+                        )
+                        + "***Forwarded***"
+                    )
+
+                    message_embeds = [
+                        discord.Embed(
+                            colour=discord.Colour.from_str("#414348"),
+                            description=f"{forwarded_message_header}\n{snapshot.content}",
+                        )
+                    ] + snapshot.embeds
+                else:
+                    # The forwarded message was originally bridged
+                    # That means that its only content is the embeds, which were originally generated
+                    # by the code above
+                    message_embeds = snapshot.embeds
+
             bridged_reply_to: dict[int, int] = {}
             reply_has_ping = False
             if not is_forwarded and message.reference and message.reference.message_id:
@@ -380,14 +404,11 @@ async def bridge_message_helper(message: discord.Message):
                 )
 
                 # First, check whether the message replied to was itself bridged from a different channel
-                def get_local_replied_to():
-                    select_message_map: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
-                        DBMessageMap
-                    ).where(DBMessageMap.target_message == str(replied_to_id))
-                    return session.scalars(select_message_map).first()
-
+                select_message_map: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
+                    DBMessageMap
+                ).where(DBMessageMap.target_message == str(replied_to_id))
                 local_replied_to_message_map: DBMessageMap | None = await sql_retry(
-                    get_local_replied_to
+                    lambda: session.scalars(select_message_map).first()
                 )
                 if isinstance(local_replied_to_message_map, DBMessageMap):
                     # So the message replied to was bridged from elsewhere
@@ -403,14 +424,11 @@ async def bridge_message_helper(message: discord.Message):
                     reply_source_channel_id = message_channel_id
 
                 # Now find all other bridged versions of the message we're replying to
-                def get_bridged_reply_tos():
-                    select_bridged_reply_to: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
-                        DBMessageMap
-                    ).where(DBMessageMap.source_message == str(source_replied_to_id))
-                    return session.scalars(select_bridged_reply_to)
-
+                select_bridged_reply_to: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
+                    DBMessageMap
+                ).where(DBMessageMap.source_message == str(source_replied_to_id))
                 query_result: ScalarResult[DBMessageMap] = await sql_retry(
-                    get_bridged_reply_tos
+                    lambda: session.scalars(select_bridged_reply_to)
                 )
                 for message_map in query_result:
                     bridged_reply_to[int(message_map.target_channel)] = int(
@@ -472,22 +490,21 @@ async def bridge_message_helper(message: discord.Message):
             ]
             source_message_id_str = str(message.id)
             source_channel_id_str = str(message_channel_id)
-
-            def insert_into_message_map():
-                session.add_all(
+            await sql_retry(
+                lambda: session.add_all(
                     [
                         DBMessageMap(
                             source_message=source_message_id_str,
                             source_channel=source_channel_id_str,
                             target_message=bridged_message.id,
                             target_channel=bridged_message.channel.id,
+                            forwarded=is_forwarded,
                             webhook=bridged_message.webhook_id,
                         )
                         for bridged_message in bridged_messages
                     ]
                 )
-
-            await sql_retry(insert_into_message_map)
+            )
             session.commit()
     except Exception as e:
         if session:
@@ -683,15 +700,11 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
     try:
         async_message_edits: list[Coroutine[Any, Any, None]] = []
         with SQLSession(engine) as session:
-
-            def get_bridged_messages():
-                select_message_map: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
-                    DBMessageMap
-                ).where(DBMessageMap.source_message == payload.message_id)
-                return session.scalars(select_message_map)
-
+            select_message_map: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
+                DBMessageMap
+            ).where(DBMessageMap.source_message == payload.message_id)
             bridged_messages: ScalarResult[DBMessageMap] = await sql_retry(
-                get_bridged_messages
+                lambda: session.scalars(select_message_map)
             )
 
             for message_row in bridged_messages:
@@ -916,15 +929,11 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
     try:
         async_message_deletes: list[Coroutine[Any, Any, None]] = []
         with SQLSession(engine) as session:
-
-            def get_bridged_messages():
-                select_message_map: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
-                    DBMessageMap
-                ).where(DBMessageMap.source_message == payload.message_id)
-                return session.scalars(select_message_map)
-
+            select_message_map: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
+                DBMessageMap
+            ).where(DBMessageMap.source_message == payload.message_id)
             bridged_messages: ScalarResult[DBMessageMap] = await sql_retry(
-                get_bridged_messages
+                lambda: session.scalars(select_message_map)
             )
             for message_row in bridged_messages:
                 target_channel_id = int(message_row.target_channel)
@@ -1007,8 +1016,8 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
 
             # If the message was bridged, delete its row
             # If it was a source of bridged messages, delete all rows of its bridged versions
-            def delete_bridged_messages():
-                session.execute(
+            await sql_retry(
+                lambda: session.execute(
                     SQLDelete(DBMessageMap).where(
                         sql_or(
                             DBMessageMap.source_message == str(payload.message_id),
@@ -1016,8 +1025,7 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
                         )
                     )
                 )
-
-            await sql_retry(delete_bridged_messages)
+            )
             session.commit()
     except Exception as e:
         if session:
@@ -1202,17 +1210,14 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
 
         with SQLSession(engine) as session:
             # Let me check whether I've already reacted to bridged messages in some of these channels
-            def get_already_bridged_reactions():
-                select_reaction_map: SQLSelect[tuple[DBReactionMap]] = SQLSelect(
-                    DBReactionMap
-                ).where(
-                    DBReactionMap.source_message == source_message_id_str,
-                    DBReactionMap.source_emoji == emoji_id_str,
-                )
-                return session.scalars(select_reaction_map)
-
+            select_reaction_map: SQLSelect[tuple[DBReactionMap]] = SQLSelect(
+                DBReactionMap
+            ).where(
+                DBReactionMap.source_message == source_message_id_str,
+                DBReactionMap.source_emoji == emoji_id_str,
+            )
             already_bridged_reactions: ScalarResult[DBReactionMap] = await sql_retry(
-                get_already_bridged_reactions
+                lambda: session.scalars(select_reaction_map)
             )
             already_bridged_reaction_channels = {
                 int(bridged_reaction.target_channel)
@@ -1227,16 +1232,13 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                 return
 
             # First, check whether this message is bridged, in which case I need to find its source
-            def get_source_message_map():
-                select_message_map: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
-                    DBMessageMap
-                ).where(
-                    DBMessageMap.target_message == source_message_id_str,
-                )
-                return session.scalars(select_message_map).first()
-
+            select_message_map: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
+                DBMessageMap
+            ).where(
+                DBMessageMap.target_message == source_message_id_str,
+            )
             source_message_map: DBMessageMap | None = await sql_retry(
-                get_source_message_map
+                lambda: session.scalars(select_message_map).first()
             )
             if isinstance(source_message_map, DBMessageMap):
                 # This message was bridged, so find the original one, react to it, and then find any other bridged messages from it
@@ -1275,22 +1277,15 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
             if not bridges.get_outbound_bridges(source_channel_id):
                 if len(async_add_reactions) > 0:
                     reaction_added = await async_add_reactions[0]
-
-                    def insert_into_reactions_map():
-                        session.add(reaction_added)
-                        session.commit()
-
-                    await sql_retry(insert_into_reactions_map)
+                    await sql_retry(lambda: session.add(reaction_added))
+                    session.commit()
                 return
 
-            def get_bridged_messages():
-                select_message_map: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
-                    DBMessageMap
-                ).where(DBMessageMap.source_message == str(source_message_id))
-                return session.scalars(select_message_map)
-
+            select_message_map: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
+                DBMessageMap
+            ).where(DBMessageMap.source_message == str(source_message_id))
             bridged_messages_query_result: ScalarResult[DBMessageMap] = await sql_retry(
-                get_bridged_messages
+                lambda: session.scalars(select_message_map)
             )
             for message_row in bridged_messages_query_result:
                 target_channel_id = int(message_row.target_channel)
@@ -1322,12 +1317,8 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                     raise
 
         reactions_added = await asyncio.gather(*async_add_reactions)
-
-        def insert_into_reactions_map():
-            session.add_all([r for r in reactions_added if r])
-            session.commit()
-
-        await sql_retry(insert_into_reactions_map)
+        await sql_retry(lambda: session.add_all([r for r in reactions_added if r]))
+        session.commit()
     except Exception as e:
         if session:
             session.rollback()

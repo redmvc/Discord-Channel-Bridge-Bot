@@ -1,9 +1,11 @@
-discord.py @ git+https://github.com/redmvc/discord.py@7b7dd83a
-typing_extensions==4.12.2
-# Uncomment one of the lines below depending on which SQL dialect your server will be using and make sure to use the correct one in your settings.json file
-# PyMySQL
-# psycopg2
-# pysqlite
-SQLAlchemy==2.0.31
 aiolimiter==1.1.0
 beartype==0.18.5
+cryptography==43.0.0
+discord.py @ git+https://github.com/redmvc/discord.py@7b7dd83a
+sphinx==7.4.7
+SQLAlchemy==2.0.31
+typing_extensions==4.12.2
+# Uncomment one of the lines below and choose a version depending on which SQL dialect your server will be using and make sure to use the correct one in your settings.json file
+# pymysql==X.Y.Z
+# psycopg2==X.Y.Z
+# pysqlite==X.Y.Z
