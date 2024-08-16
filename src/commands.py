@@ -74,7 +74,7 @@ async def help(
             + "\n- whenever someone adds a reaction to one message the bot will add the same reaction (if it can) to all of its mirrors;"
             + "\n- and deleting the original message will delete its copies (but not vice-versa)."
             + "\nThreads created in a channel do not automatically get matched to other channels bridged to it; create and bridge them manually or use the `/bridge_thread` or `/auto_bridge_threads` command."
-            + f"\n\nList of commands: `/bridge`, `/bridge_thread`, `/auto_bridge_threads`, `/demolish`, `/demolish_all`, `/whitelist`{emoji_server_commands}, `/help`.\nType `/help command` for detailed explanation of a command.",
+            + f"\n\nList of commands: `/bridge`, `/bridge_thread`, `/auto_bridge_threads`, `/demolish`, `/demolish_all`, `/whitelist`{emoji_server_commands}, `/help`.\n\nType `/help command` for detailed explanation of a command. You can also go to [the bot's documentation page](<https://discord-channel-bridge-bot.readthedocs.io/en/latest/>) for detailed explanations of all commands available.",
             ephemeral=True,
         )
     else:

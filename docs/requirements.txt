@@ -3,6 +3,7 @@ beartype==0.18.5
 cryptography==43.0.0
 discord.py @ git+https://github.com/redmvc/discord.py@7b7dd83a
 sphinx==7.4.7
+sphinx_rtd_dark_mode==1.3.0
 SQLAlchemy==2.0.31
 typing_extensions==4.12.2
 pymysql==1.1.1
