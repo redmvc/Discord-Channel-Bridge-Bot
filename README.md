@@ -9,7 +9,7 @@ This bot is a simple Python bot for bridging messages between Discord text chann
 ## Usage
 To add this bot to your server, visit [this link](https://discord.com/oauth2/authorize?client_id=1253380419773136947) and invite it. From there, usage is simple: just use the `/bridge target` slash-command and a bridge between the current and target channels will be created! Messages, attachments, reactions, edits, and deletions will be mirrored, and both channels will act as if they are the same.
 
-There are, however, many more commands than just that, as well as some options for customisation. You can check the [documentation](https://readthedocs.org/projects/discord-channel-bridge-bot/) for details!
+There are, however, many more commands than just that, as well as some options for customisation. You can check the [documentation](https://discord-channel-bridge-bot.readthedocs.io/en/latest/) for details!
 
 ## Running your own copy
 It's very straightforward to run your own copy of this bot. You'll need access to an SQL database running MySQL, PostgreSQL, or SQLite, and a Discord developer account.
