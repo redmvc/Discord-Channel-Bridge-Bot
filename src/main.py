@@ -289,6 +289,20 @@ async def on_message(message: discord.Message):
 
 
 @beartype
+def truncate(msg: str, length: int) -> str:
+    """Truncate a message to a certain length.
+
+    #### Args:
+        - `msg`: The message to truncate.
+        - `length`: Its maximum length.
+
+    #### Returns:
+        `str`: The truncated message.
+    """
+    return msg if len(msg) < length else msg[: length - 1] + "…"
+
+
+@beartype
 async def bridge_message_helper(message: discord.Message):
     """Mirror a message to any of its outbound bridge targets.
 
@@ -578,9 +592,6 @@ async def bridge_message_to_target_channel(
         # The message being replied to is also bridged to this channel, so I'll create an embed to represent this
         try:
             message_replied_to = await target_channel.fetch_message(bridged_reply_to)
-
-            def truncate(msg: str, length: int) -> str:
-                return msg if len(msg) < length else msg[: length - 1] + "…"
 
             display_name = discord.utils.escape_markdown(
                 message_replied_to.author.display_name
