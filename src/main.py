@@ -671,7 +671,7 @@ async def bridge_message_to_target_channel(
                 reply_embed = [
                     discord.Embed.from_dict(
                         create_reply_embed_dict(
-                            replied_author.default_avatar,
+                            replied_author.display_avatar,
                             replied_author_name,
                             "The message being replied to could not be loaded.",
                             replied_content,
