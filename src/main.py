@@ -401,11 +401,14 @@ async def bridge_message_helper(message: discord.Message):
                     # by the code above
                     message_embeds = snapshot.embeds
 
+            message_is_reply = (
+                not is_forwarded and message.reference and message.reference.message_id
+            )
             bridged_reply_to: dict[int, int] = {}
             replied_author = None
             replied_content = None
             reply_has_ping = False
-            if not is_forwarded and message.reference and message.reference.message_id:
+            if message_is_reply:
                 # This message is a reply to another message, so we should try to link to its match on the other side of bridges
                 # bridged_reply_to will be a dict whose keys are channel IDs and whose values are the IDs of messages matching the
                 # message I'm replying to in those channels
@@ -494,6 +497,7 @@ async def bridge_message_helper(message: discord.Message):
                         target_channel,
                         webhook,
                         webhook_channel,
+                        message_is_reply,
                         replied_author,
                         replied_content,
                         bridged_reply_to.get(target_id),
@@ -558,6 +562,7 @@ async def bridge_message_to_target_channel(
     target_channel: discord.TextChannel | discord.Thread,
     webhook: discord.Webhook,
     webhook_channel: discord.TextChannel,
+    message_is_reply: bool,
     replied_author: discord.User | discord.Member | None,
     replied_content: str | None,
     bridged_reply_to: int | None,
@@ -575,6 +580,7 @@ async def bridge_message_to_target_channel(
         - `target_channel`: The channel the message is being bridged to.
         - `webhook`: The webhook that will send the message.
         - `webhook_channel`: The parent channel the webhook is attached to.
+        - `message_is_reply`: Whether the message being bridged is replying to another message.
         - `replied_author`: The author of the message the message being bridged is replying to.
         - `replied_content`: The content of the message the message being bridged is replying to.
         - `bridged_reply_to`: The ID of a message the message being bridged is replying to on the target channel.
@@ -602,52 +608,61 @@ async def bridge_message_to_target_channel(
         bridged_member_name = message.author.display_name
         bridged_avatar_url = message.author.display_avatar
 
-    if bridged_reply_to:
-        # The message being replied to is also bridged to this channel, so I'll create an embed to represent this
-        def create_reply_embed_dict(
-            replied_to_author_avatar: discord.Asset,
-            replied_to_author_name: str,
-            jump_url: str,
-            replied_content: str,
-        ):
-            return {
-                "type": "rich",
-                "thumbnail": {
-                    "url": replied_to_author_avatar.replace(size=16).url,
-                    "height": 18,
-                    "width": 18,
-                },
-                "description": f"**[↪]({jump_url}) {replied_to_author_name}**  {replied_content}",
-            }
+    if message_is_reply:
+        # This message is a reply to another message
+        if bridged_reply_to:
+            # The message being replied to is also bridged to this channel, so I'll create an embed to represent this
+            def create_reply_embed_dict(
+                replied_to_author_avatar: discord.Asset,
+                replied_to_author_name: str,
+                jump_url: str,
+                replied_content: str,
+            ):
+                return {
+                    "type": "rich",
+                    "thumbnail": {
+                        "url": replied_to_author_avatar.replace(size=16).url,
+                        "height": 18,
+                        "width": 18,
+                    },
+                    "description": f"**[↪]({jump_url}) {replied_to_author_name}**  {replied_content}",
+                }
 
-        try:
-            message_replied_to = await target_channel.fetch_message(bridged_reply_to)
-
-            # Use the author's display name if they're in this server
-            display_name = discord.utils.escape_markdown(
-                message_replied_to.author.display_name
-            )
-            # Discord represents ping "ON" vs "OFF" replies with an @ symbol before the reply author name
-            # copy this behavior here
-            if reply_has_ping:
-                display_name = "@" + display_name
-
-            if not replied_content:
-                replied_content = await replace_missing_emoji(
-                    truncate(
-                        discord.utils.remove_markdown(message_replied_to.clean_content),
-                        50,
-                    )
+            try:
+                message_replied_to = await target_channel.fetch_message(
+                    bridged_reply_to
                 )
-            reply_embed_dict = create_reply_embed_dict(
-                message_replied_to.author.display_avatar,
-                display_name,
-                message_replied_to.jump_url,
-                replied_content,
-            )
-            reply_embed_dict["url"] = message_replied_to.jump_url
-            reply_embed = [discord.Embed.from_dict(reply_embed_dict)]
-        except discord.HTTPException:
+
+                # Use the author's display name if they're in this server
+                display_name = discord.utils.escape_markdown(
+                    message_replied_to.author.display_name
+                )
+                # Discord represents ping "ON" vs "OFF" replies with an @ symbol before the reply author name
+                # copy this behavior here
+                if reply_has_ping:
+                    display_name = "@" + display_name
+
+                if not replied_content:
+                    replied_content = await replace_missing_emoji(
+                        truncate(
+                            discord.utils.remove_markdown(
+                                message_replied_to.clean_content
+                            ),
+                            50,
+                        )
+                    )
+                reply_embed_dict = create_reply_embed_dict(
+                    message_replied_to.author.display_avatar,
+                    display_name,
+                    message_replied_to.jump_url,
+                    replied_content,
+                )
+                reply_embed_dict["url"] = message_replied_to.jump_url
+                reply_embed = [discord.Embed.from_dict(reply_embed_dict)]
+            except discord.HTTPException:
+                bridged_reply_to = False
+
+        if not bridged_reply_to:
             if replied_content and replied_author:
                 replied_author_name = discord.utils.escape_markdown(replied_author.name)
                 if reply_has_ping:
