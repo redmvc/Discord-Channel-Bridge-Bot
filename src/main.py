@@ -613,11 +613,14 @@ async def bridge_message_to_target_channel(
         def create_reply_embed_dict(
             replied_to_author_avatar: discord.Asset,
             replied_to_author_name: str,
-            jump_url: str,
             replied_content: str,
+            *,
+            jump_url: str | None = None,
+            error_msg: str | None = None,
         ):
-            return {
+            reply_embed_dict = {
                 "type": "rich",
+                "url": jump_url,
                 "thumbnail": {
                     "url": replied_to_author_avatar.replace(size=16).url,
                     "height": 18,
@@ -625,6 +628,18 @@ async def bridge_message_to_target_channel(
                 },
                 "description": f"**[↪]({jump_url}) {replied_to_author_name}**  {replied_content}",
             }
+
+            if jump_url:
+                reply_embed_dict["url"] = jump_url
+                reply_embed_dict["description"] = (
+                    f"**[↪]({jump_url}) {replied_to_author_name}**  {replied_content}"
+                )
+            elif error_msg:
+                reply_embed_dict["description"] = (
+                    f"**↪ {replied_to_author_name}**  {replied_content}\n\n#- {error_msg}"
+                )
+
+            return reply_embed_dict
 
         if bridged_reply_to:
             # The message being replied to is also bridged to this channel, so I'll create an embed to represent this
@@ -654,15 +669,38 @@ async def bridge_message_to_target_channel(
                 reply_embed_dict = create_reply_embed_dict(
                     message_replied_to.author.display_avatar,
                     display_name,
-                    message_replied_to.jump_url,
                     replied_content,
+                    jump_url=message_replied_to.jump_url,
                 )
-                reply_embed_dict["url"] = message_replied_to.jump_url
                 reply_embed = [discord.Embed.from_dict(reply_embed_dict)]
             except discord.HTTPException:
-                bridged_reply_to = False
+                if replied_content and replied_author:
+                    replied_author_name = discord.utils.escape_markdown(
+                        replied_author.name
+                    )
+                    if reply_has_ping:
+                        replied_author_name = "@" + replied_author_name
 
-        if not bridged_reply_to:
+                    reply_embed = [
+                        discord.Embed.from_dict(
+                            create_reply_embed_dict(
+                                replied_author.display_avatar,
+                                replied_author_name,
+                                replied_content,
+                                error_msg="The message being replied to could not be loaded.",
+                            )
+                        )
+                    ]
+                else:
+                    reply_embed = [
+                        discord.Embed.from_dict(
+                            {
+                                "type": "rich",
+                                "description": f"-# **↪** This message is a reply but the message being replied to could not be loaded.",
+                            }
+                        )
+                    ]
+        else:
             if replied_content and replied_author:
                 replied_author_name = discord.utils.escape_markdown(replied_author.name)
                 if reply_has_ping:
@@ -673,8 +711,8 @@ async def bridge_message_to_target_channel(
                         create_reply_embed_dict(
                             replied_author.display_avatar,
                             replied_author_name,
-                            "The message being replied to could not be loaded.",
                             replied_content,
+                            error_msg="The message being replied has not been bridged.",
                         )
                     )
                 ]
@@ -683,7 +721,7 @@ async def bridge_message_to_target_channel(
                     discord.Embed.from_dict(
                         {
                             "type": "rich",
-                            "description": f"**↪** This message is a reply but the message being replied to could not be loaded.",
+                            "description": f"-# **↪** This message is a reply but the message being replied to could not be loaded.",
                         }
                     )
                 ]
