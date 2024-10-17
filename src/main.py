@@ -712,7 +712,7 @@ async def bridge_message_to_target_channel(
                             replied_author.display_avatar,
                             replied_author_name,
                             replied_content,
-                            error_msg="The message being replied has not been bridged.",
+                            error_msg="The message being replied to has not been bridged.",
                         )
                     )
                 ]
