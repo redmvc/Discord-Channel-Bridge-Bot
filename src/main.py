@@ -636,7 +636,7 @@ async def bridge_message_to_target_channel(
                 )
             elif error_msg:
                 reply_embed_dict["description"] = (
-                    f"**↪ {replied_to_author_name}**  {replied_content}\n\n#- {error_msg}"
+                    f"**↪ {replied_to_author_name}**  {replied_content}\n\n-# {error_msg}"
                 )
 
             return reply_embed_dict
