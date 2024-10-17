@@ -401,7 +401,7 @@ async def bridge_message_helper(message: discord.Message):
                     # by the code above
                     message_embeds = snapshot.embeds
 
-            message_is_reply = (
+            message_is_reply = not not (
                 not is_forwarded and message.reference and message.reference.message_id
             )
             bridged_reply_to: dict[int, int] = {}
