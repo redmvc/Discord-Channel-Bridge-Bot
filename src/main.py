@@ -610,24 +610,24 @@ async def bridge_message_to_target_channel(
 
     if message_is_reply:
         # This message is a reply to another message
+        def create_reply_embed_dict(
+            replied_to_author_avatar: discord.Asset,
+            replied_to_author_name: str,
+            jump_url: str,
+            replied_content: str,
+        ):
+            return {
+                "type": "rich",
+                "thumbnail": {
+                    "url": replied_to_author_avatar.replace(size=16).url,
+                    "height": 18,
+                    "width": 18,
+                },
+                "description": f"**[↪]({jump_url}) {replied_to_author_name}**  {replied_content}",
+            }
+
         if bridged_reply_to:
             # The message being replied to is also bridged to this channel, so I'll create an embed to represent this
-            def create_reply_embed_dict(
-                replied_to_author_avatar: discord.Asset,
-                replied_to_author_name: str,
-                jump_url: str,
-                replied_content: str,
-            ):
-                return {
-                    "type": "rich",
-                    "thumbnail": {
-                        "url": replied_to_author_avatar.replace(size=16).url,
-                        "height": 18,
-                        "width": 18,
-                    },
-                    "description": f"**[↪]({jump_url}) {replied_to_author_name}**  {replied_content}",
-                }
-
             try:
                 message_replied_to = await target_channel.fetch_message(
                     bridged_reply_to
