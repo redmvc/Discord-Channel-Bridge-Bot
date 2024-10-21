@@ -171,7 +171,6 @@ async def on_ready():
             )
         else:
             globals.emoji_server = emoji_server
-            await emoji_hash_map.map.load_forwarded_message_emoji()
 
         logger.info("Emoji server loaded.")
     else:
