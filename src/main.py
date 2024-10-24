@@ -1072,17 +1072,40 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
         - `Forbidden`: Tried to delete a message that is not yours.
         - `ValueError`: A webhook does not have a token associated with it.
     """
-    if not await globals.wait_until_ready():
-        return
+    lock = globals.message_lock.get(payload.message_id)
+    if not lock:
+        lock = globals.message_lock[payload.message_id] = asyncio.Lock()
 
-    if not bridges.get_outbound_bridges(payload.channel_id):
-        return
+    async with lock:
+        if not await globals.wait_until_ready():
+            return
 
-    logger.debug("Bridging deletion of message with ID %s.", payload.message_id)
+        if not bridges.get_outbound_bridges(payload.channel_id):
+            return
+
+        await delete_message_helper(payload.message_id, payload.channel_id)
+
+    del globals.message_lock[payload.message_id]
+
+
+@beartype
+async def delete_message_helper(message_id: int, channel_id: int):
+    """Delete bridged versions of a message, if possible.
+
+    #### Args:
+        - `message_id`: The message ID.
+        - `channel_id`: The ID of the channel the message being edited is in.
+
+    #### Raises:
+        - `HTTPException`: Deleting a message failed.
+        - `Forbidden`: Tried to delete a message that is not yours.
+        - `ValueError`: A webhook does not have a token associated with it.
+    """
+    logger.debug("Bridging deletion of message with ID %s.", message_id)
 
     # Get all channels reachable from this one via an unbroken sequence of outbound bridges as well as their webhooks
     reachable_channels = await bridges.get_reachable_channels(
-        payload.channel_id,
+        channel_id,
         "outbound",
         include_webhooks=True,
     )
@@ -1094,7 +1117,7 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
         with SQLSession(engine) as session:
             select_message_map: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
                 DBMessageMap
-            ).where(DBMessageMap.source_message == payload.message_id)
+            ).where(DBMessageMap.source_message == message_id)
             bridged_messages: ScalarResult[DBMessageMap] = await sql_retry(
                 lambda: session.scalars(select_message_map)
             )
@@ -1183,8 +1206,8 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
                 lambda: session.execute(
                     SQLDelete(DBMessageMap).where(
                         sql_or(
-                            DBMessageMap.source_message == str(payload.message_id),
-                            DBMessageMap.target_message == str(payload.message_id),
+                            DBMessageMap.source_message == str(message_id),
+                            DBMessageMap.target_message == str(message_id),
                         )
                     )
                 )
@@ -1208,9 +1231,7 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
 
     await asyncio.gather(*async_message_deletes)
 
-    logger.debug(
-        "Successfully bridged deletion of message with ID %s.", payload.message_id
-    )
+    logger.debug("Successfully bridged deletion of message with ID %s.", message_id)
 
 
 @globals.client.event
