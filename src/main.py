@@ -4,7 +4,7 @@ import asyncio
 import inspect
 import re
 from copy import deepcopy
-from typing import Any, Coroutine, TypedDict, cast, overload
+from typing import Any, Coroutine, NamedTuple, TypedDict, cast, overload
 
 import discord
 from beartype import beartype
@@ -451,9 +451,9 @@ async def bridge_message_helper(message: discord.Message):
                 message_is_reply = False
 
             # Send a message out to each target webhook
-            async_bridged_messages: list[
-                Coroutine[Any, Any, discord.WebhookMessage | discord.Message | None]
-            ] = []
+            async_bridged_messages: list[Coroutine[Any, Any, BridgedMessage | None]] = (
+                []
+            )
             for target_id, webhook in reachable_channels.items():
                 if not webhook:
                     continue
@@ -502,7 +502,7 @@ async def bridge_message_helper(message: discord.Message):
                 return
 
             # Insert references to the linked messages into the message_mappings table
-            bridged_messages: list[discord.WebhookMessage | discord.Message] = [
+            bridged_messages: list[BridgedMessage] = [
                 bridged_message
                 for bridged_message in (await asyncio.gather(*async_bridged_messages))
                 if bridged_message
@@ -516,7 +516,8 @@ async def bridge_message_helper(message: discord.Message):
                             source_message=source_message_id_str,
                             source_channel=source_channel_id_str,
                             target_message=bridged_message.id,
-                            target_channel=bridged_message.channel.id,
+                            target_channel=bridged_message.channel_id,
+                            forward_header_message=bridged_message.forwarded_header_id,
                             webhook=bridged_message.webhook_id,
                         )
                         for bridged_message in bridged_messages
@@ -543,9 +544,16 @@ async def bridge_message_helper(message: discord.Message):
     logger.debug("Message with ID %s successfully bridged.", message.id)
 
 
+class BridgedMessage(NamedTuple):
+    id: int
+    channel_id: int
+    webhook_id: int | None
+    forwarded_header_id: int | None
+
+
 @beartype
 async def bridge_message_to_target_channel(
-    message: discord.Message,
+    sent_message: discord.Message,
     message_content: str,
     message_attachments: list[discord.Attachment],
     message_embeds: list[discord.Embed],
@@ -560,7 +568,7 @@ async def bridge_message_to_target_channel(
     forwarded_message: discord.Message | None,
     thread_splat: ThreadSplat,
     session: SQLSession,
-) -> discord.WebhookMessage | discord.Message | None:
+) -> BridgedMessage | None:
     """Bridge a message to a channel and returns the message bridged.
 
     #### Args:
@@ -585,7 +593,7 @@ async def bridge_message_to_target_channel(
     """
     logger.debug(
         "Bridging message with ID %s to channel with ID %s.",
-        message.id,
+        sent_message.id,
         target_channel.id,
     )
 
@@ -607,16 +615,16 @@ async def bridge_message_to_target_channel(
 
     # Try to find whether the user who sent this message is on the other side of the bridge and if so what their name and avatar would be
     bridged_member = await globals.get_channel_member(
-        webhook_channel, message.author.id
+        webhook_channel, sent_message.author.id
     )
     if bridged_member:
         bridged_member_name = bridged_member.display_name
         bridged_avatar_url = bridged_member.display_avatar
         bridged_member_id = bridged_member.id
     else:
-        bridged_member_name = message.author.display_name
-        bridged_avatar_url = message.author.display_avatar
-        bridged_member_id = message.author.id
+        bridged_member_name = sent_message.author.display_name
+        bridged_avatar_url = sent_message.author.display_avatar
+        bridged_member_id = sent_message.author.id
 
     if message_is_reply:
         # This message is a reply to another message
@@ -752,7 +760,7 @@ async def bridge_message_to_target_channel(
     try:
         if not forwarded_message:
             # Message is not a forward
-            return await webhook.send(
+            sent_message = await webhook.send(
                 content=message_content,
                 allowed_mentions=discord.AllowedMentions(
                     users=True, roles=False, everyone=False
@@ -763,6 +771,12 @@ async def bridge_message_to_target_channel(
                 files=attachments,  # TODO might throw HHTPException if too large?
                 wait=True,
                 **thread_splat,
+            )
+            return BridgedMessage(
+                id=sent_message.id,
+                channel_id=sent_message.channel.id,
+                webhook_id=sent_message.webhook_id,
+                forwarded_header_id=None,
             )
         else:
             # Message is a forward so I'll send a short message saying who sent it then forward it myself
@@ -790,23 +804,35 @@ async def bridge_message_to_target_channel(
 
             if forwarded_message_channel_parent.nsfw and not target_channel_parent.nsfw:
                 # Messages can't be forwarded from NSFW channels to SFW channels
-                return await target_channel.send(
+                sent_message = await target_channel.send(
                     allowed_mentions=discord.AllowedMentions(
                         users=False, roles=False, everyone=False
                     ),
                     content=f"> -# <@{bridged_member_id}> forwarded a message from an NSFW channel across the bridge but this channel is SFW; forwarding failed.",
                 )
+
+                return BridgedMessage(
+                    id=sent_message.id,
+                    channel_id=sent_message.channel.id,
+                    webhook_id=sent_message.webhook_id,
+                    forwarded_header_id=None,
+                )
             else:
                 # Either the target channel is NSFW or the source isn't, so the forwarding can work fine
                 async def bridge_forwarded_message():
-                    await target_channel.send(
+                    forward_header = await target_channel.send(
                         allowed_mentions=discord.AllowedMentions(
                             users=False, roles=False, everyone=False
                         ),
                         content=f"> -# The following message was originally forwarded by <@{bridged_member_id}>.",
                     )
                     bridged_forward = await forwarded_message.forward(target_channel)
-                    return bridged_forward
+                    return BridgedMessage(
+                        id=bridged_forward.id,
+                        channel_id=bridged_forward.channel.id,
+                        webhook_id=bridged_forward.webhook_id,
+                        forwarded_header_id=forward_header.id,
+                    )
 
                 return await bridge_forwarded_message()
     except discord.NotFound:
@@ -1305,51 +1331,66 @@ async def delete_message_helper(message_id: int, channel_id: int):
                         target_channel_id: int,
                         thread_splat: ThreadSplat,
                     ):
-                        if not message_row.webhook:
-                            return
-
-                        # The webhook returned by the call to get_reachable_channels() may not be the same as the one used to post the message
-                        message_webhook_id = int(message_row.webhook)
-                        if (
-                            message_webhook_id
-                            == reachable_channels[target_channel_id].id
-                        ):
-                            webhook = reachable_channels[target_channel_id]
-                        else:
-                            try:
-                                webhook = await globals.client.fetch_webhook(
-                                    message_webhook_id
-                                )
-                            except Exception:
-                                return
-
-                        try:
-                            await webhook.delete_message(
-                                int(message_row.target_message),
-                                **thread_splat,
-                            )
-                        except discord.NotFound:
-                            # Webhook is gone, delete this bridge
-                            assert isinstance(
-                                bridged_channel, (discord.TextChannel, discord.Thread)
-                            )
-                            logger.warning(
-                                "Webhook in %s:%s (ID: %s) not found, demolishing bridges to this channel and its threads.",
-                                bridged_channel.guild.name,
-                                bridged_channel.name,
-                                bridged_channel.id,
-                            )
-                            try:
-                                await bridges.demolish_bridges(
-                                    target_channel=bridged_channel, session=session
-                                )
-                            except Exception as e:
-                                if not isinstance(e, discord.HTTPException):
-                                    logger.error(
-                                        "Exception occurred when trying to demolish an invalid bridge after bridging a message deletion: %s",
-                                        e,
+                        if message_row.webhook:
+                            # The webhook returned by the call to get_reachable_channels() may not be the same as the one used to post the message
+                            message_webhook_id = int(message_row.webhook)
+                            if (
+                                message_webhook_id
+                                == reachable_channels[target_channel_id].id
+                            ):
+                                webhook = reachable_channels[target_channel_id]
+                            else:
+                                try:
+                                    webhook = await globals.client.fetch_webhook(
+                                        message_webhook_id
                                     )
-                                raise
+                                except Exception:
+                                    return
+
+                            try:
+                                await webhook.delete_message(
+                                    int(message_row.target_message),
+                                    **thread_splat,
+                                )
+                            except discord.NotFound:
+                                # Webhook is gone, delete this bridge
+                                assert isinstance(
+                                    bridged_channel,
+                                    (discord.TextChannel, discord.Thread),
+                                )
+                                logger.warning(
+                                    "Webhook in %s:%s (ID: %s) not found, demolishing bridges to this channel and its threads.",
+                                    bridged_channel.guild.name,
+                                    bridged_channel.name,
+                                    bridged_channel.id,
+                                )
+                                try:
+                                    await bridges.demolish_bridges(
+                                        target_channel=bridged_channel, session=session
+                                    )
+                                except Exception as e:
+                                    if not isinstance(e, discord.HTTPException):
+                                        logger.error(
+                                            "Exception occurred when trying to demolish an invalid bridge after bridging a message deletion: %s",
+                                            e,
+                                        )
+                                    raise
+                        elif message_row.forward_header_message:
+                            # If the message doesn't have a webhook, it's forwarded
+                            partial_target_channel = (
+                                globals.client.get_partial_messageable(
+                                    target_channel_id
+                                )
+                            )
+                            await partial_target_channel.get_partial_message(
+                                int(message_row.target_message)
+                            ).delete()
+                            await partial_target_channel.get_partial_message(
+                                int(message_row.forward_header_message)
+                            ).delete()
+                        else:
+                            # This should never happen
+                            return
 
                     async_message_deletes.append(
                         delete_message(message_row, target_channel_id, thread_splat)
