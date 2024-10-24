@@ -297,20 +297,6 @@ async def on_message(message: discord.Message):
 
 
 @beartype
-def truncate(msg: str, length: int) -> str:
-    """Truncate a message to a certain length.
-
-    #### Args:
-        - `msg`: The message to truncate.
-        - `length`: Its maximum length.
-
-    #### Returns:
-        `str`: The truncated message.
-    """
-    return msg if len(msg) < length else msg[: length - 1] + "…"
-
-
-@beartype
 async def bridge_message_helper(message: discord.Message):
     """Mirror a message to any of its outbound bridge targets.
 
@@ -414,7 +400,7 @@ async def bridge_message_helper(message: discord.Message):
                 replied_to_message = message.reference.resolved
                 if isinstance(replied_to_message, discord.Message):
                     replied_content = await replace_missing_emoji(
-                        truncate(
+                        globals.truncate(
                             discord.utils.remove_markdown(
                                 replied_to_message.clean_content
                             ),
@@ -673,7 +659,7 @@ async def bridge_message_to_target_channel(
 
                 if not replied_content:
                     replied_content = await replace_missing_emoji(
-                        truncate(
+                        globals.truncate(
                             discord.utils.remove_markdown(
                                 message_replied_to.clean_content
                             ),
