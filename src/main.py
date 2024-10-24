@@ -580,7 +580,7 @@ async def bridge_message_to_target_channel(
         - `message`: The message being bridged.
         - `message_content`: Its contents.
         - `message_attachments`: Its attachments.
-        - `message_embneds`: Its embeds.
+        - `message_embeds`: Its embeds.
         - `target_channel`: The channel the message is being bridged to.
         - `webhook`: The webhook that will send the message.
         - `webhook_channel`: The parent channel the webhook is attached to.
@@ -868,7 +868,7 @@ async def edit_message_helper(message_content: str, message_id: int, channel_id:
     """Edit bridged versions of a message, if possible.
 
     #### Args:
-        - `message_content`: The contents of thhe message.
+        - `message_content`: The updated contents of the message.
         - `message_id`: The message ID.
         - `channel_id`: The ID of the channel the message being edited is in.
 
