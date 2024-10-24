@@ -956,10 +956,34 @@ async def edit_message_helper(
                                 return
 
                         try:
+                            target_channel = webhook.channel
+                            channel_specific_message_content = message_content
+                            channel_specific_embeds = deepcopy(embeds)
+                            if isinstance(target_channel, discord.TextChannel):
+                                # Replace Discord links in the message and embed text
+                                channel_specific_message_content = (
+                                    await replace_discord_links(
+                                        channel_specific_message_content,
+                                        target_channel,
+                                        session,
+                                    )
+                                )
+                                for embed in channel_specific_embeds:
+                                    embed.description = await replace_discord_links(
+                                        embed.description,
+                                        target_channel,
+                                        session,
+                                    )
+                                    embed.title = await replace_discord_links(
+                                        embed.title,
+                                        target_channel,
+                                        session,
+                                    )
+
                             await webhook.edit_message(
                                 message_id=int(message_row.target_message),
-                                content=message_content,
-                                embeds=embeds,
+                                content=channel_specific_message_content,
+                                embeds=channel_specific_embeds,
                                 **thread_splat,
                             )
                         except discord.NotFound:
@@ -996,7 +1020,7 @@ async def edit_message_helper(
                         + str(e)
                     )
 
-        await asyncio.gather(*async_message_edits)
+            await asyncio.gather(*async_message_edits)
     except Exception as e:
         if isinstance(e, SQLError):
             logger.warning(
