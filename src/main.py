@@ -392,34 +392,35 @@ async def bridge_message_helper(message: discord.Message):
                 message_attachments = []
                 message_embeds = []
 
-            message_is_reply = not not (
-                not forwarded_message
-                and message.reference
-                and message.reference.message_id
-            )
             bridged_reply_to: dict[int, int] = {}
             replied_author = None
             replied_content = None
             reply_has_ping = False
-            if message_is_reply:
+            if (
+                not forwarded_message
+                and message.reference
+                and message.reference.message_id
+            ):
                 # This message is a reply to another message, so we should try to link to its match on the other side of bridges
                 # bridged_reply_to will be a dict whose keys are channel IDs and whose values are the IDs of messages matching the
                 # message I'm replying to in those channels
+                message_is_reply = True
                 replied_to_message = message.reference.resolved
-                replied_content = await replace_missing_emoji(
-                    truncate(
-                        discord.utils.remove_markdown(replied_to_message.clean_content),
-                        50,
+                if isinstance(replied_to_message, discord.Message):
+                    replied_content = await replace_missing_emoji(
+                        truncate(
+                            discord.utils.remove_markdown(
+                                replied_to_message.clean_content
+                            ),
+                            50,
+                        )
                     )
-                )
-                replied_author = replied_to_message.author
+                    replied_author = replied_to_message.author
 
-                # identify if this reply "pinged" the target, to know whether to add the @ symbol UI
-                reply_has_ping = isinstance(
-                    replied_to_message, discord.Message
-                ) and any(
-                    x.id == replied_to_message.author.id for x in message.mentions
-                )
+                    # identify if this reply "pinged" the target, to know whether to add the @ symbol UI
+                    reply_has_ping = any(
+                        x.id == replied_to_message.author.id for x in message.mentions
+                    )
 
                 # First, check whether the message replied to was itself bridged from a different channel
                 replied_to_id = message.reference.message_id
@@ -452,6 +453,8 @@ async def bridge_message_helper(message: discord.Message):
                     bridged_reply_to[int(message_map.target_channel)] = int(
                         message_map.target_message
                     )
+            else:
+                message_is_reply = False
 
             # Send a message out to each target webhook
             async_bridged_messages: list[
