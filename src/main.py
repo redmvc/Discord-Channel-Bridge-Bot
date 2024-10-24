@@ -1331,51 +1331,66 @@ async def delete_message_helper(message_id: int, channel_id: int):
                         target_channel_id: int,
                         thread_splat: ThreadSplat,
                     ):
-                        if not message_row.webhook:
-                            return
-
-                        # The webhook returned by the call to get_reachable_channels() may not be the same as the one used to post the message
-                        message_webhook_id = int(message_row.webhook)
-                        if (
-                            message_webhook_id
-                            == reachable_channels[target_channel_id].id
-                        ):
-                            webhook = reachable_channels[target_channel_id]
-                        else:
-                            try:
-                                webhook = await globals.client.fetch_webhook(
-                                    message_webhook_id
-                                )
-                            except Exception:
-                                return
-
-                        try:
-                            await webhook.delete_message(
-                                int(message_row.target_message),
-                                **thread_splat,
-                            )
-                        except discord.NotFound:
-                            # Webhook is gone, delete this bridge
-                            assert isinstance(
-                                bridged_channel, (discord.TextChannel, discord.Thread)
-                            )
-                            logger.warning(
-                                "Webhook in %s:%s (ID: %s) not found, demolishing bridges to this channel and its threads.",
-                                bridged_channel.guild.name,
-                                bridged_channel.name,
-                                bridged_channel.id,
-                            )
-                            try:
-                                await bridges.demolish_bridges(
-                                    target_channel=bridged_channel, session=session
-                                )
-                            except Exception as e:
-                                if not isinstance(e, discord.HTTPException):
-                                    logger.error(
-                                        "Exception occurred when trying to demolish an invalid bridge after bridging a message deletion: %s",
-                                        e,
+                        if message_row.webhook:
+                            # The webhook returned by the call to get_reachable_channels() may not be the same as the one used to post the message
+                            message_webhook_id = int(message_row.webhook)
+                            if (
+                                message_webhook_id
+                                == reachable_channels[target_channel_id].id
+                            ):
+                                webhook = reachable_channels[target_channel_id]
+                            else:
+                                try:
+                                    webhook = await globals.client.fetch_webhook(
+                                        message_webhook_id
                                     )
-                                raise
+                                except Exception:
+                                    return
+
+                            try:
+                                await webhook.delete_message(
+                                    int(message_row.target_message),
+                                    **thread_splat,
+                                )
+                            except discord.NotFound:
+                                # Webhook is gone, delete this bridge
+                                assert isinstance(
+                                    bridged_channel,
+                                    (discord.TextChannel, discord.Thread),
+                                )
+                                logger.warning(
+                                    "Webhook in %s:%s (ID: %s) not found, demolishing bridges to this channel and its threads.",
+                                    bridged_channel.guild.name,
+                                    bridged_channel.name,
+                                    bridged_channel.id,
+                                )
+                                try:
+                                    await bridges.demolish_bridges(
+                                        target_channel=bridged_channel, session=session
+                                    )
+                                except Exception as e:
+                                    if not isinstance(e, discord.HTTPException):
+                                        logger.error(
+                                            "Exception occurred when trying to demolish an invalid bridge after bridging a message deletion: %s",
+                                            e,
+                                        )
+                                    raise
+                        elif message_row.forward_header_message:
+                            # If the message doesn't have a webhook, it's forwarded
+                            partial_target_channel = (
+                                globals.client.get_partial_messageable(
+                                    target_channel_id
+                                )
+                            )
+                            await partial_target_channel.get_partial_message(
+                                int(message_row.target_message)
+                            ).delete()
+                            await partial_target_channel.get_partial_message(
+                                int(message_row.forward_header_message)
+                            ).delete()
+                        else:
+                            # This should never happen
+                            return
 
                     async_message_deletes.append(
                         delete_message(message_row, target_channel_id, thread_splat)
