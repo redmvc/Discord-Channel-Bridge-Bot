@@ -253,41 +253,47 @@ async def on_message(message: discord.Message):
         - `Forbidden`: The authorization token for one of the webhooks is incorrect.
         - `ValueError`: The length of embeds was invalid, there was no token associated with one of the webhooks or ephemeral was passed with the improper webhook type or there was no state attached with one of the webhooks when giving it a view.
     """
-    if not isinstance(message.channel, (discord.TextChannel, discord.Thread)):
-        return
+    lock = asyncio.Lock()
+    async with lock:
+        globals.message_lock[message.id] = lock
 
-    if message.type not in {discord.MessageType.default, discord.MessageType.reply}:
-        # Only bridge contentful messages
-        return
+        if not isinstance(message.channel, (discord.TextChannel, discord.Thread)):
+            return
 
-    if message.author.id == globals.client.application_id or (
-        message.application_id
-        and (
-            message.application_id == globals.client.application_id
-            or (
-                (
-                    not (
-                        local_whitelist := globals.per_channel_whitelist.get(
-                            message.channel.id
+        if message.type not in {discord.MessageType.default, discord.MessageType.reply}:
+            # Only bridge contentful messages
+            return
+
+        if message.author.id == globals.client.application_id or (
+            message.application_id
+            and (
+                message.application_id == globals.client.application_id
+                or (
+                    (
+                        not (
+                            local_whitelist := globals.per_channel_whitelist.get(
+                                message.channel.id
+                            )
                         )
+                        or message.application_id not in local_whitelist
                     )
-                    or message.application_id not in local_whitelist
-                )
-                and (
-                    not (global_whitelist := globals.settings.get("whitelisted_apps"))
-                    or message.application_id
-                    not in [int(app_id) for app_id in global_whitelist]
+                    and (
+                        not (
+                            global_whitelist := globals.settings.get("whitelisted_apps")
+                        )
+                        or message.application_id
+                        not in [int(app_id) for app_id in global_whitelist]
+                    )
                 )
             )
-        )
-    ):
-        # Don't bridge messages from non-whitelisted applications or from self
-        return
+        ):
+            # Don't bridge messages from non-whitelisted applications or from self
+            return
 
-    if not await globals.wait_until_ready():
-        return
+        if not await globals.wait_until_ready():
+            return
 
-    await bridge_message_helper(message)
+        await bridge_message_helper(message)
 
 
 @beartype
