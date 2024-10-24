@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from copy import deepcopy
 import inspect
 import re
 from typing import Any, Coroutine, TypedDict, cast, overload
@@ -482,7 +483,7 @@ async def bridge_message_helper(message: discord.Message):
                         message,
                         message_content,
                         message_attachments,
-                        message_embeds,
+                        deepcopy(message_embeds),
                         target_channel,
                         webhook,
                         webhook_channel,
@@ -588,6 +589,22 @@ async def bridge_message_to_target_channel(
         message.id,
         target_channel.id,
     )
+
+    # Replace Discord links in the message and embed text
+    message_content = await replace_discord_links(
+        message_content, target_channel, session
+    )
+    for embed in message_embeds:
+        embed.description = await replace_discord_links(
+            embed.description,
+            target_channel,
+            session,
+        )
+        embed.title = await replace_discord_links(
+            embed.title,
+            target_channel,
+            session,
+        )
 
     # Try to find whether the user who sent this message is on the other side of the bridge and if so what their name and avatar would be
     bridged_member = await globals.get_channel_member(
