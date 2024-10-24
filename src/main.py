@@ -842,25 +842,49 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
         - `Forbidden`: Tried to edit a message that is not yours.
         - `ValueError`: The length of embeds was invalid, there was no token associated with a webhook or a webhook had no state.
     """
-    updated_message_content = payload.data.get("content")
-    if not updated_message_content or updated_message_content == "":
-        # Not a content edit
-        return
+    lock = globals.message_lock.get(payload.message_id)
+    if not lock:
+        lock = globals.message_lock[payload.message_id] = asyncio.Lock()
 
-    if not await globals.wait_until_ready():
-        return
+    async with lock:
+        updated_message_content = payload.data.get("content")
+        if not updated_message_content or updated_message_content == "":
+            # Not a content edit
+            return
 
-    if not bridges.get_outbound_bridges(payload.channel_id):
-        return
+        if not await globals.wait_until_ready():
+            return
 
-    logger.debug("Bridging edit to message with ID %s.", payload.message_id)
+        if not bridges.get_outbound_bridges(payload.channel_id):
+            return
+
+        await edit_message_helper(
+            updated_message_content, payload.message_id, payload.channel_id
+        )
+
+
+@beartype
+async def edit_message_helper(message_content: str, message_id: int, channel_id: int):
+    """Edit bridged versions of a message, if possible.
+
+    #### Args:
+        - `message_content`: The contents of thhe message.
+        - `message_id`: The message ID.
+        - `channel_id`: The ID of the channel the message being edited is in.
+
+    #### Raises:
+        - `HTTPException`: Editing a message failed.
+        - `Forbidden`: Tried to edit a message that is not yours.
+        - `ValueError`: The length of embeds was invalid, there was no token associated with a webhook or a webhook had no state.
+    """
+    logger.debug("Bridging edit to message with ID %s.", message_id)
 
     # Ensure that the message has emoji I have access to
-    updated_message_content = await replace_missing_emoji(updated_message_content)
+    message_content = await replace_missing_emoji(message_content)
 
     # Get all channels reachable from this one via an unbroken sequence of outbound bridges as well as their webhooks
     reachable_channels = await bridges.get_reachable_channels(
-        payload.channel_id,
+        channel_id,
         "outbound",
         include_webhooks=True,
     )
@@ -871,7 +895,7 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
         with SQLSession(engine) as session:
             select_message_map: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
                 DBMessageMap
-            ).where(DBMessageMap.source_message == payload.message_id)
+            ).where(DBMessageMap.source_message == message_id)
             bridged_messages: ScalarResult[DBMessageMap] = await sql_retry(
                 lambda: session.scalars(select_message_map)
             )
@@ -921,7 +945,7 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
                         try:
                             await webhook.edit_message(
                                 message_id=int(message_row.target_message),
-                                content=updated_message_content,
+                                content=message_content,
                                 **thread_splat,
                             )
                         except discord.NotFound:
@@ -971,7 +995,7 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
 
         raise
 
-    logger.debug("Successfully bridged edit to message with ID %s.", payload.message_id)
+    logger.debug("Successfully bridged edit to message with ID %s.", message_id)
 
 
 @beartype
@@ -1038,9 +1062,7 @@ async def replace_missing_emoji(message_content: str) -> str:
 
 @globals.client.event
 async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
-    """Delete bridged versions of a message, if possible.
-
-    This function is called when a message is deleted. Unlike `on_message_delete()`, this is called regardless of the message being in the internal message cache or not.
+    """This function is called when a message is deleted. Unlike `on_message_delete()`, this is called regardless of the message being in the internal message cache or not.
 
     #### Args:
         - `payload`: The raw event payload data.
