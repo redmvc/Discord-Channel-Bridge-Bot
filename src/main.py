@@ -858,17 +858,26 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
         if not bridges.get_outbound_bridges(payload.channel_id):
             return
 
+        embeds = [
+            discord.Embed.from_dict(embed) for embed in payload.data.get("embeds")
+        ]
         await edit_message_helper(
-            updated_message_content, payload.message_id, payload.channel_id
+            updated_message_content, embeds, payload.message_id, payload.channel_id
         )
 
 
 @beartype
-async def edit_message_helper(message_content: str, message_id: int, channel_id: int):
+async def edit_message_helper(
+    message_content: str,
+    embeds: list[discord.Embed],
+    message_id: int,
+    channel_id: int,
+):
     """Edit bridged versions of a message, if possible.
 
     #### Args:
         - `message_content`: The updated contents of the message.
+        - `embeds`: The updated embeds of the message.
         - `message_id`: The message ID.
         - `channel_id`: The ID of the channel the message being edited is in.
 
@@ -946,6 +955,7 @@ async def edit_message_helper(message_content: str, message_id: int, channel_id:
                             await webhook.edit_message(
                                 message_id=int(message_row.target_message),
                                 content=message_content,
+                                embeds=embeds,
                                 **thread_splat,
                             )
                         except discord.NotFound:
