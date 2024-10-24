@@ -1,15 +1,17 @@
 from __future__ import annotations
 
 import asyncio
+from copy import deepcopy
 import inspect
 import re
-from typing import Any, Coroutine, TypedDict, cast
+from typing import Any, Coroutine, TypedDict, cast, overload
 
 import discord
 from beartype import beartype
 from sqlalchemy import Delete as SQLDelete
 from sqlalchemy import ScalarResult
 from sqlalchemy import Select as SQLSelect
+from sqlalchemy import and_ as sql_and
 from sqlalchemy import or_ as sql_or
 from sqlalchemy.exc import StatementError as SQLError
 from sqlalchemy.orm import Session as SQLSession
@@ -297,20 +299,6 @@ async def on_message(message: discord.Message):
 
 
 @beartype
-def truncate(msg: str, length: int) -> str:
-    """Truncate a message to a certain length.
-
-    #### Args:
-        - `msg`: The message to truncate.
-        - `length`: Its maximum length.
-
-    #### Returns:
-        `str`: The truncated message.
-    """
-    return msg if len(msg) < length else msg[: length - 1] + "…"
-
-
-@beartype
 async def bridge_message_helper(message: discord.Message):
     """Mirror a message to any of its outbound bridge targets.
 
@@ -414,7 +402,7 @@ async def bridge_message_helper(message: discord.Message):
                 replied_to_message = message.reference.resolved
                 if isinstance(replied_to_message, discord.Message):
                     replied_content = await replace_missing_emoji(
-                        truncate(
+                        globals.truncate(
                             discord.utils.remove_markdown(
                                 replied_to_message.clean_content
                             ),
@@ -495,7 +483,7 @@ async def bridge_message_helper(message: discord.Message):
                         message,
                         message_content,
                         message_attachments,
-                        message_embeds,
+                        deepcopy(message_embeds),
                         target_channel,
                         webhook,
                         webhook_channel,
@@ -602,6 +590,22 @@ async def bridge_message_to_target_channel(
         target_channel.id,
     )
 
+    # Replace Discord links in the message and embed text
+    message_content = await replace_discord_links(
+        message_content, target_channel, session
+    )
+    for embed in message_embeds:
+        embed.description = await replace_discord_links(
+            embed.description,
+            target_channel,
+            session,
+        )
+        embed.title = await replace_discord_links(
+            embed.title,
+            target_channel,
+            session,
+        )
+
     # Try to find whether the user who sent this message is on the other side of the bridge and if so what their name and avatar would be
     bridged_member = await globals.get_channel_member(
         webhook_channel, message.author.id
@@ -673,7 +677,7 @@ async def bridge_message_to_target_channel(
 
                 if not replied_content:
                     replied_content = await replace_missing_emoji(
-                        truncate(
+                        globals.truncate(
                             discord.utils.remove_markdown(
                                 message_replied_to.clean_content
                             ),
@@ -952,10 +956,34 @@ async def edit_message_helper(
                                 return
 
                         try:
+                            target_channel = webhook.channel
+                            channel_specific_message_content = message_content
+                            channel_specific_embeds = deepcopy(embeds)
+                            if isinstance(target_channel, discord.TextChannel):
+                                # Replace Discord links in the message and embed text
+                                channel_specific_message_content = (
+                                    await replace_discord_links(
+                                        channel_specific_message_content,
+                                        target_channel,
+                                        session,
+                                    )
+                                )
+                                for embed in channel_specific_embeds:
+                                    embed.description = await replace_discord_links(
+                                        embed.description,
+                                        target_channel,
+                                        session,
+                                    )
+                                    embed.title = await replace_discord_links(
+                                        embed.title,
+                                        target_channel,
+                                        session,
+                                    )
+
                             await webhook.edit_message(
                                 message_id=int(message_row.target_message),
-                                content=message_content,
-                                embeds=embeds,
+                                content=channel_specific_message_content,
+                                embeds=channel_specific_embeds,
                                 **thread_splat,
                             )
                         except discord.NotFound:
@@ -992,7 +1020,7 @@ async def edit_message_helper(
                         + str(e)
                     )
 
-        await asyncio.gather(*async_message_edits)
+            await asyncio.gather(*async_message_edits)
     except Exception as e:
         if isinstance(e, SQLError):
             logger.warning(
@@ -1068,6 +1096,129 @@ async def replace_missing_emoji(message_content: str) -> str:
     for missing_emoji_str, new_emoji_str in emoji_to_replace.items():
         message_content = message_content.replace(missing_emoji_str, new_emoji_str)
     return message_content
+
+
+@overload
+async def replace_discord_links(
+    content: None,
+    channel: discord.TextChannel | discord.Thread,
+    session: SQLSession,
+) -> None: ...
+
+
+@overload
+async def replace_discord_links(
+    content: str,
+    channel: discord.TextChannel | discord.Thread,
+    session: SQLSession,
+) -> str: ...
+
+
+@beartype
+async def replace_discord_links(
+    content: str | None,
+    channel: discord.TextChannel | discord.Thread,
+    session: SQLSession,
+) -> str | None:
+    """Return a version of the contents of a string that replaces any links to other messages within the same channel or parent channel to appropriately bridged ones.
+
+    #### Args:
+        - `content`: The string to process.
+        - `channel`: The channel this message is being processed for.
+        - `session`: A connection to the database.
+
+    #### Raises
+        - `RuntimeError`: Session connection failed.
+        - `ServerTimeoutError`: Connection to server timed out.
+    """
+    if content is None:
+        return None
+
+    message_links: set[tuple[str, str, str, str]] = set(
+        re.findall(r"discord(app)?.com/channels/(\d+|@me)/(\d+)/(\d+)", content)
+    )
+    if len(message_links) == 0:
+        # No links to replace
+        return content
+
+    logger.debug(
+        "Replacing discord links when bridging message into channel with ID %s.",
+        channel.id,
+    )
+    guild_id = channel.guild.id
+
+    # Get all reachable channel IDs from the current channel
+    channel_id = channel.id
+    channel_ids_to_check = {str(channel_id)}
+    bridged_channel_ids: set[int] = set().union(
+        await bridges.get_reachable_channels(channel_id, "outbound"),
+        await bridges.get_reachable_channels(channel_id, "inbound"),
+    )
+
+    # If the current channel is actually a thread, get reachable channel IDs from its parent
+    parent_channel = channel
+    if isinstance(channel, discord.Thread) and isinstance(
+        channel.parent, discord.TextChannel
+    ):
+        parent_channel = channel.parent
+        parent_channel_id = parent_channel.id
+        channel_ids_to_check.add(str(parent_channel_id))
+        bridged_channel_ids = bridged_channel_ids.union(
+            await bridges.get_reachable_channels(parent_channel_id, "outbound"),
+            await bridges.get_reachable_channels(parent_channel_id, "inbound"),
+        )
+
+    # Get the channel IDs of all threads of the channel
+    assert isinstance(parent_channel, discord.TextChannel)
+    for thread in parent_channel.threads:
+        thread_id = thread.id
+        if thread_id == channel_id:
+            continue
+
+        channel_ids_to_check.add(str(thread_id))
+        bridged_channel_ids = bridged_channel_ids.union(
+            await bridges.get_reachable_channels(thread_id, "outbound"),
+            await bridges.get_reachable_channels(thread_id, "inbound"),
+        )
+
+    # Now try to find equivalent links if the messages being linked to are bridged
+    for _, link_guild_id, link_channel_id, link_message_id in message_links:
+        if int(link_channel_id) not in bridged_channel_ids:
+            continue
+
+        # The message being linked is from a channel that is bridged to the current channel
+        select_message_map: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
+            DBMessageMap
+        ).where(
+            sql_or(
+                sql_and(
+                    DBMessageMap.source_message == link_message_id,
+                    DBMessageMap.target_channel.in_(channel_ids_to_check),
+                ),
+                sql_and(
+                    DBMessageMap.target_message == link_message_id,
+                    DBMessageMap.source_channel.in_(channel_ids_to_check),
+                ),
+            )
+        )
+        bridged_messages: ScalarResult[DBMessageMap] = await sql_retry(
+            lambda: session.scalars(select_message_map)
+        )
+        for message_row in bridged_messages:
+            if message_row.source_message == link_message_id:
+                content = content.replace(
+                    f"{link_guild_id}/{link_channel_id}/{link_message_id}",
+                    f"{guild_id}/{message_row.target_channel}/{message_row.target_message}",
+                )
+            else:
+                content = content.replace(
+                    f"{link_guild_id}/{link_channel_id}/{link_message_id}",
+                    f"{guild_id}/{message_row.source_channel}/{message_row.source_message}",
+                )
+
+            break
+
+    return content
 
 
 @globals.client.event

@@ -310,6 +310,20 @@ def hash_image(image: bytes) -> str:
 
 
 @beartype
+def truncate(msg: str, length: int) -> str:
+    """Truncate a message to a certain length.
+
+    #### Args:
+        - `msg`: The message to truncate.
+        - `length`: Its maximum length.
+
+    #### Returns:
+        `str`: The truncated message.
+    """
+    return msg if len(msg) < length else msg[: length - 1] + "…"
+
+
+@beartype
 async def wait_until_ready(
     *, time_to_wait: float | int = 100, polling_rate: float | int = 1
 ) -> bool:
