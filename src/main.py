@@ -618,7 +618,6 @@ async def bridge_message_to_target_channel(
         ):
             reply_embed_dict = {
                 "type": "rich",
-                "url": jump_url,
                 "thumbnail": {
                     "url": replied_to_author_avatar.replace(size=16).url,
                     "height": 18,
