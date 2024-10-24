@@ -623,7 +623,6 @@ async def bridge_message_to_target_channel(
                     "height": 18,
                     "width": 18,
                 },
-                "description": f"**[↪]({jump_url}) {replied_to_author_name}**  {replied_content}",
             }
 
             if jump_url:
