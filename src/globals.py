@@ -115,6 +115,9 @@ per_channel_whitelist: dict[int, set[int]] = {}
 # Helper to prevent us from being rate limited
 rate_limiter = AsyncLimiter(1, 10)
 
+# Variable to keep track of messages that are still being bridged/edited before they can be edited/deleted
+message_lock: dict[int, asyncio.Lock] = {}
+
 # Type wildcard
 T = TypeVar("T", bound=Any)
 
