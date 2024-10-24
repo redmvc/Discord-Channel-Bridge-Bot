@@ -615,8 +615,8 @@ async def bridge_message_to_target_channel(
             *,
             jump_url: str | None = None,
             error_msg: str | None = None,
-        ):
-            reply_embed_dict = {
+        ) -> dict[str, str | dict[str, int | str]]:
+            reply_embed_dict: dict[str, str | dict[str, int | str]] = {
                 "type": "rich",
                 "thumbnail": {
                     "url": replied_to_author_avatar.replace(size=16).url,
