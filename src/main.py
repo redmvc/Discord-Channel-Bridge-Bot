@@ -609,30 +609,39 @@ async def bridge_message_to_target_channel(
     if message_is_reply:
         # This message is a reply to another message
         def create_reply_embed_dict(
-            replied_to_author_avatar: discord.Asset,
-            replied_to_author_name: str,
-            replied_content: str,
+            replied_to_author_avatar: discord.Asset | None,
+            replied_to_author_name: str | None,
+            replied_content: str | None,
             *,
             jump_url: str | None = None,
             error_msg: str | None = None,
         ) -> dict[str, str | dict[str, int | str]]:
-            reply_embed_dict: dict[str, str | dict[str, int | str]] = {
-                "type": "rich",
-                "thumbnail": {
+            reply_embed_dict: dict[str, str | dict[str, int | str]] = {"type": "rich"}
+
+            if replied_to_author_avatar and replied_to_author_name and replied_content:
+                reply_embed_dict["thumbnail"] = {
                     "url": replied_to_author_avatar.replace(size=16).url,
                     "height": 18,
                     "width": 18,
-                },
-            }
+                }
 
-            if jump_url:
+                if jump_url:
+                    reply_embed_dict["url"] = jump_url
+                    reply_embed_dict["description"] = (
+                        f"**[↪]({jump_url}) {replied_to_author_name}**  {replied_content}"
+                    )
+                elif error_msg:
+                    reply_embed_dict["description"] = (
+                        f"**↪ {replied_to_author_name}**  {replied_content}\n\n-# {error_msg}"
+                    )
+            elif jump_url:
                 reply_embed_dict["url"] = jump_url
                 reply_embed_dict["description"] = (
-                    f"**[↪]({jump_url}) {replied_to_author_name}**  {replied_content}"
+                    f"**[↪]({jump_url})**\n\n-# Couldn't load contents of the message this message is replying to."
                 )
-            elif error_msg:
+            else:
                 reply_embed_dict["description"] = (
-                    f"**↪ {replied_to_author_name}**  {replied_content}\n\n-# {error_msg}"
+                    "**↪\n\n-# This message is a reply but the message it's replying to could not be loaded."
                 )
 
             return reply_embed_dict
