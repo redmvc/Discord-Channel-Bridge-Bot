@@ -253,41 +253,47 @@ async def on_message(message: discord.Message):
         - `Forbidden`: The authorization token for one of the webhooks is incorrect.
         - `ValueError`: The length of embeds was invalid, there was no token associated with one of the webhooks or ephemeral was passed with the improper webhook type or there was no state attached with one of the webhooks when giving it a view.
     """
-    if not isinstance(message.channel, (discord.TextChannel, discord.Thread)):
-        return
+    lock = asyncio.Lock()
+    async with lock:
+        globals.message_lock[message.id] = lock
 
-    if message.type not in {discord.MessageType.default, discord.MessageType.reply}:
-        # Only bridge contentful messages
-        return
+        if not isinstance(message.channel, (discord.TextChannel, discord.Thread)):
+            return
 
-    if message.author.id == globals.client.application_id or (
-        message.application_id
-        and (
-            message.application_id == globals.client.application_id
-            or (
-                (
-                    not (
-                        local_whitelist := globals.per_channel_whitelist.get(
-                            message.channel.id
+        if message.type not in {discord.MessageType.default, discord.MessageType.reply}:
+            # Only bridge contentful messages
+            return
+
+        if message.author.id == globals.client.application_id or (
+            message.application_id
+            and (
+                message.application_id == globals.client.application_id
+                or (
+                    (
+                        not (
+                            local_whitelist := globals.per_channel_whitelist.get(
+                                message.channel.id
+                            )
                         )
+                        or message.application_id not in local_whitelist
                     )
-                    or message.application_id not in local_whitelist
-                )
-                and (
-                    not (global_whitelist := globals.settings.get("whitelisted_apps"))
-                    or message.application_id
-                    not in [int(app_id) for app_id in global_whitelist]
+                    and (
+                        not (
+                            global_whitelist := globals.settings.get("whitelisted_apps")
+                        )
+                        or message.application_id
+                        not in [int(app_id) for app_id in global_whitelist]
+                    )
                 )
             )
-        )
-    ):
-        # Don't bridge messages from non-whitelisted applications or from self
-        return
+        ):
+            # Don't bridge messages from non-whitelisted applications or from self
+            return
 
-    if not await globals.wait_until_ready():
-        return
+        if not await globals.wait_until_ready():
+            return
 
-    await bridge_message_helper(message)
+        await bridge_message_helper(message)
 
 
 @beartype
@@ -836,25 +842,49 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
         - `Forbidden`: Tried to edit a message that is not yours.
         - `ValueError`: The length of embeds was invalid, there was no token associated with a webhook or a webhook had no state.
     """
-    updated_message_content = payload.data.get("content")
-    if not updated_message_content or updated_message_content == "":
-        # Not a content edit
-        return
+    lock = globals.message_lock.get(payload.message_id)
+    if not lock:
+        lock = globals.message_lock[payload.message_id] = asyncio.Lock()
 
-    if not await globals.wait_until_ready():
-        return
+    async with lock:
+        updated_message_content = payload.data.get("content")
+        if not updated_message_content or updated_message_content == "":
+            # Not a content edit
+            return
 
-    if not bridges.get_outbound_bridges(payload.channel_id):
-        return
+        if not await globals.wait_until_ready():
+            return
 
-    logger.debug("Bridging edit to message with ID %s.", payload.message_id)
+        if not bridges.get_outbound_bridges(payload.channel_id):
+            return
+
+        await edit_message_helper(
+            updated_message_content, payload.message_id, payload.channel_id
+        )
+
+
+@beartype
+async def edit_message_helper(message_content: str, message_id: int, channel_id: int):
+    """Edit bridged versions of a message, if possible.
+
+    #### Args:
+        - `message_content`: The contents of thhe message.
+        - `message_id`: The message ID.
+        - `channel_id`: The ID of the channel the message being edited is in.
+
+    #### Raises:
+        - `HTTPException`: Editing a message failed.
+        - `Forbidden`: Tried to edit a message that is not yours.
+        - `ValueError`: The length of embeds was invalid, there was no token associated with a webhook or a webhook had no state.
+    """
+    logger.debug("Bridging edit to message with ID %s.", message_id)
 
     # Ensure that the message has emoji I have access to
-    updated_message_content = await replace_missing_emoji(updated_message_content)
+    message_content = await replace_missing_emoji(message_content)
 
     # Get all channels reachable from this one via an unbroken sequence of outbound bridges as well as their webhooks
     reachable_channels = await bridges.get_reachable_channels(
-        payload.channel_id,
+        channel_id,
         "outbound",
         include_webhooks=True,
     )
@@ -865,7 +895,7 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
         with SQLSession(engine) as session:
             select_message_map: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
                 DBMessageMap
-            ).where(DBMessageMap.source_message == payload.message_id)
+            ).where(DBMessageMap.source_message == message_id)
             bridged_messages: ScalarResult[DBMessageMap] = await sql_retry(
                 lambda: session.scalars(select_message_map)
             )
@@ -915,7 +945,7 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
                         try:
                             await webhook.edit_message(
                                 message_id=int(message_row.target_message),
-                                content=updated_message_content,
+                                content=message_content,
                                 **thread_splat,
                             )
                         except discord.NotFound:
@@ -965,7 +995,7 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
 
         raise
 
-    logger.debug("Successfully bridged edit to message with ID %s.", payload.message_id)
+    logger.debug("Successfully bridged edit to message with ID %s.", message_id)
 
 
 @beartype
@@ -1032,9 +1062,7 @@ async def replace_missing_emoji(message_content: str) -> str:
 
 @globals.client.event
 async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
-    """Delete bridged versions of a message, if possible.
-
-    This function is called when a message is deleted. Unlike `on_message_delete()`, this is called regardless of the message being in the internal message cache or not.
+    """This function is called when a message is deleted. Unlike `on_message_delete()`, this is called regardless of the message being in the internal message cache or not.
 
     #### Args:
         - `payload`: The raw event payload data.
@@ -1044,17 +1072,40 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
         - `Forbidden`: Tried to delete a message that is not yours.
         - `ValueError`: A webhook does not have a token associated with it.
     """
-    if not await globals.wait_until_ready():
-        return
+    lock = globals.message_lock.get(payload.message_id)
+    if not lock:
+        lock = globals.message_lock[payload.message_id] = asyncio.Lock()
 
-    if not bridges.get_outbound_bridges(payload.channel_id):
-        return
+    async with lock:
+        if not await globals.wait_until_ready():
+            return
 
-    logger.debug("Bridging deletion of message with ID %s.", payload.message_id)
+        if not bridges.get_outbound_bridges(payload.channel_id):
+            return
+
+        await delete_message_helper(payload.message_id, payload.channel_id)
+
+    del globals.message_lock[payload.message_id]
+
+
+@beartype
+async def delete_message_helper(message_id: int, channel_id: int):
+    """Delete bridged versions of a message, if possible.
+
+    #### Args:
+        - `message_id`: The message ID.
+        - `channel_id`: The ID of the channel the message being edited is in.
+
+    #### Raises:
+        - `HTTPException`: Deleting a message failed.
+        - `Forbidden`: Tried to delete a message that is not yours.
+        - `ValueError`: A webhook does not have a token associated with it.
+    """
+    logger.debug("Bridging deletion of message with ID %s.", message_id)
 
     # Get all channels reachable from this one via an unbroken sequence of outbound bridges as well as their webhooks
     reachable_channels = await bridges.get_reachable_channels(
-        payload.channel_id,
+        channel_id,
         "outbound",
         include_webhooks=True,
     )
@@ -1066,7 +1117,7 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
         with SQLSession(engine) as session:
             select_message_map: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
                 DBMessageMap
-            ).where(DBMessageMap.source_message == payload.message_id)
+            ).where(DBMessageMap.source_message == message_id)
             bridged_messages: ScalarResult[DBMessageMap] = await sql_retry(
                 lambda: session.scalars(select_message_map)
             )
@@ -1155,8 +1206,8 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
                 lambda: session.execute(
                     SQLDelete(DBMessageMap).where(
                         sql_or(
-                            DBMessageMap.source_message == str(payload.message_id),
-                            DBMessageMap.target_message == str(payload.message_id),
+                            DBMessageMap.source_message == str(message_id),
+                            DBMessageMap.target_message == str(message_id),
                         )
                     )
                 )
@@ -1180,9 +1231,7 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
 
     await asyncio.gather(*async_message_deletes)
 
-    logger.debug(
-        "Successfully bridged deletion of message with ID %s.", payload.message_id
-    )
+    logger.debug("Successfully bridged deletion of message with ID %s.", message_id)
 
 
 @globals.client.event
