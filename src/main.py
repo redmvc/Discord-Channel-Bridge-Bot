@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import asyncio
-from copy import deepcopy
 import inspect
 import re
+from copy import deepcopy
 from typing import Any, Coroutine, TypedDict, cast, overload
 
 import discord
