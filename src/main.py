@@ -1,15 +1,17 @@
 from __future__ import annotations
 
 import asyncio
+from copy import deepcopy
 import inspect
 import re
-from typing import Any, Coroutine, TypedDict, cast
+from typing import Any, Coroutine, TypedDict, cast, overload
 
 import discord
 from beartype import beartype
 from sqlalchemy import Delete as SQLDelete
 from sqlalchemy import ScalarResult
 from sqlalchemy import Select as SQLSelect
+from sqlalchemy import and_ as sql_and
 from sqlalchemy import or_ as sql_or
 from sqlalchemy.exc import StatementError as SQLError
 from sqlalchemy.orm import Session as SQLSession
@@ -171,7 +173,6 @@ async def on_ready():
             )
         else:
             globals.emoji_server = emoji_server
-            await emoji_hash_map.map.load_forwarded_message_emoji()
 
         logger.info("Emoji server loaded.")
     else:
@@ -254,38 +255,47 @@ async def on_message(message: discord.Message):
         - `Forbidden`: The authorization token for one of the webhooks is incorrect.
         - `ValueError`: The length of embeds was invalid, there was no token associated with one of the webhooks or ephemeral was passed with the improper webhook type or there was no state attached with one of the webhooks when giving it a view.
     """
-    if not isinstance(message.channel, (discord.TextChannel, discord.Thread)):
-        return
+    lock = asyncio.Lock()
+    async with lock:
+        globals.message_lock[message.id] = lock
 
-    if message.type not in {discord.MessageType.default, discord.MessageType.reply}:
-        # Only bridge contentful messages
-        return
+        if not isinstance(message.channel, (discord.TextChannel, discord.Thread)):
+            return
 
-    if message.application_id and (
-        message.application_id == globals.client.application_id
-        or (
-            (
-                not (
-                    local_whitelist := globals.per_channel_whitelist.get(
-                        message.channel.id
+        if message.type not in {discord.MessageType.default, discord.MessageType.reply}:
+            # Only bridge contentful messages
+            return
+
+        if message.author.id == globals.client.application_id or (
+            message.application_id
+            and (
+                message.application_id == globals.client.application_id
+                or (
+                    (
+                        not (
+                            local_whitelist := globals.per_channel_whitelist.get(
+                                message.channel.id
+                            )
+                        )
+                        or message.application_id not in local_whitelist
+                    )
+                    and (
+                        not (
+                            global_whitelist := globals.settings.get("whitelisted_apps")
+                        )
+                        or message.application_id
+                        not in [int(app_id) for app_id in global_whitelist]
                     )
                 )
-                or message.application_id not in local_whitelist
             )
-            and (
-                not (global_whitelist := globals.settings.get("whitelisted_apps"))
-                or message.application_id
-                not in [int(app_id) for app_id in global_whitelist]
-            )
-        )
-    ):
-        # Don't bridge messages from non-whitelisted applications or from self
-        return
+        ):
+            # Don't bridge messages from non-whitelisted applications or from self
+            return
 
-    if not await globals.wait_until_ready():
-        return
+        if not await globals.wait_until_ready():
+            return
 
-    await bridge_message_helper(message)
+        await bridge_message_helper(message)
 
 
 @beartype
@@ -333,10 +343,9 @@ async def bridge_message_helper(message: discord.Message):
                     message.id,
                 )
 
-                is_forwarded = False
-                message_content = await replace_missing_emoji(
-                    non_forwarded_message_start(message.content)
-                )
+                forwarded_message = None
+
+                message_content = await replace_missing_emoji(message.content)
                 message_attachments = message.attachments
                 message_embeds = message.embeds
             else:
@@ -345,65 +354,70 @@ async def bridge_message_helper(message: discord.Message):
                     "Message with ID %s has snapshots, is forwarded.", message.id
                 )
 
-                is_forwarded = True
-                snapshot = message.message_snapshots[0]
-                message_content = ""
-                message_attachments = snapshot.attachments
-
-                # If the original message being forwarded was created by me and it was, itself,
-                # a bridge of another forwarded message, I need to treat it differently
-                forwarded_message_id = message.reference.message_id
-                select_forwarded_message: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
-                    DBMessageMap
-                ).where(
-                    DBMessageMap.target_message == str(forwarded_message_id),
-                    DBMessageMap.forwarded,
-                )
-                query_result: ScalarResult[DBMessageMap] = await sql_retry(
-                    lambda: session.scalars(select_forwarded_message)
-                )
-                if not query_result.first():
-                    # The forwarded message was not a bridged forwarded message
-                    # so I'll just add an embed with its contents
-                    forwarded_message_header = (
-                        "-# "
-                        + (
-                            f"<:forwarded_message:{emoji_hash_map.map.forward_message_emoji_id}> "
-                            if emoji_hash_map.map.forward_message_emoji_id
-                            else ""
-                        )
-                        + "***Forwarded***"
+                forwarded_message = message
+                if (resolved_message := message.reference.resolved) and isinstance(
+                    resolved_message, discord.Message
+                ):
+                    # Original message is cached and I can just fetch it and forward it instead
+                    forwarded_message = resolved_message
+                elif message.reference.message_id:
+                    # Try to find the original message, if it's not resolved
+                    original_message_channel = await globals.get_channel_from_id(
+                        message.reference.channel_id
                     )
+                    if isinstance(
+                        original_message_channel, (discord.TextChannel, discord.Thread)
+                    ):
+                        # I have access to the channel of the original message being forwarded
+                        try:
+                            # Try to find the original message
+                            original_message = (
+                                await original_message_channel.fetch_message(
+                                    message.reference.message_id
+                                )
+                            )
+                            if isinstance(original_message, discord.Message):
+                                # I have access to the actual original message, I can forward it instead
+                                forwarded_message = original_message
+                        except Exception:
+                            pass
 
-                    message_embeds = [
-                        discord.Embed(
-                            colour=discord.Colour.from_str("#414348"),
-                            description=f"{forwarded_message_header}\n{snapshot.content}",
-                        )
-                    ] + snapshot.embeds
-                else:
-                    # The forwarded message was originally bridged
-                    # That means that its only content is the embeds, which were originally generated
-                    # by the code above
-                    message_embeds = snapshot.embeds
+                message_content = ""
+                message_attachments = []
+                message_embeds = []
 
             bridged_reply_to: dict[int, int] = {}
+            replied_author = None
+            replied_content = None
             reply_has_ping = False
-            if not is_forwarded and message.reference and message.reference.message_id:
+            if (
+                not forwarded_message
+                and message.reference
+                and message.reference.message_id
+            ):
                 # This message is a reply to another message, so we should try to link to its match on the other side of bridges
                 # bridged_reply_to will be a dict whose keys are channel IDs and whose values are the IDs of messages matching the
                 # message I'm replying to in those channels
-                replied_to_id = message.reference.message_id
-
-                # identify if this reply "pinged" the target, to know whether to add the @ symbol UI
+                message_is_reply = True
                 replied_to_message = message.reference.resolved
-                reply_has_ping = isinstance(
-                    replied_to_message, discord.Message
-                ) and any(
-                    x.id == replied_to_message.author.id for x in message.mentions
-                )
+                if isinstance(replied_to_message, discord.Message):
+                    replied_content = await replace_missing_emoji(
+                        globals.truncate(
+                            discord.utils.remove_markdown(
+                                replied_to_message.clean_content
+                            ),
+                            50,
+                        )
+                    )
+                    replied_author = replied_to_message.author
+
+                    # identify if this reply "pinged" the target, to know whether to add the @ symbol UI
+                    reply_has_ping = any(
+                        x.id == replied_to_message.author.id for x in message.mentions
+                    )
 
                 # First, check whether the message replied to was itself bridged from a different channel
+                replied_to_id = message.reference.message_id
                 select_message_map: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
                     DBMessageMap
                 ).where(DBMessageMap.target_message == str(replied_to_id))
@@ -421,7 +435,6 @@ async def bridge_message_helper(message: discord.Message):
                     bridged_reply_to[reply_source_channel_id] = source_replied_to_id
                 else:
                     source_replied_to_id = replied_to_id
-                    reply_source_channel_id = message_channel_id
 
                 # Now find all other bridged versions of the message we're replying to
                 select_bridged_reply_to: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
@@ -434,10 +447,12 @@ async def bridge_message_helper(message: discord.Message):
                     bridged_reply_to[int(message_map.target_channel)] = int(
                         message_map.target_message
                     )
+            else:
+                message_is_reply = False
 
             # Send a message out to each target webhook
             async_bridged_messages: list[
-                Coroutine[Any, Any, discord.WebhookMessage | None]
+                Coroutine[Any, Any, discord.WebhookMessage | discord.Message | None]
             ] = []
             for target_id, webhook in reachable_channels.items():
                 if not webhook:
@@ -468,12 +483,16 @@ async def bridge_message_helper(message: discord.Message):
                         message,
                         message_content,
                         message_attachments,
-                        message_embeds,
+                        deepcopy(message_embeds),
                         target_channel,
                         webhook,
                         webhook_channel,
+                        message_is_reply,
+                        replied_author,
+                        replied_content,
                         bridged_reply_to.get(target_id),
                         reply_has_ping,
+                        forwarded_message,
                         thread_splat,
                         session,
                     )
@@ -483,7 +502,7 @@ async def bridge_message_helper(message: discord.Message):
                 return
 
             # Insert references to the linked messages into the message_mappings table
-            bridged_messages: list[discord.WebhookMessage] = [
+            bridged_messages: list[discord.WebhookMessage | discord.Message] = [
                 bridged_message
                 for bridged_message in (await asyncio.gather(*async_bridged_messages))
                 if bridged_message
@@ -498,7 +517,7 @@ async def bridge_message_helper(message: discord.Message):
                             source_channel=source_channel_id_str,
                             target_message=bridged_message.id,
                             target_channel=bridged_message.channel.id,
-                            forwarded=is_forwarded,
+                            forwarded=not not forwarded_message,
                             webhook=bridged_message.webhook_id,
                         )
                         for bridged_message in bridged_messages
@@ -534,23 +553,31 @@ async def bridge_message_to_target_channel(
     target_channel: discord.TextChannel | discord.Thread,
     webhook: discord.Webhook,
     webhook_channel: discord.TextChannel,
+    message_is_reply: bool,
+    replied_author: discord.User | discord.Member | None,
+    replied_content: str | None,
     bridged_reply_to: int | None,
     reply_has_ping: bool,
+    forwarded_message: discord.Message | None,
     thread_splat: ThreadSplat,
     session: SQLSession,
-) -> discord.WebhookMessage | None:
+) -> discord.WebhookMessage | discord.Message | None:
     """Bridge a message to a channel and returns the message bridged.
 
     #### Args:
         - `message`: The message being bridged.
         - `message_content`: Its contents.
         - `message_attachments`: Its attachments.
-        - `message_embneds`: Its embeds.
+        - `message_embeds`: Its embeds.
         - `target_channel`: The channel the message is being bridged to.
         - `webhook`: The webhook that will send the message.
         - `webhook_channel`: The parent channel the webhook is attached to.
+        - `message_is_reply`: Whether the message being bridged is replying to another message.
+        - `replied_author`: The author of the message the message being bridged is replying to.
+        - `replied_content`: The content of the message the message being bridged is replying to.
         - `bridged_reply_to`: The ID of a message the message being bridged is replying to on the target channel.
         - `reply_has_ping`: Whether the reply is pinging the original message.
+        - `forwarded_message`: A message being forwarded, in case it is a forward.
         - `thread_splat`: A splat with the thread this message is being bridged to, if any.
         - `session`: A connection to the database.
 
@@ -563,6 +590,22 @@ async def bridge_message_to_target_channel(
         target_channel.id,
     )
 
+    # Replace Discord links in the message and embed text
+    message_content = await replace_discord_links(
+        message_content, target_channel, session
+    )
+    for embed in message_embeds:
+        embed.description = await replace_discord_links(
+            embed.description,
+            target_channel,
+            session,
+        )
+        embed.title = await replace_discord_links(
+            embed.title,
+            target_channel,
+            session,
+        )
+
     # Try to find whether the user who sent this message is on the other side of the bridge and if so what their name and avatar would be
     bridged_member = await globals.get_channel_member(
         webhook_channel, message.author.id
@@ -570,51 +613,136 @@ async def bridge_message_to_target_channel(
     if bridged_member:
         bridged_member_name = bridged_member.display_name
         bridged_avatar_url = bridged_member.display_avatar
+        bridged_member_id = bridged_member.id
     else:
         bridged_member_name = message.author.display_name
         bridged_avatar_url = message.author.display_avatar
+        bridged_member_id = message.author.id
 
-    if bridged_reply_to:
-        # The message being replied to is also bridged to this channel, so I'll create an embed to represent this
-        try:
-            message_replied_to = await target_channel.fetch_message(bridged_reply_to)
+    if message_is_reply:
+        # This message is a reply to another message
+        def create_reply_embed_dict(
+            replied_to_author_avatar: discord.Asset | None,
+            replied_to_author_name: str | None,
+            replied_content: str | None,
+            *,
+            jump_url: str | None = None,
+            error_msg: str | None = None,
+        ) -> dict[str, str | dict[str, int | str]]:
+            reply_embed_dict: dict[str, str | dict[str, int | str]] = {"type": "rich"}
 
-            def truncate(msg: str, length: int) -> str:
-                return msg if len(msg) < length else msg[: length - 1] + "…"
+            if replied_to_author_avatar and replied_to_author_name and replied_content:
+                reply_embed_dict["thumbnail"] = {
+                    "url": replied_to_author_avatar.replace(size=16).url,
+                    "height": 18,
+                    "width": 18,
+                }
 
-            display_name = discord.utils.escape_markdown(
-                message_replied_to.author.display_name
-            )
-
-            # Discord represents ping "ON" vs "OFF" replies with an @ symbol before the reply author name
-            # copy this behavior here
-            if reply_has_ping:
-                display_name = "@" + display_name
-
-            replied_content = await replace_missing_emoji(
-                truncate(
-                    discord.utils.remove_markdown(message_replied_to.clean_content),
-                    50,
+                if jump_url:
+                    reply_embed_dict["url"] = jump_url
+                    reply_embed_dict["description"] = (
+                        f"**[↪]({jump_url}) {replied_to_author_name}**  {replied_content}"
+                    )
+                elif error_msg:
+                    reply_embed_dict["description"] = (
+                        f"**↪ {replied_to_author_name}**  {replied_content}\n\n-# {error_msg}"
+                    )
+            elif jump_url:
+                reply_embed_dict["url"] = jump_url
+                reply_embed_dict["description"] = (
+                    f"**[↪]({jump_url})**\n\n-# Couldn't load contents of the message this message is replying to."
                 )
-            )
-            reply_embed = [
-                discord.Embed.from_dict(
-                    {
-                        "type": "rich",
-                        "url": message_replied_to.jump_url,
-                        "thumbnail": {
-                            "url": message_replied_to.author.display_avatar.replace(
-                                size=16
-                            ).url,
-                            "height": 18,
-                            "width": 18,
-                        },
-                        "description": f"**[↪]({message_replied_to.jump_url}) {display_name}**  {replied_content}",
-                    }
-                ),
-            ]
-        except discord.HTTPException:
-            reply_embed = []
+            else:
+                reply_embed_dict["description"] = (
+                    "**↪\n\n-# This message is a reply but the message it's replying to could not be loaded."
+                )
+
+            return reply_embed_dict
+
+        if bridged_reply_to:
+            # The message being replied to is also bridged to this channel, so I'll create an embed to represent this
+            try:
+                message_replied_to = await target_channel.fetch_message(
+                    bridged_reply_to
+                )
+
+                # Use the author's display name if they're in this server
+                display_name = discord.utils.escape_markdown(
+                    message_replied_to.author.display_name
+                )
+                # Discord represents ping "ON" vs "OFF" replies with an @ symbol before the reply author name
+                # copy this behavior here
+                if reply_has_ping:
+                    display_name = "@" + display_name
+
+                if not replied_content:
+                    replied_content = await replace_missing_emoji(
+                        globals.truncate(
+                            discord.utils.remove_markdown(
+                                message_replied_to.clean_content
+                            ),
+                            50,
+                        )
+                    )
+                reply_embed_dict = create_reply_embed_dict(
+                    message_replied_to.author.display_avatar,
+                    display_name,
+                    replied_content,
+                    jump_url=message_replied_to.jump_url,
+                )
+                reply_embed = [discord.Embed.from_dict(reply_embed_dict)]
+            except discord.HTTPException:
+                if replied_content and replied_author:
+                    replied_author_name = discord.utils.escape_markdown(
+                        replied_author.name
+                    )
+                    if reply_has_ping:
+                        replied_author_name = "@" + replied_author_name
+
+                    reply_embed = [
+                        discord.Embed.from_dict(
+                            create_reply_embed_dict(
+                                replied_author.display_avatar,
+                                replied_author_name,
+                                replied_content,
+                                error_msg="The message being replied to could not be loaded.",
+                            )
+                        )
+                    ]
+                else:
+                    reply_embed = [
+                        discord.Embed.from_dict(
+                            {
+                                "type": "rich",
+                                "description": f"-# **↪** This message is a reply but the message being replied to could not be loaded.",
+                            }
+                        )
+                    ]
+        else:
+            if replied_content and replied_author:
+                replied_author_name = discord.utils.escape_markdown(replied_author.name)
+                if reply_has_ping:
+                    replied_author_name = "@" + replied_author_name
+
+                reply_embed = [
+                    discord.Embed.from_dict(
+                        create_reply_embed_dict(
+                            replied_author.display_avatar,
+                            replied_author_name,
+                            replied_content,
+                            error_msg="The message being replied to has not been bridged or has been deleted.",
+                        )
+                    )
+                ]
+            else:
+                reply_embed = [
+                    discord.Embed.from_dict(
+                        {
+                            "type": "rich",
+                            "description": f"-# **↪** This message is a reply but the message being replied to could not be loaded.",
+                        }
+                    )
+                ]
     else:
         reply_embed = []
 
@@ -623,18 +751,65 @@ async def bridge_message_to_target_channel(
     )
 
     try:
-        return await webhook.send(
-            content=message_content,
-            allowed_mentions=discord.AllowedMentions(
-                users=True, roles=False, everyone=False
-            ),
-            avatar_url=bridged_avatar_url,
-            username=bridged_member_name,
-            embeds=list(message_embeds + reply_embed),
-            files=attachments,  # TODO might throw HHTPException if too large?
-            wait=True,
-            **thread_splat,
-        )
+        if not forwarded_message:
+            # Message is not a forward
+            return await webhook.send(
+                content=message_content,
+                allowed_mentions=discord.AllowedMentions(
+                    users=True, roles=False, everyone=False
+                ),
+                avatar_url=bridged_avatar_url,
+                username=bridged_member_name,
+                embeds=list(message_embeds + reply_embed),
+                files=attachments,  # TODO might throw HHTPException if too large?
+                wait=True,
+                **thread_splat,
+            )
+        else:
+            # Message is a forward so I'll send a short message saying who sent it then forward it myself
+            forwarded_message_channel = forwarded_message.channel
+            assert isinstance(
+                forwarded_message_channel, (discord.TextChannel, discord.Thread)
+            )
+
+            target_channel_parent = (
+                isinstance(target_channel, discord.TextChannel) and target_channel
+            ) or (
+                isinstance(target_channel.parent, discord.TextChannel)
+                and target_channel.parent
+            )
+            assert target_channel_parent
+
+            forwarded_message_channel_parent = (
+                isinstance(forwarded_message_channel, discord.TextChannel)
+                and forwarded_message_channel
+            ) or (
+                isinstance(forwarded_message_channel.parent, discord.TextChannel)
+                and forwarded_message_channel.parent
+            )
+            assert forwarded_message_channel_parent
+
+            if forwarded_message_channel_parent.nsfw and not target_channel_parent.nsfw:
+                # Messages can't be forwarded from NSFW channels to SFW channels
+                return await target_channel.send(
+                    allowed_mentions=discord.AllowedMentions(
+                        users=False, roles=False, everyone=False
+                    ),
+                    content=f"> -# <@{bridged_member_id}> forwarded a message from an NSFW channel across the bridge but this channel is SFW; forwarding failed.",
+                )
+            else:
+                # Either the target channel is NSFW or the source isn't, so the forwarding can work fine
+                async def bridge_forwarded_message():
+                    await target_channel.send(
+                        allowed_mentions=discord.AllowedMentions(
+                            users=False, roles=False, everyone=False
+                        ),
+                        content=f"> -# The following message was originally forwarded by <@{bridged_member_id}>.",
+                    )
+                    bridged_forward = await forwarded_message.forward(target_channel)
+                    return bridged_forward
+
+                return await bridge_forwarded_message()
     except discord.NotFound:
         # Webhook is gone, delete this bridge
         logger.warning(
@@ -671,27 +846,58 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
         - `Forbidden`: Tried to edit a message that is not yours.
         - `ValueError`: The length of embeds was invalid, there was no token associated with a webhook or a webhook had no state.
     """
-    updated_message_content = payload.data.get("content")
-    if not updated_message_content or updated_message_content == "":
-        # Not a content edit
-        return
+    lock = globals.message_lock.get(payload.message_id)
+    if not lock:
+        lock = globals.message_lock[payload.message_id] = asyncio.Lock()
 
-    if not await globals.wait_until_ready():
-        return
+    async with lock:
+        updated_message_content = payload.data.get("content")
+        if not updated_message_content or updated_message_content == "":
+            # Not a content edit
+            return
 
-    if not bridges.get_outbound_bridges(payload.channel_id):
-        return
+        if not await globals.wait_until_ready():
+            return
 
-    logger.debug("Bridging edit to message with ID %s.", payload.message_id)
+        if not bridges.get_outbound_bridges(payload.channel_id):
+            return
+
+        embeds = [
+            discord.Embed.from_dict(embed) for embed in payload.data.get("embeds")
+        ]
+        await edit_message_helper(
+            updated_message_content, embeds, payload.message_id, payload.channel_id
+        )
+
+
+@beartype
+async def edit_message_helper(
+    message_content: str,
+    embeds: list[discord.Embed],
+    message_id: int,
+    channel_id: int,
+):
+    """Edit bridged versions of a message, if possible.
+
+    #### Args:
+        - `message_content`: The updated contents of the message.
+        - `embeds`: The updated embeds of the message.
+        - `message_id`: The message ID.
+        - `channel_id`: The ID of the channel the message being edited is in.
+
+    #### Raises:
+        - `HTTPException`: Editing a message failed.
+        - `Forbidden`: Tried to edit a message that is not yours.
+        - `ValueError`: The length of embeds was invalid, there was no token associated with a webhook or a webhook had no state.
+    """
+    logger.debug("Bridging edit to message with ID %s.", message_id)
 
     # Ensure that the message has emoji I have access to
-    updated_message_content = await replace_missing_emoji(
-        non_forwarded_message_start(updated_message_content)
-    )
+    message_content = await replace_missing_emoji(message_content)
 
     # Get all channels reachable from this one via an unbroken sequence of outbound bridges as well as their webhooks
     reachable_channels = await bridges.get_reachable_channels(
-        payload.channel_id,
+        channel_id,
         "outbound",
         include_webhooks=True,
     )
@@ -702,7 +908,7 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
         with SQLSession(engine) as session:
             select_message_map: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
                 DBMessageMap
-            ).where(DBMessageMap.source_message == payload.message_id)
+            ).where(DBMessageMap.source_message == message_id)
             bridged_messages: ScalarResult[DBMessageMap] = await sql_retry(
                 lambda: session.scalars(select_message_map)
             )
@@ -750,9 +956,34 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
                                 return
 
                         try:
+                            target_channel = webhook.channel
+                            channel_specific_message_content = message_content
+                            channel_specific_embeds = deepcopy(embeds)
+                            if isinstance(target_channel, discord.TextChannel):
+                                # Replace Discord links in the message and embed text
+                                channel_specific_message_content = (
+                                    await replace_discord_links(
+                                        channel_specific_message_content,
+                                        target_channel,
+                                        session,
+                                    )
+                                )
+                                for embed in channel_specific_embeds:
+                                    embed.description = await replace_discord_links(
+                                        embed.description,
+                                        target_channel,
+                                        session,
+                                    )
+                                    embed.title = await replace_discord_links(
+                                        embed.title,
+                                        target_channel,
+                                        session,
+                                    )
+
                             await webhook.edit_message(
                                 message_id=int(message_row.target_message),
-                                content=updated_message_content,
+                                content=channel_specific_message_content,
+                                embeds=channel_specific_embeds,
                                 **thread_splat,
                             )
                         except discord.NotFound:
@@ -789,7 +1020,7 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
                         + str(e)
                     )
 
-        await asyncio.gather(*async_message_edits)
+            await asyncio.gather(*async_message_edits)
     except Exception as e:
         if isinstance(e, SQLError):
             logger.warning(
@@ -802,7 +1033,7 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
 
         raise
 
-    logger.debug("Successfully bridged edit to message with ID %s.", payload.message_id)
+    logger.debug("Successfully bridged edit to message with ID %s.", message_id)
 
 
 @beartype
@@ -867,39 +1098,132 @@ async def replace_missing_emoji(message_content: str) -> str:
     return message_content
 
 
+@overload
+async def replace_discord_links(
+    content: None,
+    channel: discord.TextChannel | discord.Thread,
+    session: SQLSession,
+) -> None: ...
+
+
+@overload
+async def replace_discord_links(
+    content: str,
+    channel: discord.TextChannel | discord.Thread,
+    session: SQLSession,
+) -> str: ...
+
+
 @beartype
-def non_forwarded_message_start(message_content: str):
-    """Check whether the start of a message has the forwarded message header and, if it does, add a disclaimer at the top clarifying it is not forwarded. Then, return it.
+async def replace_discord_links(
+    content: str | None,
+    channel: discord.TextChannel | discord.Thread,
+    session: SQLSession,
+) -> str | None:
+    """Return a version of the contents of a string that replaces any links to other messages within the same channel or parent channel to appropriately bridged ones.
 
     #### Args:
-        - `message_content`: The message content to validate.
+        - `content`: The string to process.
+        - `channel`: The channel this message is being processed for.
+        - `session`: A connection to the database.
+
+    #### Raises
+        - `RuntimeError`: Session connection failed.
+        - `ServerTimeoutError`: Connection to server timed out.
     """
-    if (
-        message_content.startswith("-# ")
-        and (first_line := message_content.split("\n")[0])
-        and first_line.endswith(" ***Forwarded***")
-        and (first_line_split := first_line.split())
-        and (
-            len(first_line_split) == 2
-            or (
-                len(first_line_split) == 3
-                and re.match(r"<(a?:[^:]+):(\d+)>", first_line_split[1])
-            )
-        )
+    if content is None:
+        return None
+
+    message_links: set[tuple[str, str, str, str]] = set(
+        re.findall(r"discord(app)?.com/channels/(\d+|@me)/(\d+)/(\d+)", content)
+    )
+    if len(message_links) == 0:
+        # No links to replace
+        return content
+
+    logger.debug(
+        "Replacing discord links when bridging message into channel with ID %s.",
+        channel.id,
+    )
+    guild_id = channel.guild.id
+
+    # Get all reachable channel IDs from the current channel
+    channel_id = channel.id
+    channel_ids_to_check = {str(channel_id)}
+    bridged_channel_ids: set[int] = set().union(
+        await bridges.get_reachable_channels(channel_id, "outbound"),
+        await bridges.get_reachable_channels(channel_id, "inbound"),
+    )
+
+    # If the current channel is actually a thread, get reachable channel IDs from its parent
+    parent_channel = channel
+    if isinstance(channel, discord.Thread) and isinstance(
+        channel.parent, discord.TextChannel
     ):
-        return (
-            "-# (This message was not actually forwarded; the header was added by the user who wrote it.)\n"
-            + message_content
+        parent_channel = channel.parent
+        parent_channel_id = parent_channel.id
+        channel_ids_to_check.add(str(parent_channel_id))
+        bridged_channel_ids = bridged_channel_ids.union(
+            await bridges.get_reachable_channels(parent_channel_id, "outbound"),
+            await bridges.get_reachable_channels(parent_channel_id, "inbound"),
         )
 
-    return message_content
+    # Get the channel IDs of all threads of the channel
+    assert isinstance(parent_channel, discord.TextChannel)
+    for thread in parent_channel.threads:
+        thread_id = thread.id
+        if thread_id == channel_id:
+            continue
+
+        channel_ids_to_check.add(str(thread_id))
+        bridged_channel_ids = bridged_channel_ids.union(
+            await bridges.get_reachable_channels(thread_id, "outbound"),
+            await bridges.get_reachable_channels(thread_id, "inbound"),
+        )
+
+    # Now try to find equivalent links if the messages being linked to are bridged
+    for _, link_guild_id, link_channel_id, link_message_id in message_links:
+        if int(link_channel_id) not in bridged_channel_ids:
+            continue
+
+        # The message being linked is from a channel that is bridged to the current channel
+        select_message_map: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
+            DBMessageMap
+        ).where(
+            sql_or(
+                sql_and(
+                    DBMessageMap.source_message == link_message_id,
+                    DBMessageMap.target_channel.in_(channel_ids_to_check),
+                ),
+                sql_and(
+                    DBMessageMap.target_message == link_message_id,
+                    DBMessageMap.source_channel.in_(channel_ids_to_check),
+                ),
+            )
+        )
+        bridged_messages: ScalarResult[DBMessageMap] = await sql_retry(
+            lambda: session.scalars(select_message_map)
+        )
+        for message_row in bridged_messages:
+            if message_row.source_message == link_message_id:
+                content = content.replace(
+                    f"{link_guild_id}/{link_channel_id}/{link_message_id}",
+                    f"{guild_id}/{message_row.target_channel}/{message_row.target_message}",
+                )
+            else:
+                content = content.replace(
+                    f"{link_guild_id}/{link_channel_id}/{link_message_id}",
+                    f"{guild_id}/{message_row.source_channel}/{message_row.source_message}",
+                )
+
+            break
+
+    return content
 
 
 @globals.client.event
 async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
-    """Delete bridged versions of a message, if possible.
-
-    This function is called when a message is deleted. Unlike `on_message_delete()`, this is called regardless of the message being in the internal message cache or not.
+    """This function is called when a message is deleted. Unlike `on_message_delete()`, this is called regardless of the message being in the internal message cache or not.
 
     #### Args:
         - `payload`: The raw event payload data.
@@ -909,17 +1233,40 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
         - `Forbidden`: Tried to delete a message that is not yours.
         - `ValueError`: A webhook does not have a token associated with it.
     """
-    if not await globals.wait_until_ready():
-        return
+    lock = globals.message_lock.get(payload.message_id)
+    if not lock:
+        lock = globals.message_lock[payload.message_id] = asyncio.Lock()
 
-    if not bridges.get_outbound_bridges(payload.channel_id):
-        return
+    async with lock:
+        if not await globals.wait_until_ready():
+            return
 
-    logger.debug("Bridging deletion of message with ID %s.", payload.message_id)
+        if not bridges.get_outbound_bridges(payload.channel_id):
+            return
+
+        await delete_message_helper(payload.message_id, payload.channel_id)
+
+    del globals.message_lock[payload.message_id]
+
+
+@beartype
+async def delete_message_helper(message_id: int, channel_id: int):
+    """Delete bridged versions of a message, if possible.
+
+    #### Args:
+        - `message_id`: The message ID.
+        - `channel_id`: The ID of the channel the message being edited is in.
+
+    #### Raises:
+        - `HTTPException`: Deleting a message failed.
+        - `Forbidden`: Tried to delete a message that is not yours.
+        - `ValueError`: A webhook does not have a token associated with it.
+    """
+    logger.debug("Bridging deletion of message with ID %s.", message_id)
 
     # Get all channels reachable from this one via an unbroken sequence of outbound bridges as well as their webhooks
     reachable_channels = await bridges.get_reachable_channels(
-        payload.channel_id,
+        channel_id,
         "outbound",
         include_webhooks=True,
     )
@@ -931,7 +1278,7 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
         with SQLSession(engine) as session:
             select_message_map: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
                 DBMessageMap
-            ).where(DBMessageMap.source_message == payload.message_id)
+            ).where(DBMessageMap.source_message == message_id)
             bridged_messages: ScalarResult[DBMessageMap] = await sql_retry(
                 lambda: session.scalars(select_message_map)
             )
@@ -1020,8 +1367,8 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
                 lambda: session.execute(
                     SQLDelete(DBMessageMap).where(
                         sql_or(
-                            DBMessageMap.source_message == str(payload.message_id),
-                            DBMessageMap.target_message == str(payload.message_id),
+                            DBMessageMap.source_message == str(message_id),
+                            DBMessageMap.target_message == str(message_id),
                         )
                     )
                 )
@@ -1045,9 +1392,7 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
 
     await asyncio.gather(*async_message_deletes)
 
-    logger.debug(
-        "Successfully bridged deletion of message with ID %s.", payload.message_id
-    )
+    logger.debug("Successfully bridged deletion of message with ID %s.", message_id)
 
 
 @globals.client.event

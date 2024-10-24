@@ -109,14 +109,14 @@ auto_bridge_thread_channels: set[int] = set()
 # Server which can be used to store unknown emoji for mirroring reactions
 emoji_server: discord.Guild | None = None
 
-# URL of an image of the icon used by forwarded messages
-forwarded_message_icon_url = "https://cdn.discordapp.com/emojis/1263880469750091918.png"
-
 # Dictionary listing all apps whitelisted per channel
 per_channel_whitelist: dict[int, set[int]] = {}
 
 # Helper to prevent us from being rate limited
 rate_limiter = AsyncLimiter(1, 10)
+
+# Variable to keep track of messages that are still being bridged/edited before they can be edited/deleted
+message_lock: dict[int, asyncio.Lock] = {}
 
 # Type wildcard
 T = TypeVar("T", bound=Any)
@@ -307,6 +307,20 @@ def hash_image(image: bytes) -> str:
         - `image`: The image bytes object.
     """
     return md5(image).hexdigest()
+
+
+@beartype
+def truncate(msg: str, length: int) -> str:
+    """Truncate a message to a certain length.
+
+    #### Args:
+        - `msg`: The message to truncate.
+        - `length`: Its maximum length.
+
+    #### Returns:
+        `str`: The truncated message.
+    """
+    return msg if len(msg) < length else msg[: length - 1] + "…"
 
 
 @beartype
