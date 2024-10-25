@@ -543,6 +543,7 @@ class EmojiHashMap:
         emoji_image: bytes | None = None,
         emoji_image_hash: str | None = None,
         emoji_to_copy_name: str | None = None,
+        session: SQLSession | None = None,
     ) -> discord.Emoji | None:
         """Try to create an emoji in the emoji server and, if successful, return it.
 
@@ -552,6 +553,7 @@ class EmojiHashMap:
             - `emoji_image`: An image to be directly loaded into the server. Defaults to None, in which case either `emoji_to_copy` or `emoji_to_copy_id` is used instead.
             - `emoji_image_hash`: The hash of `emoji_image`. Defaults to none, in which case it will be calculated from `emoji_image`.
             - `emoji_to_copy_name`: The name of a missing emoji, optionally preceded by an `"a:"` in case it's animated. Defaults to None, but must be included if either `emoji_to_copy_id` or `emoji_image` is.
+            - `session`: A connection to the database. Defaults to None, in which case a new one will be created for the DB operations.
 
         #### Raises:
             - `ArgumentError`: The number of arguments passed is incorrect.
@@ -623,49 +625,58 @@ class EmojiHashMap:
                 raise
 
         # Copied the emoji, going to update my table
-        session = None
+        if not session:
+            session = SQLSession(engine)
+            close_after = True
+        else:
+            close_after = False
+
         try:
-            with SQLSession(engine) as session:
-                if emoji_to_delete_id is not None:
-                    try:
-                        await self.delete_emoji(emoji_to_delete_id, session=session)
-                    except Exception as e:
-                        logger.error(
-                            "An error occurred when trying to delete an emoji from the hash map while running copy_emoji_into_server(): %s",
-                            e,
-                        )
+            if emoji_to_delete_id is not None:
+                try:
+                    await self.delete_emoji(emoji_to_delete_id, session=session)
+                except Exception as e:
+                    logger.error(
+                        "An error occurred when trying to delete an emoji from the hash map while running copy_emoji_into_server(): %s",
+                        e,
+                    )
+                    if session:
+                        session.rollback()
+                        if close_after:
+                            session.close()
 
-                        raise
+                    raise
 
-                await self.add_emoji(
-                    emoji=emoji,
-                    emoji_server_id=emoji_server_id,
+            await self.add_emoji(
+                emoji=emoji,
+                emoji_server_id=emoji_server_id,
+                image_hash=emoji_image_hash,
+                is_internal=True,
+                session=session,
+            )
+
+            if emoji_to_copy:
+                await self.map_emoji(
+                    external_emoji=emoji_to_copy,
+                    internal_emoji=emoji,
                     image_hash=emoji_image_hash,
-                    is_internal=True,
+                    session=session,
+                )
+            elif emoji_to_copy_id:
+                await self.map_emoji(
+                    external_emoji_id=emoji_to_copy_id,
+                    external_emoji_name=emoji_to_copy_name,
+                    internal_emoji=emoji,
+                    image_hash=emoji_image_hash,
                     session=session,
                 )
 
-                if emoji_to_copy:
-                    await self.map_emoji(
-                        external_emoji=emoji_to_copy,
-                        internal_emoji=emoji,
-                        image_hash=emoji_image_hash,
-                        session=session,
-                    )
-                elif emoji_to_copy_id:
-                    await self.map_emoji(
-                        external_emoji_id=emoji_to_copy_id,
-                        external_emoji_name=emoji_to_copy_name,
-                        internal_emoji=emoji,
-                        image_hash=emoji_image_hash,
-                        session=session,
-                    )
-
-                session.commit()
+            session.commit()
         except Exception as e:
             if session:
                 session.rollback()
-                session.close()
+                if close_after:
+                    session.close()
 
             if isinstance(e, SQLError):
                 logger.warning(

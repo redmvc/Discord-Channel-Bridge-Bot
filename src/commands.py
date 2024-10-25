@@ -1600,11 +1600,13 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
         # Try to copy this emoji into my emoji server
         if isinstance(emoji, discord.PartialEmoji):
             copied_emoji = await emoji_hash_map.map.copy_emoji_into_server(
-                emoji_to_copy=emoji
+                emoji_to_copy=emoji, session=session
             )
         else:
             copied_emoji = await emoji_hash_map.map.copy_emoji_into_server(
-                emoji_to_copy_id=emoji.id, emoji_to_copy_name=emoji.name
+                emoji_to_copy_id=emoji.id,
+                emoji_to_copy_name=emoji.name,
+                session=session,
             )
         if copied_emoji:
             return str(copied_emoji)
