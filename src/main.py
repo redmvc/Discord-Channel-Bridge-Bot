@@ -344,6 +344,7 @@ async def bridge_message_helper(message: discord.Message):
                 )
 
                 forwarded_message = None
+                forwarded_message_channel_is_nsfw = False
 
                 message_content = await replace_missing_emoji(message.content, session)
                 message_attachments = message.attachments
@@ -360,6 +361,7 @@ async def bridge_message_helper(message: discord.Message):
                 ):
                     # Original message is cached and I can just fetch it and forward it instead
                     forwarded_message = resolved_message
+                    original_message_channel = forwarded_message.channel
                 elif message.reference.message_id:
                     # Try to find the original message, if it's not resolved
                     original_message_channel = await globals.get_channel_from_id(
@@ -381,6 +383,26 @@ async def bridge_message_helper(message: discord.Message):
                                 forwarded_message = original_message
                         except Exception:
                             pass
+                else:
+                    original_message_channel = message.channel
+
+                original_message_channel_parent = original_message_channel
+                if (
+                    isinstance(original_message_channel, discord.Thread)
+                    and original_message_channel.parent
+                ):
+                    original_message_channel_parent = original_message_channel.parent
+                forwarded_message_channel_is_nsfw = (
+                    isinstance(
+                        original_message_channel_parent,
+                        discord.TextChannel
+                        | discord.VoiceChannel
+                        | discord.StageChannel
+                        | discord.ForumChannel
+                        | discord.CategoryChannel,
+                    )
+                    and original_message_channel_parent.nsfw
+                )
 
                 message_content = ""
                 message_attachments = []
@@ -508,6 +530,7 @@ async def bridge_message_helper(message: discord.Message):
                         bridged_reply_to.get(target_id),
                         reply_has_ping,
                         forwarded_message,
+                        forwarded_message_channel_is_nsfw,
                         thread_splat,
                         session,
                     )
@@ -582,6 +605,7 @@ async def bridge_message_to_target_channel(
     bridged_reply_to: int | None,
     reply_has_ping: bool,
     forwarded_message: discord.Message | None,
+    forwarded_message_channel_is_nsfw: bool,
     thread_splat: ThreadSplat,
     session: SQLSession,
 ) -> BridgedMessage | None:
@@ -602,6 +626,7 @@ async def bridge_message_to_target_channel(
         - `bridged_reply_to`: The ID of a message the message being bridged is replying to on the target channel.
         - `reply_has_ping`: Whether the reply is pinging the original message.
         - `forwarded_message`: A message being forwarded, in case it is a forward.
+        - `forwarded_message_channel_is_nsfw`: Whether the origin channel of the message being forwarded from is NSFW.
         - `thread_splat`: A splat with the thread this message is being bridged to, if any.
         - `session`: A connection to the database.
 
@@ -803,17 +828,8 @@ async def bridge_message_to_target_channel(
             )
 
         # Message is a forward so I'll send a short message saying who sent it then forward it myself
-        forwarded_message_channel = forwarded_message.channel
-        assert isinstance(
-            forwarded_message_channel, (discord.TextChannel, discord.Thread)
-        )
-
         target_channel_parent = await globals.get_channel_parent(target_channel)
-        forwarded_message_channel_parent = await globals.get_channel_parent(
-            forwarded_message_channel
-        )
-
-        if forwarded_message_channel_parent.nsfw and not target_channel_parent.nsfw:
+        if not target_channel_parent.nsfw and forwarded_message_channel_is_nsfw:
             # Messages can't be forwarded from NSFW channels to SFW channels
             sent_message = await target_channel.send(
                 allowed_mentions=discord.AllowedMentions(
