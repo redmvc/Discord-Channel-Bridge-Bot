@@ -520,7 +520,7 @@ async def bridge_message_helper(message: discord.Message):
                         message_content,
                         message_attachments,
                         deepcopy(message_embeds),
-                        people_to_ping,
+                        deepcopy(people_to_ping),
                         target_channel,
                         webhook,
                         webhook_channel,
@@ -534,6 +534,9 @@ async def bridge_message_helper(message: discord.Message):
                         thread_splat,
                         session,
                     )
+                )
+                people_to_ping.difference_update(
+                    {member.id for member in webhook_channel.members}
                 )
 
             if len(async_bridged_messages) == 0:
@@ -816,9 +819,6 @@ async def bridge_message_to_target_channel(
                 files=attachments,  # TODO might throw HHTPException if too large?
                 wait=True,
                 **thread_splat,
-            )
-            people_to_ping.difference_update(
-                {member.id for member in webhook_channel.members}
             )
             return BridgedMessage(
                 id=sent_message.id,
