@@ -124,8 +124,22 @@ T = TypeVar("T", bound=Any)
 
 @beartype
 async def get_channel_from_id(
-    channel_or_id: GuildChannel | discord.Thread | discord.abc.PrivateChannel | int,
-) -> GuildChannel | discord.Thread | discord.abc.PrivateChannel | None:
+    channel_or_id: (
+        GuildChannel
+        | discord.Thread
+        | discord.DMChannel
+        | discord.PartialMessageable
+        | discord.abc.PrivateChannel
+        | int
+    ),
+) -> (
+    GuildChannel
+    | discord.Thread
+    | discord.abc.PrivateChannel
+    | discord.PartialMessageable
+    | discord.DMChannel
+    | None
+):
     """Ensure that this function's argument is a valid Discord channel, when it may instead be a channel ID.
 
     #### Args:
