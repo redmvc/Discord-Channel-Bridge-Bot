@@ -208,9 +208,9 @@ async def get_channel_parent(
     #### Returns:
         - `discord.TextChannel`: The parent of the channel passed as argument, or the channel itself in case it is not a thread.
     """
-    channel = await get_channel_from_id(channel_or_id)
-    validate_channels(channel_or_id=channel)
-    channel = cast(discord.TextChannel | discord.Thread, channel)
+    channel = validate_channels(channel_or_id=await get_channel_from_id(channel_or_id))[
+        "channel_or_id"
+    ]
 
     if isinstance(channel, discord.TextChannel):
         return channel

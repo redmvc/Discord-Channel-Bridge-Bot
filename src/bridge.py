@@ -366,18 +366,12 @@ class Bridges:
         #### Returns:
             - `Bridge`: The created `Bridge`.
         """
-        source_channel = await globals.get_channel_from_id(source)
-        if isinstance(target, int):
-            target_channel = await globals.get_channel_from_id(target)
-            validate_channels(
-                target_channel=target_channel, source_channel=source_channel
-            )
-            target_channel = cast(discord.TextChannel | discord.Thread, target_channel)
-            source_channel = cast(discord.TextChannel | discord.Thread, source_channel)
-        else:
-            target_channel = target
-            validate_channels(source_channel=source_channel)
-            source_channel = cast(discord.TextChannel | discord.Thread, source_channel)
+        validated_channels = validate_channels(
+            source=await globals.get_channel_from_id(source),
+            target=await globals.get_channel_from_id(target),
+        )
+        source_channel = validated_channels["source"]
+        target_channel = validated_channels["target"]
 
         logger.debug(
             "Creating bridge from #%s:%s (ID: %s) to #%s:%s (ID: %s)...",
@@ -947,9 +941,9 @@ class Webhooks:
 
         if not webhook or not webhook.channel_id:
             # Webhook wasn't given or wasn't valid
-            channel = await globals.get_channel_from_id(channel_or_id)
-            validate_channels(channel=channel)
-            channel = cast(discord.TextChannel | discord.Thread, channel)
+            channel = validate_channels(
+                channel=await globals.get_channel_from_id(channel_or_id)
+            )["channel"]
 
             logger.debug(
                 "Adding new webhook to #%s:%s (ID: %s)...",

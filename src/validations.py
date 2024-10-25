@@ -34,20 +34,18 @@ class ArgumentError(ValueError):
 
 def validate_channels(
     log_error: bool = True,
-    **kwargs: (
-        discord.guild.GuildChannel
-        | discord.Thread
-        | discord.abc.PrivateChannel
-        | discord.abc.MessageableChannel
-        | None
-    ),
-):
-    """Raise `ChannelTypeError` if the channels passed as arguments are not the right channel types.
+    **kwargs: Any,
+) -> dict[str, discord.TextChannel | discord.Thread]:
+    """Raise `ChannelTypeError` if any of the channels passed as arguments is not a `discord.TextChannel` nor a `discord.Thread`, and otherwise return a tuple with the arguments cast to the right type.
 
     #### Args:
         - `log_error`: Whether to register this error in the logger. Defaults to True.
         - `kwargs`: The channels to validate.
+
+    #### Returns:
+        - The channels passed as arguments cast to the appropriate type.
     """
+    cast_channels: dict[str, discord.TextChannel | discord.Thread] = {}
     for channel_name, channel in kwargs.items():
         if (
             not isinstance(channel, discord.Thread)
@@ -59,6 +57,10 @@ def validate_channels(
             if log_error:
                 logger.error(err)
             raise err
+
+        cast_channels[channel_name] = channel
+
+    return cast_channels
 
 
 def validate_webhook(
