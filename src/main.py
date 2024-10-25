@@ -344,8 +344,9 @@ async def bridge_message_helper(message: discord.Message):
                 )
 
                 forwarded_message = None
+                forwarded_message_channel_is_nsfw = False
 
-                message_content = await replace_missing_emoji(message.content)
+                message_content = await replace_missing_emoji(message.content, session)
                 message_attachments = message.attachments
                 message_embeds = message.embeds
             else:
@@ -360,6 +361,7 @@ async def bridge_message_helper(message: discord.Message):
                 ):
                     # Original message is cached and I can just fetch it and forward it instead
                     forwarded_message = resolved_message
+                    original_message_channel = forwarded_message.channel
                 elif message.reference.message_id:
                     # Try to find the original message, if it's not resolved
                     original_message_channel = await globals.get_channel_from_id(
@@ -381,6 +383,26 @@ async def bridge_message_helper(message: discord.Message):
                                 forwarded_message = original_message
                         except Exception:
                             pass
+                else:
+                    original_message_channel = message.channel
+
+                original_message_channel_parent = original_message_channel
+                if (
+                    isinstance(original_message_channel, discord.Thread)
+                    and original_message_channel.parent
+                ):
+                    original_message_channel_parent = original_message_channel.parent
+                forwarded_message_channel_is_nsfw = (
+                    isinstance(
+                        original_message_channel_parent,
+                        discord.TextChannel
+                        | discord.VoiceChannel
+                        | discord.StageChannel
+                        | discord.ForumChannel
+                        | discord.CategoryChannel,
+                    )
+                    and original_message_channel_parent.nsfw
+                )
 
                 message_content = ""
                 message_attachments = []
@@ -407,7 +429,8 @@ async def bridge_message_helper(message: discord.Message):
                                 replied_to_message.clean_content
                             ),
                             50,
-                        )
+                        ),
+                        session,
                     )
                     replied_author = replied_to_message.author
 
@@ -450,6 +473,19 @@ async def bridge_message_helper(message: discord.Message):
             else:
                 message_is_reply = False
 
+            # Check who, if anyone, is pinged in the message
+            people_to_ping: set[int] = set()
+            if not message_content.startswith("@silent") and (
+                people_to_ping := {
+                    int(id) for id in set(re.findall(r"<@(\d+)>", message_content))
+                }
+            ):
+                # Remove everyone who was already successfully pinged in the message in the original channel
+                message_channel = await globals.get_channel_parent(message.channel)
+                people_to_ping.difference_update(
+                    {member.id for member in message_channel.members}
+                )
+
             # Send a message out to each target webhook
             async_bridged_messages: list[Coroutine[Any, Any, BridgedMessage | None]] = (
                 []
@@ -484,6 +520,7 @@ async def bridge_message_helper(message: discord.Message):
                         message_content,
                         message_attachments,
                         deepcopy(message_embeds),
+                        deepcopy(people_to_ping),
                         target_channel,
                         webhook,
                         webhook_channel,
@@ -493,9 +530,13 @@ async def bridge_message_helper(message: discord.Message):
                         bridged_reply_to.get(target_id),
                         reply_has_ping,
                         forwarded_message,
+                        forwarded_message_channel_is_nsfw,
                         thread_splat,
                         session,
                     )
+                )
+                people_to_ping.difference_update(
+                    {member.id for member in webhook_channel.members}
                 )
 
             if len(async_bridged_messages) == 0:
@@ -557,6 +598,7 @@ async def bridge_message_to_target_channel(
     message_content: str,
     message_attachments: list[discord.Attachment],
     message_embeds: list[discord.Embed],
+    people_to_ping: set[int],
     target_channel: discord.TextChannel | discord.Thread,
     webhook: discord.Webhook,
     webhook_channel: discord.TextChannel,
@@ -566,6 +608,7 @@ async def bridge_message_to_target_channel(
     bridged_reply_to: int | None,
     reply_has_ping: bool,
     forwarded_message: discord.Message | None,
+    forwarded_message_channel_is_nsfw: bool,
     thread_splat: ThreadSplat,
     session: SQLSession,
 ) -> BridgedMessage | None:
@@ -576,6 +619,7 @@ async def bridge_message_to_target_channel(
         - `message_content`: Its contents.
         - `message_attachments`: Its attachments.
         - `message_embeds`: Its embeds.
+        - `people_to_ping`: A set of IDs of people that were @-mentioned in the original message and who haven't already been pinged.
         - `target_channel`: The channel the message is being bridged to.
         - `webhook`: The webhook that will send the message.
         - `webhook_channel`: The parent channel the webhook is attached to.
@@ -585,6 +629,7 @@ async def bridge_message_to_target_channel(
         - `bridged_reply_to`: The ID of a message the message being bridged is replying to on the target channel.
         - `reply_has_ping`: Whether the reply is pinging the original message.
         - `forwarded_message`: A message being forwarded, in case it is a forward.
+        - `forwarded_message_channel_is_nsfw`: Whether the origin channel of the message being forwarded from is NSFW.
         - `thread_splat`: A splat with the thread this message is being bridged to, if any.
         - `session`: A connection to the database.
 
@@ -689,7 +734,8 @@ async def bridge_message_to_target_channel(
                                 message_replied_to.clean_content
                             ),
                             50,
-                        )
+                        ),
+                        session,
                     )
                 reply_embed_dict = create_reply_embed_dict(
                     message_replied_to.author.display_avatar,
@@ -763,7 +809,9 @@ async def bridge_message_to_target_channel(
             sent_message = await webhook.send(
                 content=message_content,
                 allowed_mentions=discord.AllowedMentions(
-                    users=True, roles=False, everyone=False
+                    users=[discord.Object(id=id) for id in people_to_ping],
+                    roles=False,
+                    everyone=False,
                 ),
                 avatar_url=bridged_avatar_url,
                 username=bridged_member_name,
@@ -778,63 +826,42 @@ async def bridge_message_to_target_channel(
                 webhook_id=sent_message.webhook_id,
                 forwarded_header_id=None,
             )
-        else:
-            # Message is a forward so I'll send a short message saying who sent it then forward it myself
-            forwarded_message_channel = forwarded_message.channel
-            assert isinstance(
-                forwarded_message_channel, (discord.TextChannel, discord.Thread)
+
+        # Message is a forward so I'll send a short message saying who sent it then forward it myself
+        target_channel_parent = await globals.get_channel_parent(target_channel)
+        if not target_channel_parent.nsfw and forwarded_message_channel_is_nsfw:
+            # Messages can't be forwarded from NSFW channels to SFW channels
+            sent_message = await target_channel.send(
+                allowed_mentions=discord.AllowedMentions(
+                    users=False, roles=False, everyone=False
+                ),
+                content=f"> -# <@{bridged_member_id}> forwarded a message from an NSFW channel across the bridge but this channel is SFW; forwarding failed.",
             )
 
-            target_channel_parent = (
-                isinstance(target_channel, discord.TextChannel) and target_channel
-            ) or (
-                isinstance(target_channel.parent, discord.TextChannel)
-                and target_channel.parent
+            return BridgedMessage(
+                id=sent_message.id,
+                channel_id=sent_message.channel.id,
+                webhook_id=sent_message.webhook_id,
+                forwarded_header_id=None,
             )
-            assert target_channel_parent
 
-            forwarded_message_channel_parent = (
-                isinstance(forwarded_message_channel, discord.TextChannel)
-                and forwarded_message_channel
-            ) or (
-                isinstance(forwarded_message_channel.parent, discord.TextChannel)
-                and forwarded_message_channel.parent
+        # Either the target channel is NSFW or the source isn't, so the forwarding can work fine
+        async def bridge_forwarded_message():
+            forward_header = await target_channel.send(
+                allowed_mentions=discord.AllowedMentions(
+                    users=False, roles=False, everyone=False
+                ),
+                content=f"> -# The following message was originally forwarded by <@{bridged_member_id}>.",
             )
-            assert forwarded_message_channel_parent
+            bridged_forward = await forwarded_message.forward(target_channel)
+            return BridgedMessage(
+                id=bridged_forward.id,
+                channel_id=bridged_forward.channel.id,
+                webhook_id=bridged_forward.webhook_id,
+                forwarded_header_id=forward_header.id,
+            )
 
-            if forwarded_message_channel_parent.nsfw and not target_channel_parent.nsfw:
-                # Messages can't be forwarded from NSFW channels to SFW channels
-                sent_message = await target_channel.send(
-                    allowed_mentions=discord.AllowedMentions(
-                        users=False, roles=False, everyone=False
-                    ),
-                    content=f"> -# <@{bridged_member_id}> forwarded a message from an NSFW channel across the bridge but this channel is SFW; forwarding failed.",
-                )
-
-                return BridgedMessage(
-                    id=sent_message.id,
-                    channel_id=sent_message.channel.id,
-                    webhook_id=sent_message.webhook_id,
-                    forwarded_header_id=None,
-                )
-            else:
-                # Either the target channel is NSFW or the source isn't, so the forwarding can work fine
-                async def bridge_forwarded_message():
-                    forward_header = await target_channel.send(
-                        allowed_mentions=discord.AllowedMentions(
-                            users=False, roles=False, everyone=False
-                        ),
-                        content=f"> -# The following message was originally forwarded by <@{bridged_member_id}>.",
-                    )
-                    bridged_forward = await forwarded_message.forward(target_channel)
-                    return BridgedMessage(
-                        id=bridged_forward.id,
-                        channel_id=bridged_forward.channel.id,
-                        webhook_id=bridged_forward.webhook_id,
-                        forwarded_header_id=forward_header.id,
-                    )
-
-                return await bridge_forwarded_message()
+        return await bridge_forwarded_message()
     except discord.NotFound:
         # Webhook is gone, delete this bridge
         logger.warning(
@@ -917,9 +944,6 @@ async def edit_message_helper(
     """
     logger.debug("Bridging edit to message with ID %s.", message_id)
 
-    # Ensure that the message has emoji I have access to
-    message_content = await replace_missing_emoji(message_content)
-
     # Get all channels reachable from this one via an unbroken sequence of outbound bridges as well as their webhooks
     reachable_channels = await bridges.get_reachable_channels(
         channel_id,
@@ -931,6 +955,10 @@ async def edit_message_helper(
     try:
         async_message_edits: list[Coroutine[Any, Any, None]] = []
         with SQLSession(engine) as session:
+            # Ensure that the message has emoji I have access to
+            message_content = await replace_missing_emoji(message_content, session)
+
+            # Find bridged message
             select_message_map: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
                 DBMessageMap
             ).where(DBMessageMap.source_message == message_id)
@@ -1062,11 +1090,14 @@ async def edit_message_helper(
 
 
 @beartype
-async def replace_missing_emoji(message_content: str) -> str:
+async def replace_missing_emoji(
+    message_content: str, session: SQLSession | None = None
+) -> str:
     """Return a version of the contents of a message that replaces any instances of an emoji that the bot can't find with matching ones, if possible.
 
     #### Args:
         - `message_content`: The content of the message to process.
+        - `session`: A connection to the database. Defaults to None, in which case a new one will be created for the DB operations.
 
     #### Raises
         - `HTTPResponseError`: HTTP request to fetch image returned a status other than 200.
@@ -1085,6 +1116,12 @@ async def replace_missing_emoji(message_content: str) -> str:
         # Message has no emoji
         return message_content
 
+    if not session:
+        session = SQLSession(engine)
+        close_after = True
+    else:
+        close_after = False
+
     emoji_to_replace: dict[str, str] = {}
     for emoji_name, emoji_id_str in message_emoji:
         emoji_id = int(emoji_id_str)
@@ -1095,7 +1132,7 @@ async def replace_missing_emoji(message_content: str) -> str:
 
         try:
             await emoji_hash_map.map.ensure_hash_map(
-                emoji_id=emoji_id, emoji_name=emoji_name
+                emoji_id=emoji_id, emoji_name=emoji_name, session=session
             )
         except Exception as e:
             logger.error(
@@ -1111,12 +1148,17 @@ async def replace_missing_emoji(message_content: str) -> str:
 
         try:
             emoji = await emoji_hash_map.map.copy_emoji_into_server(
-                emoji_to_copy_id=emoji_id_str, emoji_to_copy_name=emoji_name
+                emoji_to_copy_id=emoji_id_str,
+                emoji_to_copy_name=emoji_name,
+                session=session,
             )
             if emoji:
                 emoji_to_replace[f"<{emoji_name}:{emoji_id_str}>"] = str(emoji)
         except Exception:
             pass
+
+    if close_after:
+        session.close()
 
     for missing_emoji_str, new_emoji_str in emoji_to_replace.items():
         message_content = message_content.replace(missing_emoji_str, new_emoji_str)
@@ -1181,11 +1223,8 @@ async def replace_discord_links(
     )
 
     # If the current channel is actually a thread, get reachable channel IDs from its parent
-    parent_channel = channel
-    if isinstance(channel, discord.Thread) and isinstance(
-        channel.parent, discord.TextChannel
-    ):
-        parent_channel = channel.parent
+    parent_channel = await globals.get_channel_parent(channel)
+    if isinstance(channel, discord.Thread):
         parent_channel_id = parent_channel.id
         channel_ids_to_check.add(str(parent_channel_id))
         bridged_channel_ids = bridged_channel_ids.union(
