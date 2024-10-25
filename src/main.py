@@ -345,7 +345,7 @@ async def bridge_message_helper(message: discord.Message):
 
                 forwarded_message = None
 
-                message_content = await replace_missing_emoji(message.content)
+                message_content = await replace_missing_emoji(message.content, session)
                 message_attachments = message.attachments
                 message_embeds = message.embeds
             else:
@@ -407,7 +407,8 @@ async def bridge_message_helper(message: discord.Message):
                                 replied_to_message.clean_content
                             ),
                             50,
-                        )
+                        ),
+                        session,
                     )
                     replied_author = replied_to_message.author
 
@@ -689,7 +690,8 @@ async def bridge_message_to_target_channel(
                                 message_replied_to.clean_content
                             ),
                             50,
-                        )
+                        ),
+                        session,
                     )
                 reply_embed_dict = create_reply_embed_dict(
                     message_replied_to.author.display_avatar,
@@ -917,9 +919,6 @@ async def edit_message_helper(
     """
     logger.debug("Bridging edit to message with ID %s.", message_id)
 
-    # Ensure that the message has emoji I have access to
-    message_content = await replace_missing_emoji(message_content)
-
     # Get all channels reachable from this one via an unbroken sequence of outbound bridges as well as their webhooks
     reachable_channels = await bridges.get_reachable_channels(
         channel_id,
@@ -931,6 +930,10 @@ async def edit_message_helper(
     try:
         async_message_edits: list[Coroutine[Any, Any, None]] = []
         with SQLSession(engine) as session:
+            # Ensure that the message has emoji I have access to
+            message_content = await replace_missing_emoji(message_content, session)
+
+            # Find bridged message
             select_message_map: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
                 DBMessageMap
             ).where(DBMessageMap.source_message == message_id)
@@ -1062,11 +1065,14 @@ async def edit_message_helper(
 
 
 @beartype
-async def replace_missing_emoji(message_content: str) -> str:
+async def replace_missing_emoji(
+    message_content: str, session: SQLSession | None = None
+) -> str:
     """Return a version of the contents of a message that replaces any instances of an emoji that the bot can't find with matching ones, if possible.
 
     #### Args:
         - `message_content`: The content of the message to process.
+        - `session`: A connection to the database. Defaults to None, in which case a new one will be created for the DB operations.
 
     #### Raises
         - `HTTPResponseError`: HTTP request to fetch image returned a status other than 200.
@@ -1085,6 +1091,12 @@ async def replace_missing_emoji(message_content: str) -> str:
         # Message has no emoji
         return message_content
 
+    if not session:
+        session = SQLSession(engine)
+        close_after = True
+    else:
+        close_after = False
+
     emoji_to_replace: dict[str, str] = {}
     for emoji_name, emoji_id_str in message_emoji:
         emoji_id = int(emoji_id_str)
@@ -1095,7 +1107,7 @@ async def replace_missing_emoji(message_content: str) -> str:
 
         try:
             await emoji_hash_map.map.ensure_hash_map(
-                emoji_id=emoji_id, emoji_name=emoji_name
+                emoji_id=emoji_id, emoji_name=emoji_name, session=session
             )
         except Exception as e:
             logger.error(
@@ -1111,12 +1123,17 @@ async def replace_missing_emoji(message_content: str) -> str:
 
         try:
             emoji = await emoji_hash_map.map.copy_emoji_into_server(
-                emoji_to_copy_id=emoji_id_str, emoji_to_copy_name=emoji_name
+                emoji_to_copy_id=emoji_id_str,
+                emoji_to_copy_name=emoji_name,
+                session=session,
             )
             if emoji:
                 emoji_to_replace[f"<{emoji_name}:{emoji_id_str}>"] = str(emoji)
         except Exception:
             pass
+
+    if close_after:
+        session.close()
 
     for missing_emoji_str, new_emoji_str in emoji_to_replace.items():
         message_content = message_content.replace(missing_emoji_str, new_emoji_str)
