@@ -787,22 +787,10 @@ async def bridge_message_to_target_channel(
                 forwarded_message_channel, (discord.TextChannel, discord.Thread)
             )
 
-            target_channel_parent = (
-                isinstance(target_channel, discord.TextChannel) and target_channel
-            ) or (
-                isinstance(target_channel.parent, discord.TextChannel)
-                and target_channel.parent
+            target_channel_parent = await globals.get_channel_parent(target_channel)
+            forwarded_message_channel_parent = await globals.get_channel_parent(
+                forwarded_message_channel
             )
-            assert target_channel_parent
-
-            forwarded_message_channel_parent = (
-                isinstance(forwarded_message_channel, discord.TextChannel)
-                and forwarded_message_channel
-            ) or (
-                isinstance(forwarded_message_channel.parent, discord.TextChannel)
-                and forwarded_message_channel.parent
-            )
-            assert forwarded_message_channel_parent
 
             if forwarded_message_channel_parent.nsfw and not target_channel_parent.nsfw:
                 # Messages can't be forwarded from NSFW channels to SFW channels
@@ -1198,11 +1186,8 @@ async def replace_discord_links(
     )
 
     # If the current channel is actually a thread, get reachable channel IDs from its parent
-    parent_channel = channel
-    if isinstance(channel, discord.Thread) and isinstance(
-        channel.parent, discord.TextChannel
-    ):
-        parent_channel = channel.parent
+    parent_channel = await globals.get_channel_parent(channel)
+    if isinstance(channel, discord.Thread):
         parent_channel_id = parent_channel.id
         channel_ids_to_check.add(str(parent_channel_id))
         bridged_channel_ids = bridged_channel_ids.union(

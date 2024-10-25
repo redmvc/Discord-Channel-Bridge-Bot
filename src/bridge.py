@@ -963,25 +963,16 @@ class Webhooks:
                 channel.id,
             )
 
-            webhook_owner = channel
-            if isinstance(channel, discord.Thread) and isinstance(
-                channel.parent, discord.TextChannel
+            webhook_owner = await globals.get_channel_parent(channel)
+            if (webhook_id := self._webhook_by_channel.get(webhook_owner.id)) or (
+                webhook_id := self._webhook_by_parent.get(webhook_owner.id)
             ):
-                # Try to get the webhook associated with the parent channel
-                webhook_owner = channel.parent
-                if (webhook_id := self._webhook_by_channel.get(webhook_owner.id)) or (
-                    webhook_id := self._webhook_by_parent.get(webhook_owner.id)
-                ):
-                    webhook = self._webhooks.get(webhook_id)
-            elif webhook_id := self._webhook_by_parent.get(channel_id):
-                # I am the parent of some thread that had already created a webhook
+                # Try to get the webhook associated with a thread or its parent
                 webhook = self._webhooks.get(webhook_id)
 
             if not webhook or not webhook.channel_id:
                 # Webhook still doesn't exist, going to create it
-                webhook = await cast(discord.TextChannel, webhook_owner).create_webhook(
-                    name="Channel Bridge Bot"
-                )
+                webhook = await webhook_owner.create_webhook(name="Channel Bridge Bot")
         else:
             logger.debug(
                 "Adding webhook with ID %s to channel with ID %s...",

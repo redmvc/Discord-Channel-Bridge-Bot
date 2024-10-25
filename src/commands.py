@@ -1,6 +1,6 @@
 import asyncio
 import re
-from typing import Any, AsyncIterator, Coroutine, Iterable, Literal, cast
+from typing import Any, AsyncIterator, Coroutine, Iterable, Literal
 
 import discord
 from beartype import beartype
@@ -1239,7 +1239,7 @@ async def bridge_thread_helper(
         - `user_id`: ID of the user that created the thread.
         - `interaction`: The interaction that called this function, if any. Defaults to None.
     """
-    thread_parent = cast(discord.TextChannel, thread_to_bridge.parent)
+    thread_parent = await globals.get_channel_parent(thread_to_bridge)
 
     outbound_bridges = bridges.get_outbound_bridges(thread_parent.id)
     inbound_bridges = bridges.get_inbound_bridges(thread_parent.id)

@@ -13,7 +13,7 @@ from aiolimiter import AsyncLimiter
 from beartype import beartype
 from typing_extensions import NotRequired
 
-from validations import ArgumentError, HTTPResponseError, logger
+from validations import ArgumentError, HTTPResponseError, logger, validate_channels
 
 # discord.guild.GuildChannel isn't working in commands.py for some reason
 GuildChannel = (
@@ -184,6 +184,38 @@ def get_id_from_channel(
     )
     logger.error(err)
     raise err
+
+
+@beartype
+async def get_channel_parent(
+    channel_or_id: (
+        GuildChannel
+        | discord.Thread
+        | discord.DMChannel
+        | discord.PartialMessageable
+        | discord.GroupChannel
+        | int
+    ),
+) -> discord.TextChannel:
+    """Return the parent channel of its argument, or the argument itself if it does not have a parent. Errors if the channel passed as argument is not a `discord.TextChannel`, a `discord.Thread`, or the ID of one of those.
+
+    #### Args:
+        - `channel_or_id`: A Discord channel or its ID.
+
+    #### Raises:
+        - `ChannelTypeError`: The channel is not a text channel nor a thread off a text channel.
+
+    #### Returns:
+        - `discord.TextChannel`: The parent of the channel passed as argument, or the channel itself in case it is not a thread.
+    """
+    channel = await get_channel_from_id(channel_or_id)
+    validate_channels(channel_or_id=channel)
+    channel = cast(discord.TextChannel | discord.Thread, channel)
+
+    if isinstance(channel, discord.TextChannel):
+        return channel
+
+    return cast(discord.TextChannel, channel.parent)
 
 
 @beartype
