@@ -451,6 +451,19 @@ async def bridge_message_helper(message: discord.Message):
             else:
                 message_is_reply = False
 
+            # Check who, if anyone, is pinged in the message
+            people_to_ping: set[int] = set()
+            if not message_content.startswith("@silent") and (
+                people_to_ping := {
+                    int(id) for id in set(re.findall(r"<@(\d+)>", message_content))
+                }
+            ):
+                # Remove everyone who was already successfully pinged in the message in the original channel
+                message_channel = await globals.get_channel_parent(message.channel)
+                people_to_ping.difference_update(
+                    {member.id for member in message_channel.members}
+                )
+
             # Send a message out to each target webhook
             async_bridged_messages: list[Coroutine[Any, Any, BridgedMessage | None]] = (
                 []
@@ -485,6 +498,7 @@ async def bridge_message_helper(message: discord.Message):
                         message_content,
                         message_attachments,
                         deepcopy(message_embeds),
+                        people_to_ping,
                         target_channel,
                         webhook,
                         webhook_channel,
@@ -558,6 +572,7 @@ async def bridge_message_to_target_channel(
     message_content: str,
     message_attachments: list[discord.Attachment],
     message_embeds: list[discord.Embed],
+    people_to_ping: set[int],
     target_channel: discord.TextChannel | discord.Thread,
     webhook: discord.Webhook,
     webhook_channel: discord.TextChannel,
@@ -577,6 +592,7 @@ async def bridge_message_to_target_channel(
         - `message_content`: Its contents.
         - `message_attachments`: Its attachments.
         - `message_embeds`: Its embeds.
+        - `people_to_ping`: A set of IDs of people that were @-mentioned in the original message and who haven't already been pinged.
         - `target_channel`: The channel the message is being bridged to.
         - `webhook`: The webhook that will send the message.
         - `webhook_channel`: The parent channel the webhook is attached to.
@@ -765,7 +781,9 @@ async def bridge_message_to_target_channel(
             sent_message = await webhook.send(
                 content=message_content,
                 allowed_mentions=discord.AllowedMentions(
-                    users=True, roles=False, everyone=False
+                    users=[discord.Object(id=id) for id in people_to_ping],
+                    roles=False,
+                    everyone=False,
                 ),
                 avatar_url=bridged_avatar_url,
                 username=bridged_member_name,
@@ -773,6 +791,9 @@ async def bridge_message_to_target_channel(
                 files=attachments,  # TODO might throw HHTPException if too large?
                 wait=True,
                 **thread_splat,
+            )
+            people_to_ping.difference_update(
+                {member.id for member in webhook_channel.members}
             )
             return BridgedMessage(
                 id=sent_message.id,
@@ -787,22 +808,10 @@ async def bridge_message_to_target_channel(
             forwarded_message_channel, (discord.TextChannel, discord.Thread)
         )
 
-        target_channel_parent = (
-            isinstance(target_channel, discord.TextChannel) and target_channel
-        ) or (
-            isinstance(target_channel.parent, discord.TextChannel)
-            and target_channel.parent
+        target_channel_parent = await globals.get_channel_parent(target_channel)
+        forwarded_message_channel_parent = await globals.get_channel_parent(
+            forwarded_message_channel
         )
-        assert target_channel_parent
-
-        forwarded_message_channel_parent = (
-            isinstance(forwarded_message_channel, discord.TextChannel)
-            and forwarded_message_channel
-        ) or (
-            isinstance(forwarded_message_channel.parent, discord.TextChannel)
-            and forwarded_message_channel.parent
-        )
-        assert forwarded_message_channel_parent
 
         if forwarded_message_channel_parent.nsfw and not target_channel_parent.nsfw:
             # Messages can't be forwarded from NSFW channels to SFW channels
@@ -1198,11 +1207,8 @@ async def replace_discord_links(
     )
 
     # If the current channel is actually a thread, get reachable channel IDs from its parent
-    parent_channel = channel
-    if isinstance(channel, discord.Thread) and isinstance(
-        channel.parent, discord.TextChannel
-    ):
-        parent_channel = channel.parent
+    parent_channel = await globals.get_channel_parent(channel)
+    if isinstance(channel, discord.Thread):
         parent_channel_id = parent_channel.id
         channel_ids_to_check.add(str(parent_channel_id))
         bridged_channel_ids = bridged_channel_ids.union(
