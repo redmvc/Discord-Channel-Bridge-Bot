@@ -968,7 +968,11 @@ class EmojiHashMap:
             return already_existing_hash
 
         _, image_hash = await self.add_emoji(
-            emoji=emoji, emoji_id=emoji_id, emoji_name=emoji_name, session=session
+            emoji=emoji,
+            emoji_id=emoji_id,
+            emoji_name=emoji_name,
+            update_db=True,
+            session=session,
         )
 
         return image_hash
