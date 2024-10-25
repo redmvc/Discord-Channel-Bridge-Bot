@@ -780,63 +780,63 @@ async def bridge_message_to_target_channel(
                 webhook_id=sent_message.webhook_id,
                 forwarded_header_id=None,
             )
-        else:
-            # Message is a forward so I'll send a short message saying who sent it then forward it myself
-            forwarded_message_channel = forwarded_message.channel
-            assert isinstance(
-                forwarded_message_channel, (discord.TextChannel, discord.Thread)
+
+        # Message is a forward so I'll send a short message saying who sent it then forward it myself
+        forwarded_message_channel = forwarded_message.channel
+        assert isinstance(
+            forwarded_message_channel, (discord.TextChannel, discord.Thread)
+        )
+
+        target_channel_parent = (
+            isinstance(target_channel, discord.TextChannel) and target_channel
+        ) or (
+            isinstance(target_channel.parent, discord.TextChannel)
+            and target_channel.parent
+        )
+        assert target_channel_parent
+
+        forwarded_message_channel_parent = (
+            isinstance(forwarded_message_channel, discord.TextChannel)
+            and forwarded_message_channel
+        ) or (
+            isinstance(forwarded_message_channel.parent, discord.TextChannel)
+            and forwarded_message_channel.parent
+        )
+        assert forwarded_message_channel_parent
+
+        if forwarded_message_channel_parent.nsfw and not target_channel_parent.nsfw:
+            # Messages can't be forwarded from NSFW channels to SFW channels
+            sent_message = await target_channel.send(
+                allowed_mentions=discord.AllowedMentions(
+                    users=False, roles=False, everyone=False
+                ),
+                content=f"> -# <@{bridged_member_id}> forwarded a message from an NSFW channel across the bridge but this channel is SFW; forwarding failed.",
             )
 
-            target_channel_parent = (
-                isinstance(target_channel, discord.TextChannel) and target_channel
-            ) or (
-                isinstance(target_channel.parent, discord.TextChannel)
-                and target_channel.parent
+            return BridgedMessage(
+                id=sent_message.id,
+                channel_id=sent_message.channel.id,
+                webhook_id=sent_message.webhook_id,
+                forwarded_header_id=None,
             )
-            assert target_channel_parent
 
-            forwarded_message_channel_parent = (
-                isinstance(forwarded_message_channel, discord.TextChannel)
-                and forwarded_message_channel
-            ) or (
-                isinstance(forwarded_message_channel.parent, discord.TextChannel)
-                and forwarded_message_channel.parent
+        # Either the target channel is NSFW or the source isn't, so the forwarding can work fine
+        async def bridge_forwarded_message():
+            forward_header = await target_channel.send(
+                allowed_mentions=discord.AllowedMentions(
+                    users=False, roles=False, everyone=False
+                ),
+                content=f"> -# The following message was originally forwarded by <@{bridged_member_id}>.",
             )
-            assert forwarded_message_channel_parent
+            bridged_forward = await forwarded_message.forward(target_channel)
+            return BridgedMessage(
+                id=bridged_forward.id,
+                channel_id=bridged_forward.channel.id,
+                webhook_id=bridged_forward.webhook_id,
+                forwarded_header_id=forward_header.id,
+            )
 
-            if forwarded_message_channel_parent.nsfw and not target_channel_parent.nsfw:
-                # Messages can't be forwarded from NSFW channels to SFW channels
-                sent_message = await target_channel.send(
-                    allowed_mentions=discord.AllowedMentions(
-                        users=False, roles=False, everyone=False
-                    ),
-                    content=f"> -# <@{bridged_member_id}> forwarded a message from an NSFW channel across the bridge but this channel is SFW; forwarding failed.",
-                )
-
-                return BridgedMessage(
-                    id=sent_message.id,
-                    channel_id=sent_message.channel.id,
-                    webhook_id=sent_message.webhook_id,
-                    forwarded_header_id=None,
-                )
-            else:
-                # Either the target channel is NSFW or the source isn't, so the forwarding can work fine
-                async def bridge_forwarded_message():
-                    forward_header = await target_channel.send(
-                        allowed_mentions=discord.AllowedMentions(
-                            users=False, roles=False, everyone=False
-                        ),
-                        content=f"> -# The following message was originally forwarded by <@{bridged_member_id}>.",
-                    )
-                    bridged_forward = await forwarded_message.forward(target_channel)
-                    return BridgedMessage(
-                        id=bridged_forward.id,
-                        channel_id=bridged_forward.channel.id,
-                        webhook_id=bridged_forward.webhook_id,
-                        forwarded_header_id=forward_header.id,
-                    )
-
-                return await bridge_forwarded_message()
+        return await bridge_forwarded_message()
     except discord.NotFound:
         # Webhook is gone, delete this bridge
         logger.warning(
