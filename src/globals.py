@@ -165,7 +165,7 @@ async def get_channel_from_id(
 def get_id_from_channel(
     channel_or_id: GuildChannel | discord.Thread | discord.abc.PrivateChannel | int,
 ) -> int:
-    """Returns the ID of the channel passed as argument, or the argument itself if it is already an ID.
+    """Return the ID of the channel passed as argument, or the argument itself if it is already an ID.
 
     #### Args:
         - `channel_or_id`: A Discord channel or its ID.
