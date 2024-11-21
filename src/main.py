@@ -2133,6 +2133,34 @@ async def on_guild_remove(server: discord.Guild):
     print(left_server_msg)
 
 
+@globals.client.event
+async def on_disconnect():
+    """
+    Mark the bot as disconnected.
+    """
+    globals.is_connected = False
+
+
+@globals.client.event
+async def on_connect():
+    await reconnect()
+
+
+@globals.client.event
+async def on_resumed():
+    await reconnect()
+
+
+async def reconnect():
+    """
+    Mark the bot as connected and try to check for new messages that haven't been bridged.
+    """
+    if not globals.is_ready or globals.is_connected:
+        return
+
+    globals.is_connected = True
+
+
 app_token = globals.settings.get("app_token")
 assert isinstance(app_token, str)
 logger.info("Connecting client...")
