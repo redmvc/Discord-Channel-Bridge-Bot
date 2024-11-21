@@ -201,6 +201,7 @@ async def on_ready():
         print("Bot is not connected to any servers.")
         logger.info("Bot is not connected to any servers.")
 
+    globals.is_connected = True
     globals.is_ready = True
     logger.info("Bot is ready.")
 
@@ -217,6 +218,7 @@ async def on_typing(
     """
     if not (
         globals.is_ready
+        and globals.is_connected
         and globals.rate_limiter.has_capacity()
         and isinstance(channel, (discord.TextChannel, discord.Thread))
         and globals.client.user
