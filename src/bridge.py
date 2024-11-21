@@ -789,6 +789,12 @@ class Bridges:
         logger.debug("Fetching outbound bridges from %s.", source)
         return self._outbound_bridges.get(globals.get_id_from_channel(source))
 
+    def get_channels_with_outbound_bridges(self) -> set[int]:
+        """
+        Return a set with the IDs of all channels that have outbound bridges coming from them.
+        """
+        return set(self._outbound_bridges.keys())
+
     @beartype
     def get_inbound_bridges(
         self, target: discord.TextChannel | discord.Thread | int
