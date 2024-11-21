@@ -12,6 +12,7 @@ from sqlalchemy import Delete as SQLDelete
 from sqlalchemy import ScalarResult
 from sqlalchemy import Select as SQLSelect
 from sqlalchemy import and_ as sql_and
+from sqlalchemy import func
 from sqlalchemy import or_ as sql_or
 from sqlalchemy.exc import StatementError as SQLError
 from sqlalchemy.orm import Session as SQLSession
@@ -28,7 +29,7 @@ from database import (
     engine,
     sql_retry,
 )
-from validations import logger
+from validations import ChannelTypeError, logger, validate_channels
 
 
 class ThreadSplat(TypedDict, total=False):
@@ -2159,6 +2160,81 @@ async def reconnect():
         return
 
     globals.is_connected = True
+
+    # Find all channels that have outgoing bridges.
+    bridged_channel_ids = bridges.get_channels_with_outbound_bridges()
+    if len(bridged_channel_ids) == 0:
+        return
+
+    with SQLSession(engine) as session:
+        # Find the latest bridged messages from each channel
+        try:
+            subquery = (
+                session.query(
+                    DBMessageMap.source_channel,
+                    func.max(DBMessageMap.id).label("max_id"),
+                )
+                .group_by(DBMessageMap.source_channel)
+                .subquery()
+            )
+            select_latest_bridged_messages: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
+                DBMessageMap
+            ).join(
+                subquery,
+                (DBMessageMap.source_channel == subquery.c.source_channel)
+                & (DBMessageMap.id == subquery.c.max_id),
+            )
+
+            bridged_messages_query_result: ScalarResult[DBMessageMap] = session.scalars(
+                select_latest_bridged_messages
+            )
+        except Exception:
+            session.rollback()
+            session.close()
+            raise
+
+        for bridged_message_row in bridged_messages_query_result:
+            # Check whether the ID of the latest bridged message for a channel is also the ID of that channel's latest message
+            channel_id = int(bridged_message_row.source_channel)
+            message_id = int(bridged_message_row.source_message)
+
+            try:
+                channel = validate_channels(
+                    channel=await globals.get_channel_from_id(channel_id),
+                )["channel"]
+            except ChannelTypeError:
+                continue
+
+            if channel.last_message_id and channel.last_message_id == message_id:
+                # Most recent message in the channel has been bridged
+                continue
+
+            # There might be unbridged messages, try to find them
+            try:
+                latest_bridged_message = channel.last_message
+                if not latest_bridged_message:
+                    latest_bridged_message = await channel.fetch_message(message_id)
+
+                messages_after_latest_bridged = [
+                    message
+                    async for message in channel.history(
+                        after=latest_bridged_message.created_at, oldest_first=True
+                    )
+                ]
+            except discord.Forbidden as e:
+                logger.warning(
+                    "An error occurred when attempting to fetch unbridged messages after a disconnection:\n%s",
+                    e,
+                )
+                continue
+
+            # Try to bridge them
+            for message_to_bridge in messages_after_latest_bridged:
+                if message_to_bridge.id != message_id:
+                    try:
+                        await on_message(message_to_bridge)
+                    except Exception:
+                        break
 
 
 app_token = globals.settings.get("app_token")
