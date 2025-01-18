@@ -23,7 +23,13 @@ from database import (
     sql_retry,
     sql_upsert,
 )
-from validations import ArgumentError, logger, validate_channels, validate_webhook
+from validations import (
+    ArgumentError,
+    WebhookChannelError,
+    logger,
+    validate_channels,
+    validate_webhook,
+)
 
 
 class Bridge:
@@ -359,7 +365,6 @@ class Bridges:
 
         #### Raises:
             - `ChannelTypeError`: The source or target channels are not text channels nor threads off a text channel.
-            - `WebhookChannelError`: `webhook` is not attached to Bridge's target channel.
             - `HTTPException`: Deleting an existing webhook or creating a new one failed.
             - `Forbidden`: You do not have permissions to create or delete webhooks.
 
@@ -439,7 +444,17 @@ class Bridges:
 
             existing_webhook = await self.webhooks.get_webhook(target_id)
             if webhook:
-                validate_webhook(webhook, target_channel)
+                try:
+                    validate_webhook(webhook, target_channel)
+                except WebhookChannelError:
+                    # Failed to find a webhook in the target channel, recreate one if it doesn't already exist
+                    try:
+                        await webhook.delete()
+                    except Exception:
+                        pass
+                    webhook = None
+
+            if webhook:
                 if existing_webhook and existing_webhook.id != webhook.id:
                     # If I already have a webhook, I'll destroy the one being passed
                     logger.debug(
