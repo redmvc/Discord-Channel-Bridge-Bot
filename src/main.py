@@ -767,7 +767,7 @@ async def bridge_message_to_target_channel(
                         discord.Embed.from_dict(
                             {
                                 "type": "rich",
-                                "description": f"-# **↪** This message is a reply but the message being replied to could not be loaded.",
+                                "description": "-# **↪** This message is a reply but the message being replied to could not be loaded.",
                             }
                         )
                     ]
@@ -792,7 +792,7 @@ async def bridge_message_to_target_channel(
                     discord.Embed.from_dict(
                         {
                             "type": "rich",
-                            "description": f"-# **↪** This message is a reply but the message being replied to could not be loaded.",
+                            "description": "-# **↪** This message is a reply but the message being replied to could not be loaded.",
                         }
                     )
                 ]
