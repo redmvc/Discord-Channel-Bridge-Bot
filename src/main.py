@@ -15,6 +15,7 @@ from sqlalchemy import and_ as sql_and
 from sqlalchemy import or_ as sql_or
 from sqlalchemy.exc import StatementError as SQLError
 from sqlalchemy.orm import Session as SQLSession
+from sqlalchemy.sql import func
 
 import commands
 import emoji_hash_map
@@ -1747,9 +1748,32 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                     session.commit()
                 return
 
-            select_message_map: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
-                DBMessageMap
-            ).where(DBMessageMap.source_message == str(source_message_id))
+            # Bridge reactions to the last bridged message of a group of split bridged messages
+            max_message_subq = (
+                SQLSelect(
+                    DBMessageMap.target_channel,
+                    DBMessageMap.source_message,
+                    func.max(DBMessageMap.target_message_order).label("max_order"),
+                )
+                .where(DBMessageMap.source_message == str(source_message_id))
+                .group_by(DBMessageMap.target_channel, DBMessageMap.source_message)
+                .subquery()
+            )
+            select_message_map: SQLSelect[tuple[DBMessageMap]] = (
+                SQLSelect(DBMessageMap)
+                .where(DBMessageMap.source_message == str(source_message_id))
+                .join(
+                    max_message_subq,
+                    sql_and(
+                        DBMessageMap.target_channel
+                        == max_message_subq.c.target_channel,
+                        DBMessageMap.target_message_order
+                        == max_message_subq.c.max_order,
+                        DBMessageMap.source_message
+                        == max_message_subq.c.source_message,
+                    ),
+                )
+            )
             bridged_messages_query_result: ScalarResult[DBMessageMap] = await sql_retry(
                 lambda: session.scalars(select_message_map)
             )
