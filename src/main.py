@@ -986,20 +986,9 @@ async def edit_message_helper(
             # Ensure that the message has emoji I have access to
             message_content = await replace_missing_emoji(message_content, session)
 
-            # Find bridged message
-            select_message_map: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
-                DBMessageMap
-            ).where(DBMessageMap.source_message == message_id)
-            bridged_messages: ScalarResult[DBMessageMap] = await sql_retry(
-                lambda: session.scalars(select_message_map)
-            )
-
-            for message_row in bridged_messages:
-                target_channel_id = int(message_row.target_channel)
-                if target_channel_id not in reachable_channels:
-                    continue
-
-                bridged_channel = await globals.get_channel_from_id(target_channel_id)
+            for bridged_channel_id, webhook in reachable_channels.items():
+                # Iterate through the target channels and edit the bridged messages
+                bridged_channel = await globals.get_channel_from_id(bridged_channel_id)
                 if not isinstance(
                     bridged_channel, (discord.TextChannel, discord.Thread)
                 ):
@@ -1011,95 +1000,120 @@ async def edit_message_helper(
                         continue
                     thread_splat = {"thread": bridged_channel}
 
-                try:
+                target_channel = webhook.channel
+                channel_specific_message_content = message_content
+                channel_specific_embeds = deepcopy(embeds)
+                if isinstance(target_channel, discord.TextChannel):
+                    # Replace Discord links in the message and embed text
+                    channel_specific_message_content = await replace_discord_links(
+                        channel_specific_message_content,
+                        target_channel,
+                        session,
+                    )
+                    for embed in channel_specific_embeds:
+                        embed.description = await replace_discord_links(
+                            embed.description,
+                            target_channel,
+                            session,
+                        )
+                        embed.title = await replace_discord_links(
+                            embed.title,
+                            target_channel,
+                            session,
+                        )
 
-                    async def edit_message(
-                        message_row: DBMessageMap,
-                        target_channel_id: int,
-                        thread_splat: ThreadSplat,
-                    ):
-                        if not message_row.webhook:
-                            return
-
-                        # The webhook returned by the call to get_reachable_channels() may not be the same as the one used to post the message
-                        message_webhook_id = int(message_row.webhook)
-                        if (
-                            message_webhook_id
-                            == reachable_channels[target_channel_id].id
-                        ):
-                            webhook = reachable_channels[target_channel_id]
-                        else:
-                            try:
-                                webhook = await globals.client.fetch_webhook(
-                                    message_webhook_id
-                                )
-                            except Exception:
-                                return
-
-                        try:
-                            target_channel = webhook.channel
-                            channel_specific_message_content = message_content
-                            channel_specific_embeds = deepcopy(embeds)
-                            if isinstance(target_channel, discord.TextChannel):
-                                # Replace Discord links in the message and embed text
-                                channel_specific_message_content = (
-                                    await replace_discord_links(
-                                        channel_specific_message_content,
-                                        target_channel,
-                                        session,
-                                    )
-                                )
-                                for embed in channel_specific_embeds:
-                                    embed.description = await replace_discord_links(
-                                        embed.description,
-                                        target_channel,
-                                        session,
-                                    )
-                                    embed.title = await replace_discord_links(
-                                        embed.title,
-                                        target_channel,
-                                        session,
-                                    )
-
-                            await webhook.edit_message(
-                                message_id=int(message_row.target_message),
-                                content=channel_specific_message_content,
-                                embeds=channel_specific_embeds,
-                                **thread_splat,
-                            )
-                        except discord.NotFound:
-                            # Webhook is gone, delete this bridge
-                            assert isinstance(
-                                bridged_channel, (discord.TextChannel, discord.Thread)
-                            )
-                            logger.warning(
-                                "Webhook in %s:%s (ID: %s) not found, demolishing bridges to this channel and its threads.",
-                                bridged_channel.guild.name,
-                                bridged_channel.name,
-                                bridged_channel.id,
-                            )
-                            try:
-                                await bridges.demolish_bridges(
-                                    target_channel=bridged_channel, session=session
-                                )
-                            except Exception as e:
-                                logger.error(
-                                    "Exception occurred when trying to demolish an invalid bridge after bridging a message edit: %s",
-                                    e,
-                                )
-
-                    async_message_edits.append(
-                        edit_message(
-                            message_row,
-                            target_channel_id,
-                            thread_splat,
+                # Find all bridged messages associated with this one (there might be multiple if the original message was split due to length)
+                select_message_map: SQLSelect[tuple[DBMessageMap]] = (
+                    SQLSelect(DBMessageMap)
+                    .where(
+                        sql_and(
+                            DBMessageMap.source_message == message_id,
+                            DBMessageMap.target_channel == str(bridged_channel_id),
                         )
                     )
-                except discord.HTTPException as e:
-                    logger.warning(
-                        "Ran into a Discord exception while trying to edit a message across a bridge:\n"
-                        + str(e)
-                    )
+                    .order_by(DBMessageMap.target_message_order)
+                )
+                bridged_messages: ScalarResult[DBMessageMap] = await sql_retry(
+                    lambda: session.scalars(select_message_map)
+                )
+
+                for message_row in bridged_messages:
+                    if not message_row.webhook:
+                        break
+
+                    # The webhook returned by the call to get_reachable_channels() may not be the same as the one used to post the message
+                    if (message_webhook_id := int(message_row.webhook)) != webhook.id:
+                        try:
+                            webhook = await globals.client.fetch_webhook(
+                                message_webhook_id
+                            )
+                        except Exception:
+                            break
+
+                    if len(channel_specific_message_content) > 0:
+                        truncated_content = channel_specific_message_content[:2000]
+                        channel_specific_message_content = (
+                            channel_specific_message_content[2000:]
+                        )
+                    else:
+                        truncated_content = "-# (The original message was longer than 2000 characters but has been edited to be shorter.)"
+
+                    try:
+
+                        async def edit_message(
+                            message_row: DBMessageMap,
+                            content: str,
+                            webhook: discord.Webhook,
+                            thread_splat: ThreadSplat,
+                            attach_embeds: bool,
+                        ):
+                            try:
+                                await webhook.edit_message(
+                                    message_id=int(message_row.target_message),
+                                    content=content,
+                                    embeds=(
+                                        channel_specific_embeds
+                                        if attach_embeds
+                                        else []  # Only attach embeds on the last message
+                                    ),
+                                    **thread_splat,
+                                )
+                            except discord.NotFound:
+                                # Webhook is gone, delete this bridge
+                                assert isinstance(
+                                    bridged_channel,
+                                    (discord.TextChannel, discord.Thread),
+                                )
+                                logger.warning(
+                                    "Webhook in %s:%s (ID: %s) not found, demolishing bridges to this channel and its threads.",
+                                    bridged_channel.guild.name,
+                                    bridged_channel.name,
+                                    bridged_channel.id,
+                                )
+                                try:
+                                    await bridges.demolish_bridges(
+                                        target_channel=bridged_channel, session=session
+                                    )
+                                except Exception as e:
+                                    logger.error(
+                                        "Exception occurred when trying to demolish an invalid bridge after bridging a message edit: %s",
+                                        e,
+                                    )
+
+                        async_message_edits.append(
+                            edit_message(
+                                message_row,
+                                truncated_content,
+                                webhook,
+                                thread_splat,
+                                len(channel_specific_message_content) == 0,
+                            )
+                        )
+                    except discord.HTTPException as e:
+                        logger.warning(
+                            "Ran into a Discord exception while trying to edit a message across a bridge:\n"
+                            + str(e)
+                        )
 
             await asyncio.gather(*async_message_edits)
     except Exception as e:
