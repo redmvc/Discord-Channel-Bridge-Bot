@@ -487,9 +487,9 @@ async def bridge_message_helper(message: discord.Message):
                 )
 
             # Send a message out to each target webhook
-            async_bridged_messages: list[Coroutine[Any, Any, BridgedMessage | None]] = (
-                []
-            )
+            async_bridged_messages: list[
+                Coroutine[Any, Any, list[BridgedMessage] | None]
+            ] = []
             for target_id, webhook in reachable_channels.items():
                 if not webhook:
                     continue
@@ -545,8 +545,11 @@ async def bridge_message_helper(message: discord.Message):
             # Insert references to the linked messages into the message_mappings table
             bridged_messages: list[BridgedMessage] = [
                 bridged_message
-                for bridged_message in (await asyncio.gather(*async_bridged_messages))
-                if bridged_message
+                for bridged_message_list in (
+                    await asyncio.gather(*async_bridged_messages)
+                )
+                if bridged_message_list
+                for bridged_message in bridged_message_list
             ]
             source_message_id_str = str(message.id)
             source_channel_id_str = str(message_channel_id)
@@ -559,6 +562,7 @@ async def bridge_message_helper(message: discord.Message):
                             target_message=bridged_message.id,
                             target_channel=bridged_message.channel_id,
                             forward_header_message=bridged_message.forwarded_header_id,
+                            target_message_order=bridged_message.message_order,
                             webhook=bridged_message.webhook_id,
                         )
                         for bridged_message in bridged_messages
@@ -587,6 +591,7 @@ async def bridge_message_helper(message: discord.Message):
 
 class BridgedMessage(NamedTuple):
     id: int
+    message_order: int
     channel_id: int
     webhook_id: int | None
     forwarded_header_id: int | None
@@ -611,8 +616,8 @@ async def bridge_message_to_target_channel(
     forwarded_message_channel_is_nsfw: bool,
     thread_splat: ThreadSplat,
     session: SQLSession,
-) -> BridgedMessage | None:
-    """Bridge a message to a channel and returns the message bridged.
+) -> list[BridgedMessage] | None:
+    """Bridge a message to a channel and return a list of dictionaries with information about the message bridged. Multiple dictionaries are returned in case a message has to be split into multiple ones due to message length.
 
     #### Args:
         - `message`: The message being bridged.
@@ -634,7 +639,7 @@ async def bridge_message_to_target_channel(
         - `session`: A connection to the database.
 
     #### Returns:
-        - `discord.WebhookMessage`: The message bridged.
+        - `list[BridgedMessage]`: A dictionary with data about the bridged message (or multiple messages in case it had to be split).
     """
     logger.debug(
         "Bridging message with ID %s to channel with ID %s.",
@@ -806,26 +811,45 @@ async def bridge_message_to_target_channel(
     try:
         if not forwarded_message:
             # Message is not a forward
-            sent_message = await webhook.send(
-                content=message_content,
-                allowed_mentions=discord.AllowedMentions(
-                    users=[discord.Object(id=id) for id in people_to_ping],
-                    roles=False,
-                    everyone=False,
-                ),
-                avatar_url=bridged_avatar_url,
-                username=bridged_member_name,
-                embeds=list(message_embeds + reply_embed),
-                files=attachments,  # TODO might throw HHTPException if too large?
-                wait=True,
-                **thread_splat,
-            )
-            return BridgedMessage(
-                id=sent_message.id,
-                channel_id=sent_message.channel.id,
-                webhook_id=sent_message.webhook_id,
-                forwarded_header_id=None,
-            )
+            sent_message_ids: list[int] = []
+            while len(message_content) > 0:
+                # Message could be too long, split it up
+                # TODO: handle split emoji/words/channels/mentions/etc
+                truncated_message = message_content[:2000]
+                message_content = message_content[2000:]
+                sent_message = await webhook.send(
+                    content=truncated_message,
+                    allowed_mentions=discord.AllowedMentions(
+                        users=[discord.Object(id=id) for id in people_to_ping],
+                        roles=False,
+                        everyone=False,
+                    ),
+                    avatar_url=bridged_avatar_url,
+                    username=bridged_member_name,
+                    embeds=(
+                        list(message_embeds + reply_embed)
+                        if len(message_content) == 0
+                        else []  # Only attach embeds on the last message
+                    ),
+                    files=(
+                        attachments
+                        if len(message_content) == 0
+                        else []  # Only attach files on the last message
+                    ),  # TODO might throw HHTPException if too large?
+                    wait=True,
+                    **thread_splat,
+                )
+                sent_message_ids.append(sent_message.id)
+            return [
+                BridgedMessage(
+                    id=message_id,
+                    message_order=idx,
+                    channel_id=sent_message.channel.id,
+                    webhook_id=sent_message.webhook_id,
+                    forwarded_header_id=None,
+                )
+                for idx, message_id in enumerate(sent_message_ids)
+            ]
 
         # Message is a forward so I'll send a short message saying who sent it then forward it myself
         target_channel_parent = await globals.get_channel_parent(target_channel)
@@ -838,12 +862,15 @@ async def bridge_message_to_target_channel(
                 content=f"> -# <@{bridged_member_id}> forwarded a message from an NSFW channel across the bridge but this channel is SFW; forwarding failed.",
             )
 
-            return BridgedMessage(
-                id=sent_message.id,
-                channel_id=sent_message.channel.id,
-                webhook_id=sent_message.webhook_id,
-                forwarded_header_id=None,
-            )
+            return [
+                BridgedMessage(
+                    id=sent_message.id,
+                    message_order=0,
+                    channel_id=sent_message.channel.id,
+                    webhook_id=sent_message.webhook_id,
+                    forwarded_header_id=None,
+                )
+            ]
 
         # Either the target channel is NSFW or the source isn't, so the forwarding can work fine
         async def bridge_forwarded_message():
@@ -856,12 +883,13 @@ async def bridge_message_to_target_channel(
             bridged_forward = await forwarded_message.forward(target_channel)
             return BridgedMessage(
                 id=bridged_forward.id,
+                message_order=0,
                 channel_id=bridged_forward.channel.id,
                 webhook_id=bridged_forward.webhook_id,
                 forwarded_header_id=forward_header.id,
             )
 
-        return await bridge_forwarded_message()
+        return [await bridge_forwarded_message()]
     except discord.NotFound:
         # Webhook is gone, delete this bridge
         logger.warning(
