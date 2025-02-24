@@ -1804,7 +1804,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                         "Ran into an unknown error while trying to add a reaction across a bridge: %s",
                         e,
                     )
-                    raise
+                    return
 
         reactions_added = await asyncio.gather(*async_add_reactions)
         await sql_retry(lambda: session.add_all([r for r in reactions_added if r]))
@@ -1825,7 +1825,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                 e,
             )
 
-        raise
+        return
 
     logger.debug("Reaction bridged.")
 
