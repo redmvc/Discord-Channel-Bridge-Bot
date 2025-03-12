@@ -813,9 +813,11 @@ async def bridge_message_to_target_channel(
         if not forwarded_message:
             # Message is not a forward
             sent_message_ids: list[int] = []
-            while len(message_content) > 0:
+            sending_initial_message = True
+            while len(message_content) > 0 or sending_initial_message:
                 # Message could be too long, split it up
                 # TODO: handle split emoji/words/channels/mentions/etc
+                sending_initial_message = False
                 truncated_message = message_content[:2000]
                 message_content = message_content[2000:]
                 sent_message = await webhook.send(
