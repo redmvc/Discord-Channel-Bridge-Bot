@@ -454,13 +454,29 @@ async def bridge_message_helper(message: discord.Message):
                 )
                 if isinstance(local_replied_to_message_map, DBMessageMap):
                     # So the message replied to was bridged from elsewhere
-                    source_replied_to_id = int(
-                        local_replied_to_message_map.source_message
-                    )
                     reply_source_channel_id = int(
                         local_replied_to_message_map.source_channel
                     )
+                    source_replied_to_id = int(
+                        local_replied_to_message_map.source_message
+                    )
                     bridged_reply_to[reply_source_channel_id] = source_replied_to_id
+
+                    try:
+                        # Try to find the author of the original message
+                        reply_source_channel = await globals.get_channel_from_id(
+                            reply_source_channel_id
+                        )
+                        assert isinstance(
+                            reply_source_channel, (discord.TextChannel, discord.Thread)
+                        )
+                        source_replied_to = await reply_source_channel.fetch_message(
+                            source_replied_to_id
+                        )
+
+                        replied_to_author = source_replied_to.author
+                    except Exception:
+                        pass
                 else:
                     source_replied_to_id = message_reference_id
 
