@@ -869,6 +869,7 @@ async def bridge_message_to_target_channel(
                     **thread_splat,
                 )
                 sent_message_ids.append(sent_message.id)
+                people_to_ping = set()
             return [
                 BridgedMessage(
                     id=message_id,
