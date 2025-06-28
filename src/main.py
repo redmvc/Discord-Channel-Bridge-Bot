@@ -793,8 +793,6 @@ async def bridge_message_to_target_channel(
                 reply_error_msg = (
                     "Couldn't load contents of the message this message is replying to."
                 )
-            else:
-                reply_error_msg = "This message is a reply but the message it's replying to could not be loaded."
 
         if reply_error_msg:
             reply_error_msg = f"\n\n-# {reply_error_msg}"
