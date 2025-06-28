@@ -806,7 +806,10 @@ async def bridge_message_to_target_channel(
         reply_embed = []
 
     attachments = await asyncio.gather(
-        *[attachment.to_file() for attachment in message_attachments]
+        *[
+            attachment.to_file(spoiler=attachment.is_spoiler())
+            for attachment in message_attachments
+        ]
     )
 
     try:
