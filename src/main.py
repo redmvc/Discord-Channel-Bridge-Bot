@@ -1178,7 +1178,9 @@ async def replace_missing_emoji(
 
         try:
             await emoji_hash_map.map.ensure_hash_map(
-                emoji_id=emoji_id, emoji_name=emoji_name, session=session
+                emoji_id=emoji_id,
+                emoji_name=emoji_name,
+                session=session,
             )
         except Exception as e:
             logger.error(

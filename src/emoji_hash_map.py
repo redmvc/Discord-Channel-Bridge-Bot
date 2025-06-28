@@ -860,7 +860,10 @@ class EmojiHashMap:
 
     @beartype
     def get_accessible_emoji(
-        self, emoji_id: int, *, skip_self: bool = False
+        self,
+        emoji_id: int,
+        *,
+        skip_self: bool = False,
     ) -> discord.Emoji | None:
         """Return an emoji matching the ID passed. First tries to return the one matching the ID itself, then an internal equivalent, and finally any accessible ones.
 
@@ -895,6 +898,41 @@ class EmojiHashMap:
 
         return None
 
+    @overload
+    async def get_hash(
+        self,
+        *,
+        emoji: discord.PartialEmoji | discord.Emoji,
+        session: SQLSession | None = None,
+    ) -> str: ...
+
+    @overload
+    async def get_hash(
+        self,
+        *,
+        emoji_id: int | str,
+        session: SQLSession | None = None,
+    ) -> str | None: ...
+
+    @overload
+    async def get_hash(
+        self,
+        *,
+        emoji: None,
+        emoji_id: int | str,
+        emoji_name: None,
+        session: SQLSession | None = None,
+    ) -> str | None: ...
+
+    @overload
+    async def get_hash(
+        self,
+        *,
+        emoji_id: int | str,
+        emoji_name: str,
+        session: SQLSession | None = None,
+    ) -> str: ...
+
     @beartype
     async def get_hash(
         self,
@@ -928,8 +966,38 @@ class EmojiHashMap:
             return self._emoji_to_hash.get(int(emoji_id))
 
         return await self.ensure_hash_map(
-            emoji=emoji, emoji_id=emoji_id, emoji_name=emoji_name, session=session
+            emoji=emoji,
+            emoji_id=emoji_id,
+            emoji_name=emoji_name,
+            session=session,
         )
+
+    @overload
+    async def ensure_hash_map(
+        self,
+        *,
+        emoji: discord.Emoji | discord.PartialEmoji,
+        session: SQLSession | None = None,
+    ) -> str: ...
+
+    @overload
+    async def ensure_hash_map(
+        self,
+        *,
+        emoji_id: int | str,
+        emoji_name: str,
+        session: SQLSession | None = None,
+    ) -> str: ...
+
+    @overload
+    async def ensure_hash_map(
+        self,
+        *,
+        emoji: discord.Emoji | discord.PartialEmoji | None = None,
+        emoji_id: int | str | None = None,
+        emoji_name: str | None = None,
+        session: SQLSession | None = None,
+    ) -> str: ...
 
     @beartype
     async def ensure_hash_map(
