@@ -1441,6 +1441,7 @@ async def delete_message_helper(message_id: int, channel_id: int):
                         message_row: DBMessageMap,
                         target_channel_id: int,
                         thread_splat: ThreadSplat,
+                        bridged_channel: discord.TextChannel | discord.Thread,
                     ):
                         if message_row.webhook:
                             # The webhook returned by the call to get_reachable_channels() may not be the same as the one used to post the message
@@ -1465,10 +1466,6 @@ async def delete_message_helper(message_id: int, channel_id: int):
                                 )
                             except discord.NotFound:
                                 # Webhook is gone, delete this bridge
-                                assert isinstance(
-                                    bridged_channel,
-                                    (discord.TextChannel, discord.Thread),
-                                )
                                 logger.warning(
                                     "Webhook in %s:%s (ID: %s) not found, demolishing bridges to this channel and its threads.",
                                     bridged_channel.guild.name,
@@ -1477,7 +1474,8 @@ async def delete_message_helper(message_id: int, channel_id: int):
                                 )
                                 try:
                                     await bridges.demolish_bridges(
-                                        target_channel=bridged_channel, session=session
+                                        target_channel=bridged_channel,
+                                        session=session,
                                     )
                                 except Exception as e:
                                     if not isinstance(e, discord.HTTPException):
@@ -1504,7 +1502,12 @@ async def delete_message_helper(message_id: int, channel_id: int):
                             return
 
                     async_message_deletes.append(
-                        delete_message(message_row, target_channel_id, thread_splat)
+                        delete_message(
+                            message_row,
+                            target_channel_id,
+                            thread_splat,
+                            bridged_channel,
+                        )
                     )
                 except discord.HTTPException as e:
                     logger.warning(
