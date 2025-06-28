@@ -687,6 +687,53 @@ async def bridge_message_to_target_channel(
         target_channel.id,
     )
 
+    # Lock the channel to preserve message ordering (particularly when doing message forwards)
+    target_channel_id = target_channel.id
+    lock = globals.channel_lock.get(target_channel_id)
+    if not lock:
+        lock = globals.channel_lock[target_channel_id] = asyncio.Lock()
+
+    async with lock:
+        return await _bridge_message_to_target_channel(
+            sent_message,
+            message_content,
+            message_attachments,
+            message_embeds,
+            people_to_ping,
+            target_channel,
+            webhook,
+            webhook_channel,
+            message_is_reply,
+            replied_to_author,
+            replied_to_content,
+            bridged_reply_to,
+            reply_has_ping,
+            forwarded_message,
+            forwarded_message_channel_is_nsfw,
+            thread_splat,
+            session,
+        )
+
+
+async def _bridge_message_to_target_channel(
+    sent_message: discord.Message,
+    message_content: str,
+    message_attachments: list[discord.Attachment],
+    message_embeds: list[discord.Embed],
+    people_to_ping: set[int],
+    target_channel: discord.TextChannel | discord.Thread,
+    webhook: discord.Webhook,
+    webhook_channel: discord.TextChannel,
+    message_is_reply: bool,
+    replied_to_author: discord.User | discord.Member | None,
+    replied_to_content: str | None,
+    bridged_reply_to: int | None,
+    reply_has_ping: bool,
+    forwarded_message: discord.Message | None,
+    forwarded_message_channel_is_nsfw: bool,
+    thread_splat: ThreadSplat,
+    session: SQLSession,
+) -> list[BridgedMessage] | None:
     # Replace Discord links in the message and embed text
     message_content = await replace_discord_links(
         message_content, target_channel, session
@@ -705,7 +752,8 @@ async def bridge_message_to_target_channel(
 
     # Try to find whether the user who sent this message is on the other side of the bridge and if so what their name and avatar would be
     bridged_member = await globals.get_channel_member(
-        webhook_channel, sent_message.author.id
+        webhook_channel,
+        sent_message.author.id,
     )
     if bridged_member:
         bridged_member_name = bridged_member.display_name
@@ -866,7 +914,9 @@ async def bridge_message_to_target_channel(
             # Messages can't be forwarded from NSFW channels to SFW channels
             sent_message = await target_channel.send(
                 allowed_mentions=discord.AllowedMentions(
-                    users=False, roles=False, everyone=False
+                    users=False,
+                    roles=False,
+                    everyone=False,
                 ),
                 content=f"> -# <@{bridged_member_id}> forwarded a message from an NSFW channel across the bridge but this channel is SFW; forwarding failed.",
             )
@@ -885,7 +935,9 @@ async def bridge_message_to_target_channel(
         async def bridge_forwarded_message():
             forward_header = await target_channel.send(
                 allowed_mentions=discord.AllowedMentions(
-                    users=False, roles=False, everyone=False
+                    users=False,
+                    roles=False,
+                    everyone=False,
                 ),
                 content=f"> -# The following message was originally forwarded by <@{bridged_member_id}>.",
             )

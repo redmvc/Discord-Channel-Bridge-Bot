@@ -127,6 +127,9 @@ rate_limiter = AsyncLimiter(1, 10)
 # Variable to keep track of messages that are still being bridged/edited before they can be edited/deleted
 message_lock: dict[int, asyncio.Lock] = {}
 
+# Variable to keep track of channels that are being sent messages to to try to preserve ordering
+channel_lock: dict[int, asyncio.Lock] = {}
+
 # Type wildcard
 T = TypeVar("T", bound=Any)
 
