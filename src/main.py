@@ -333,10 +333,38 @@ async def bridge_message_helper(message: discord.Message):
     session = None
     try:
         with SQLSession(engine) as session:
+            # Check whether this message is a reference to another message, i.e. if it's a reply or a forward
             message_reference = message.reference
+            original_message = message
+            original_message_channel = message.channel
             if message_reference:
                 resolved_message_reference = message_reference.resolved
                 message_reference_id = message_reference.message_id
+
+                if isinstance(resolved_message_reference, discord.Message):
+                    # Original message is cached and I can just fetch it
+                    original_message = resolved_message_reference
+                    original_message_channel = original_message.channel
+                elif message_reference_id:
+                    # Try to find the original message, if it's not resolved
+                    original_message_channel = await globals.get_channel_from_id(
+                        message_reference.channel_id
+                    )
+                    if isinstance(
+                        original_message_channel, (discord.TextChannel, discord.Thread)
+                    ):
+                        # I have access to the channel of the original message being forwarded
+                        try:
+                            # Try to find the original message
+                            original_message = (
+                                await original_message_channel.fetch_message(
+                                    message_reference_id
+                                )
+                            )
+                        except Exception:
+                            pass
+                    else:
+                        original_message_channel = message.channel
             else:
                 resolved_message_reference = None
                 message_reference_id = None
@@ -364,37 +392,7 @@ async def bridge_message_helper(message: discord.Message):
                     "Message with ID %s has snapshots, is forwarded.", message.id
                 )
 
-                forwarded_message = message
-                if resolved_message_reference and isinstance(
-                    resolved_message_reference, discord.Message
-                ):
-                    # Original message is cached and I can just fetch it and forward it instead
-                    forwarded_message = resolved_message_reference
-                    original_message_channel = forwarded_message.channel
-                elif message_reference_id:
-                    # Try to find the original message, if it's not resolved
-                    original_message_channel = await globals.get_channel_from_id(
-                        message_reference.channel_id
-                    )
-                    if isinstance(
-                        original_message_channel, (discord.TextChannel, discord.Thread)
-                    ):
-                        # I have access to the channel of the original message being forwarded
-                        try:
-                            # Try to find the original message
-                            original_message = (
-                                await original_message_channel.fetch_message(
-                                    message_reference_id
-                                )
-                            )
-                            if isinstance(original_message, discord.Message):
-                                # I have access to the actual original message, I can forward it instead
-                                forwarded_message = original_message
-                        except Exception:
-                            pass
-                else:
-                    original_message_channel = message.channel
-
+                forwarded_message = original_message
                 original_message_channel_parent = original_message_channel
                 if isinstance(original_message_channel, discord.Thread) and (
                     possible_parent := original_message_channel.parent
@@ -426,22 +424,25 @@ async def bridge_message_helper(message: discord.Message):
                 # message I'm replying to in those channels
                 message_is_reply = True
 
-                if isinstance(resolved_message_reference, discord.Message):
+                if original_message.id != message.id:
+                    replied_to_message = original_message
+                else:
+                    replied_to_message = resolved_message_reference
+                if isinstance(replied_to_message, discord.Message):
                     replied_to_content = await replace_missing_emoji(
                         globals.truncate(
                             discord.utils.remove_markdown(
-                                resolved_message_reference.clean_content
+                                replied_to_message.clean_content
                             ),
                             50,
                         ),
                         session,
                     )
-                    replied_to_author = resolved_message_reference.author
+                    replied_to_author = replied_to_message.author
 
                     # identify if this reply "pinged" the target, to know whether to add the @ symbol UI
                     reply_has_ping = any(
-                        x.id == resolved_message_reference.author.id
-                        for x in message.mentions
+                        x.id == replied_to_author.id for x in message.mentions
                     )
 
                 # First, check whether the message replied to was itself bridged from a different channel
