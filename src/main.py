@@ -496,12 +496,11 @@ async def bridge_message_helper(message: discord.Message):
 
             # Check who, if anyone, is pinged in the message
             people_to_ping = {m.id for m in message.mentions}
-            if not message_content.startswith("@silent") and people_to_ping:
-                # Remove everyone who was already successfully pinged in the message in the original channel
-                message_channel = await globals.get_channel_parent(message.channel)
-                people_to_ping.difference_update(
-                    {member.id for member in message_channel.members}
-                )
+            # Remove everyone who was already successfully pinged in the message in the original channel
+            message_channel = await globals.get_channel_parent(message.channel)
+            people_to_ping.difference_update(
+                {member.id for member in message_channel.members}
+            )
 
             # Send a message out to each target webhook
             async_bridged_messages: list[
