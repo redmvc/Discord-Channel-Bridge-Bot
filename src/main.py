@@ -427,7 +427,7 @@ async def bridge_message_helper(message: discord.Message):
             replied_to_author = None
             replied_to_content = None
             reply_has_ping = False
-            if (not forwarded_message) and message_reference_id:
+            if message.type == discord.MessageType.reply:
                 # This message is a reply to another message, so we should try to link to its match on the other side of bridges
                 # bridged_reply_to will be a dict whose keys are channel IDs and whose values are the IDs of messages matching the
                 # message I'm replying to in those channels
