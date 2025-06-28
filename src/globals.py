@@ -291,21 +291,6 @@ def get_emoji_information(
         - `ArgumentError`: Neither `emoji` nor `emoji_id` were passed, or `emoji_id` was passed but not `emoji_name`.
         - `ValueError`: `emoji` argument was passed and had type `PartialEmoji` but it was not a custom emoji, or `emoji_id` argument was passed and had type `str` but it was not a valid numerical ID.
     """
-    if not emoji:
-        if emoji_id:
-            if not emoji_name:
-                err = ArgumentError(
-                    f"Error in function {inspect.stack()[1][3]}(): if emoji_id is passed as argument to get_emoji_information(), emoji_name must also be."
-                )
-                logger.error(err)
-                raise err
-        else:
-            err = ArgumentError(
-                f"Error in function {inspect.stack()[1][3]}(): at least one of emoji or emoji_id must be passed as argument to get_emoji_information()."
-            )
-            logger.error(err)
-            raise err
-
     if emoji:
         if not emoji.id:
             err = ValueError(
@@ -319,10 +304,20 @@ def get_emoji_information(
         emoji_animated = emoji.animated
         emoji_url = emoji.url
     else:
-        assert emoji_id and isinstance(emoji_name, str)
+        if not emoji_id:
+            err = ArgumentError(
+                f"Error in function {inspect.stack()[1][3]}(): either emoji or both emoji_id and emoji_name must be passed as argument to get_emoji_information()."
+            )
+            logger.error(err)
+            raise err
+        elif not emoji_name:
+            err = ArgumentError(
+                f"Error in function {inspect.stack()[1][3]}(): if emoji_id is passed as argument to get_emoji_information(), emoji_name must also be."
+            )
+            logger.error(err)
+            raise err
 
-        emoji_animated = emoji_name.startswith("a:")
-        if emoji_animated:
+        if emoji_animated := emoji_name.startswith("a:"):
             emoji_name = emoji_name[2:]
         elif emoji_name.startswith(":"):
             emoji_name = emoji_name[1:]
