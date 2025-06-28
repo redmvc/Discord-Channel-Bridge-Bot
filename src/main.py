@@ -716,73 +716,25 @@ async def bridge_message_to_target_channel(
 
     if message_is_reply:
         # This message is a reply to another message
-        def create_reply_embed_dict(
-            replied_to_author_avatar: discord.Asset | None,
-            replied_to_author_name: str | None,
-            replied_to_content: str | None,
-            *,
-            jump_url: str | None = None,
-            error_msg: str | None = None,
-        ) -> ReplyEmbedDict:
-            reply_embed_dict: ReplyEmbedDict = {"type": "rich"}
-
-            if jump_url:
-                reply_embed_dict["url"] = jump_url
-                reply_symbol = f"[↪]({jump_url})"
-            else:
-                reply_symbol = "↪"
-
-            if (
-                replied_to_author_avatar
-                and replied_to_author_name
-                and replied_to_content
-            ):
-                reply_embed_dict["thumbnail"] = {
-                    "url": replied_to_author_avatar.replace(size=16).url,
-                    "height": 18,
-                    "width": 18,
-                }
-
-                if reply_has_ping:
-                    # Discord represents ping "ON" vs "OFF" replies with an @ symbol before the reply author name
-                    # copy this behavior here
-                    replied_to_author_name = f"@{replied_to_author_name}"
-
-                replied_to_author_name = " " + replied_to_author_name
-                replied_to_content = "  " + replied_to_content
-            else:
-                replied_to_author_name = ""
-                replied_to_content = ""
-                if jump_url:
-                    error_msg = "Couldn't load contents of the message this message is replying to."
-                else:
-                    error_msg = "This message is a reply but the message it's replying to could not be loaded."
-
-            if error_msg:
-                error_msg = f"\n\n-# {error_msg}"
-            else:
-                error_msg = ""
-
-            reply_embed_dict["description"] = (
-                f"**{reply_symbol}{replied_to_author_name}**{replied_to_content}{error_msg}"
-            )
-
-            return reply_embed_dict
-
-        reply_error_msg = None
-        reply_embed = []
+        replied_to_author_avatar = None
+        replied_to_author_name = ""
+        jump_url = None
+        reply_error_msg = ""
         if bridged_reply_to:
             # The message being replied to is also bridged to this channel, so I'll create an embed to represent this
             try:
                 message_replied_to = await target_channel.fetch_message(
                     bridged_reply_to
                 )
+                jump_url = message_replied_to.jump_url
 
-                # Use the author's display name if they're in this server
-                display_name = discord.utils.escape_markdown(
+                # Use the author's display name and avatar if they're in this server
+                replied_to_author_name = discord.utils.escape_markdown(
                     message_replied_to.author.display_name
                 )
+                replied_to_author_avatar = message_replied_to.author.display_avatar
 
+                # Try to fetch the replied to content if it's not available
                 if not replied_to_content:
                     replied_to_content = await replace_missing_emoji(
                         globals.truncate(
@@ -793,49 +745,65 @@ async def bridge_message_to_target_channel(
                         ),
                         session,
                     )
-                reply_embed = [
-                    discord.Embed.from_dict(
-                        create_reply_embed_dict(
-                            message_replied_to.author.display_avatar,
-                            display_name,
-                            replied_to_content,
-                            jump_url=message_replied_to.jump_url,
-                        )
-                    )
-                ]
             except discord.HTTPException:
                 reply_error_msg = "The message being replied to could not be loaded."
-                bridged_reply_to = False
         else:
             reply_error_msg = (
                 "The message being replied to has not been bridged or has been deleted."
             )
 
-        if not bridged_reply_to:
-            if replied_to_content and replied_to_author:
+        if replied_to_author is not None:
+            if not replied_to_author_name:
+                replied_to_author_avatar = replied_to_author.display_avatar
+
                 replied_to_author_name = discord.utils.escape_markdown(
                     replied_to_author.name
                 )
+        elif replied_to_content is None:
+            reply_error_msg = "This message is a reply but the message being replied to could not be loaded."
 
-                reply_embed = [
-                    discord.Embed.from_dict(
-                        create_reply_embed_dict(
-                            replied_to_author.display_avatar,
-                            replied_to_author_name,
-                            replied_to_content,
-                            error_msg=reply_error_msg,
-                        )
-                    )
-                ]
+        reply_embed_dict: ReplyEmbedDict = {"type": "rich"}
+
+        if replied_to_author_avatar:
+            reply_embed_dict["thumbnail"] = {
+                "url": replied_to_author_avatar.replace(size=16).url,
+                "height": 18,
+                "width": 18,
+            }
+
+        if replied_to_author_name:
+            if reply_has_ping:
+                # Discord represents ping "ON" vs "OFF" replies with an @ symbol before the reply author name
+                # copy this behavior here
+                replied_to_author_name = f"@{replied_to_author_name}"
+            replied_to_author_name = " " + replied_to_author_name
+
+        if jump_url:
+            reply_embed_dict["url"] = jump_url
+            reply_symbol = f"[↪]({jump_url})"
+        else:
+            reply_symbol = "↪"
+
+        if replied_to_content:
+            replied_to_content = "  " + replied_to_content
+        else:
+            replied_to_content = ""
+            # TODO: deal with the fact that forwarded messages don't have contents
+            if jump_url:
+                reply_error_msg = (
+                    "Couldn't load contents of the message this message is replying to."
+                )
             else:
-                reply_embed = [
-                    discord.Embed.from_dict(
-                        {
-                            "type": "rich",
-                            "description": "-# **↪** This message is a reply but the message being replied to could not be loaded.",
-                        }
-                    )
-                ]
+                reply_error_msg = "This message is a reply but the message it's replying to could not be loaded."
+
+        if reply_error_msg:
+            reply_error_msg = f"\n\n-# {reply_error_msg}"
+
+        reply_embed_dict["description"] = (
+            f"**{reply_symbol}{replied_to_author_name}**{replied_to_content}{reply_error_msg}"
+        )
+
+        reply_embed = [discord.Embed.from_dict(reply_embed_dict)]
     else:
         reply_embed = []
 
