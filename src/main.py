@@ -340,6 +340,13 @@ async def bridge_message_helper(message: discord.Message):
         "outbound",
         include_webhooks=True,
     )
+    if len(reachable_channels) == 0:
+        logger.debug(
+            "No channels are reachable from channel with ID %s.",
+            message.id,
+            message_channel_id,
+        )
+        return
 
     session = None
     try:
@@ -525,7 +532,8 @@ async def bridge_message_helper(message: discord.Message):
                     continue
 
                 target_channel = await globals.get_channel_from_id(
-                    target_id, assert_text_or_thread=True
+                    target_id,
+                    assert_text_or_thread=True,
                 )
 
                 thread_splat: ThreadSplat = {}
@@ -736,7 +744,9 @@ async def _bridge_message_to_target_channel(
 ) -> list[BridgedMessage] | None:
     # Replace Discord links in the message and embed text
     message_content = await replace_discord_links(
-        message_content, target_channel, session
+        message_content,
+        target_channel,
+        session,
     )
     for embed in message_embeds:
         embed.description = await replace_discord_links(
@@ -862,6 +872,9 @@ async def _bridge_message_to_target_channel(
         ]
     )
 
+    target_channel_id = target_channel.id
+    webhook_id = webhook.id
+
     try:
         if not forwarded_message:
             # Message is not a forward
@@ -901,8 +914,8 @@ async def _bridge_message_to_target_channel(
                 BridgedMessage(
                     id=message_id,
                     message_order=idx,
-                    channel_id=sent_message.channel.id,
-                    webhook_id=sent_message.webhook_id,
+                    channel_id=target_channel_id,
+                    webhook_id=webhook_id,
                     forwarded_header_id=None,
                 )
                 for idx, message_id in enumerate(sent_message_ids)
