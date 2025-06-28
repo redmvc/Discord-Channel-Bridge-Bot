@@ -340,6 +340,13 @@ async def bridge_message_helper(message: discord.Message):
         "outbound",
         include_webhooks=True,
     )
+    if len(reachable_channels) == 0:
+        logger.debug(
+            "No channels are reachable from channel with ID %s.",
+            message.id,
+            message_channel_id,
+        )
+        return
 
     session = None
     try:
