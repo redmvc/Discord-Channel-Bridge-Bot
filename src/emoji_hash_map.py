@@ -576,7 +576,9 @@ class EmojiHashMap:
 
             emoji_to_copy_id, emoji_to_copy_name, _, emoji_to_copy_url = (
                 globals.get_emoji_information(
-                    emoji_to_copy, emoji_to_copy_id, emoji_to_copy_name
+                    emoji_to_copy,
+                    emoji_to_copy_id,
+                    emoji_to_copy_name,
                 )
             )
 
@@ -595,19 +597,21 @@ class EmojiHashMap:
         emoji_to_delete_id = None
         try:
             emoji = await globals.emoji_server.create_custom_emoji(
-                name=emoji_to_copy_name, image=emoji_image, reason="Bridging reaction."
+                name=emoji_to_copy_name,
+                image=emoji_image,
+                reason="Bridging reaction.",
             )
         except discord.Forbidden:
             logger.warning("Emoji server permissions not set correctly.")
             raise
         except discord.HTTPException:
-            if len(globals.emoji_server.emojis) < 50:
+            loaded_emojis = await globals.emoji_server.fetch_emojis()
+            if len(loaded_emojis) < 50:
                 # Something weird happened, the error was not due to a full server
                 raise
 
             # Try to delete an emoji from the server and then add this again.
-            emoji_to_delete: discord.Emoji | None = None
-            emoji_to_delete = random.choice(globals.emoji_server.emojis)
+            emoji_to_delete: discord.Emoji | None = random.choice(loaded_emojis)
             emoji_to_delete_id = emoji_to_delete.id
             if not emoji_to_delete:
                 raise Exception("emoji_to_delete failed to be fetched somehow.")
