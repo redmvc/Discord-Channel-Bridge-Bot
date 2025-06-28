@@ -42,22 +42,22 @@ It's very straightforward to run your own copy of this bot. You'll need access t
 5. Edit your `requirements.txt` file to include the appropriate SQL library depending on your SQL dialect, then run `pip install -r requirements.txt` on your command line from the main folder.
 6. Run `main.py`. This will automatically create the necessary tables in your database if they're not already there, and all commands will be working out of the box.
 
-If you set up a server for the bot to store emoji, you can run the command `/map_emoji :internal_emoji: :external_emoji: [:external_emoji_2: [:external_emoji_3: ...]]` from that server to create an internal equivalence between emoji for the bot to bridge. You can also run the command `/hash_server_emoji [server_id]` in order to store hashes of every emoji in a server so that the bridge will store hashes of each emoji so that it can automatically match different emoji from different servers that use the same image.
+If you set up a server for the bot to store emoji, you can run the command `/map_emoji :internal_emoji: :external_emoji: [:external_emoji_2: [:external_emoji_3: ...]]` from that server to create an internal equivalence between emoji for the bot to bridge. You can also run the command `/hash_server_emoji [server_id]` in order to store hashes of every emoji in a server so that it can automatically match different emoji from different servers that use the same image.
 
 
 ## Help, issues, and bugs
 If you have any issues with this bot, feel free to add them to the Issue Tracker or DM `redmagnos` on Discord.
 
 ## Contributing
-I greatly appreciate contributions! If you want to help make this bot better, feel free to submit a pull request. Make sure your PRs focus on a single aspect and don't have scope creep. This project follows PEP-8 guidelines with a column limit of 88.
+I greatly appreciate contributions! If you want to help make this bot better, feel free to submit a pull request. Make sure your PRs focus on a single feature or bugfix and don't have scope creep. This project follows PEP-8 guidelines with a column limit of 88.
 
 ### Git Commit Guidelines
-- Use present tense (e.g. "Add feature" not "Added feature")
+- Use present tense imperatives (e.g. "Add feature" not "Added feature")
 - Limit all lines to 72 characters or less.
 - Reference issues or pull requests outside of the first line.
   - Please use the shorthand `#123` and not the full URL.
 
-If you do not meet any of these guidelines, I'll poke you about it to fix them (unless I feel like fixing them myself).
+If you fail to meet any of these guidelines, I'll poke you about it to fix them (unless I feel like fixing them myself).
 
 ## License
 This project is licensed under the GNU General Public License v3.0 License. See the LICENSE file for details.
