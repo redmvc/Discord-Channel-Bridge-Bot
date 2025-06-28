@@ -495,12 +495,8 @@ async def bridge_message_helper(message: discord.Message):
                 message_is_reply = False
 
             # Check who, if anyone, is pinged in the message
-            people_to_ping: set[int] = set()
-            if not message_content.startswith("@silent") and (
-                people_to_ping := {
-                    int(id) for id in set(re.findall(r"<@(\d+)>", message_content))
-                }
-            ):
+            people_to_ping = {m.id for m in message.mentions}
+            if not message_content.startswith("@silent") and people_to_ping:
                 # Remove everyone who was already successfully pinged in the message in the original channel
                 message_channel = await globals.get_channel_parent(message.channel)
                 people_to_ping.difference_update(
