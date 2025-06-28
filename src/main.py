@@ -4,7 +4,16 @@ import asyncio
 import inspect
 import re
 from copy import deepcopy
-from typing import Any, Coroutine, NamedTuple, TypedDict, cast, overload
+from typing import (
+    Any,
+    Coroutine,
+    Literal,
+    NamedTuple,
+    NotRequired,
+    TypedDict,
+    cast,
+    overload,
+)
 
 import discord
 from beartype import beartype
@@ -613,6 +622,19 @@ class BridgedMessage(NamedTuple):
     forwarded_header_id: int | None
 
 
+class ReplyEmbedDict(TypedDict, total=False):
+    type: Literal["rich"]
+    description: str
+    url: NotRequired[str]
+    thumbnail: NotRequired["ReplyEmbedThumbnailDict"]
+
+
+class ReplyEmbedThumbnailDict(TypedDict):
+    url: str
+    height: int
+    width: int
+
+
 @beartype
 async def bridge_message_to_target_channel(
     sent_message: discord.Message,
@@ -701,8 +723,8 @@ async def bridge_message_to_target_channel(
             *,
             jump_url: str | None = None,
             error_msg: str | None = None,
-        ) -> dict[str, str | dict[str, int | str]]:
-            reply_embed_dict: dict[str, str | dict[str, int | str]] = {"type": "rich"}
+        ) -> ReplyEmbedDict:
+            reply_embed_dict: ReplyEmbedDict = {"type": "rich"}
 
             if jump_url:
                 reply_embed_dict["url"] = jump_url
