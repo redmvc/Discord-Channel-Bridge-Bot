@@ -5,7 +5,16 @@ import inspect
 import io
 import json
 from hashlib import md5
-from typing import Any, Callable, Literal, SupportsInt, TypedDict, TypeVar, cast
+from typing import (
+    Any,
+    Callable,
+    Literal,
+    SupportsInt,
+    TypedDict,
+    TypeVar,
+    cast,
+    overload,
+)
 
 import aiohttp
 import discord
@@ -122,7 +131,7 @@ message_lock: dict[int, asyncio.Lock] = {}
 T = TypeVar("T", bound=Any)
 
 
-@beartype
+@overload
 async def get_channel_from_id(
     channel_or_id: (
         GuildChannel
@@ -139,11 +148,71 @@ async def get_channel_from_id(
     | discord.PartialMessageable
     | discord.DMChannel
     | None
+): ...
+
+
+@overload
+async def get_channel_from_id(
+    channel_or_id: (
+        GuildChannel
+        | discord.Thread
+        | discord.DMChannel
+        | discord.PartialMessageable
+        | discord.abc.PrivateChannel
+        | int
+    ),
+    *,
+    assert_text_or_thread: Literal[False],
+) -> (
+    GuildChannel
+    | discord.Thread
+    | discord.abc.PrivateChannel
+    | discord.PartialMessageable
+    | discord.DMChannel
+    | None
+): ...
+
+
+@overload
+async def get_channel_from_id(
+    channel_or_id: (
+        GuildChannel
+        | discord.Thread
+        | discord.DMChannel
+        | discord.PartialMessageable
+        | discord.abc.PrivateChannel
+        | int
+    ),
+    *,
+    assert_text_or_thread: Literal[True],
+) -> discord.TextChannel | discord.Thread: ...
+
+
+@beartype
+async def get_channel_from_id(
+    channel_or_id: (
+        GuildChannel
+        | discord.Thread
+        | discord.DMChannel
+        | discord.PartialMessageable
+        | discord.abc.PrivateChannel
+        | int
+    ),
+    *,
+    assert_text_or_thread: bool = False,
+) -> (
+    GuildChannel
+    | discord.Thread
+    | discord.abc.PrivateChannel
+    | discord.PartialMessageable
+    | discord.DMChannel
+    | None
 ):
     """Ensure that this function's argument is a valid Discord channel, when it may instead be a channel ID.
 
     #### Args:
         - `channel_or_id`: Either a Discord channel or an ID of same.
+        - `assert_text_or_thread`: Whether to assert that the channel is either a TextChannel or a Thread before returning. Defaults to False.
 
     #### Returns:
         - If the argument is a channel, returns it unchanged; otherwise, returns a channel with the ID passed, or None if it couldn't be found.
@@ -157,6 +226,9 @@ async def get_channel_from_id(
                 channel = None
     else:
         channel = channel_or_id
+
+    if assert_text_or_thread:
+        assert isinstance(channel, discord.TextChannel | discord.Thread)
 
     return channel
 
@@ -220,7 +292,8 @@ async def get_channel_parent(
 
 @beartype
 async def get_channel_member(
-    channel: GuildChannel | discord.Thread, member_id: int
+    channel: GuildChannel | discord.Thread,
+    member_id: int,
 ) -> discord.Member | None:
     """Return a channel's member by their ID, or None if they can't be found.
 
@@ -366,7 +439,9 @@ def truncate(msg: str, length: int) -> str:
 
 @beartype
 async def wait_until_ready(
-    *, time_to_wait: float | int = 100, polling_rate: float | int = 1
+    *,
+    time_to_wait: float | int = 100,
+    polling_rate: float | int = 1,
 ) -> bool:
     """Return True when the bot is ready or False if it times out.
 

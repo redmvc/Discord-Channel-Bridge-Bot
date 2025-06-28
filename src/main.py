@@ -217,7 +217,9 @@ async def on_ready():
 
 @globals.client.event
 async def on_typing(
-    channel: discord.abc.Messageable, user: discord.User | discord.Member, _
+    channel: discord.abc.Messageable,
+    user: discord.User | discord.Member,
+    _,
 ):
     """Make the bot start typing across bridges when a user on the source end of a bridge does so.
 
@@ -360,7 +362,8 @@ async def bridge_message_helper(message: discord.Message):
                         message_reference.channel_id
                     )
                     if isinstance(
-                        original_message_channel, (discord.TextChannel, discord.Thread)
+                        original_message_channel,
+                        (discord.TextChannel, discord.Thread),
                     ):
                         # I have access to the channel of the original message being forwarded
                         try:
@@ -474,10 +477,8 @@ async def bridge_message_helper(message: discord.Message):
                     try:
                         # Try to find the author of the original message
                         reply_source_channel = await globals.get_channel_from_id(
-                            reply_source_channel_id
-                        )
-                        assert isinstance(
-                            reply_source_channel, (discord.TextChannel, discord.Thread)
+                            reply_source_channel_id,
+                            assert_text_or_thread=True,
                         )
                         source_replied_to = await reply_source_channel.fetch_message(
                             source_replied_to_id
@@ -523,8 +524,9 @@ async def bridge_message_helper(message: discord.Message):
                 if not isinstance(webhook_channel, discord.TextChannel):
                     continue
 
-                target_channel = await globals.get_channel_from_id(target_id)
-                assert isinstance(target_channel, discord.TextChannel | discord.Thread)
+                target_channel = await globals.get_channel_from_id(
+                    target_id, assert_text_or_thread=True
+                )
 
                 thread_splat: ThreadSplat = {}
                 if target_id != webhook_channel.id:
@@ -1003,7 +1005,8 @@ async def edit_message_helper(
                 # Iterate through the target channels and edit the bridged messages
                 bridged_channel = await globals.get_channel_from_id(bridged_channel_id)
                 if not isinstance(
-                    bridged_channel, (discord.TextChannel, discord.Thread)
+                    bridged_channel,
+                    (discord.TextChannel, discord.Thread),
                 ):
                     continue
 
@@ -1106,10 +1109,6 @@ async def edit_message_helper(
                                 )
                             except discord.NotFound:
                                 # Webhook is gone, delete this bridge
-                                assert isinstance(
-                                    bridged_channel,
-                                    (discord.TextChannel, discord.Thread),
-                                )
                                 logger.warning(
                                     "Webhook in %s:%s (ID: %s) not found, demolishing bridges to this channel and its threads.",
                                     bridged_channel.guild.name,
@@ -1126,6 +1125,7 @@ async def edit_message_helper(
                                         "Exception occurred when trying to demolish an invalid bridge after bridging a message edit: %s",
                                         e,
                                     )
+
                         async_message_edits.append(
                             edit_message(
                                 message_row,
@@ -1161,7 +1161,8 @@ async def edit_message_helper(
 
 @beartype
 async def replace_missing_emoji(
-    message_content: str, session: SQLSession | None = None
+    message_content: str,
+    session: SQLSession | None = None,
 ) -> str:
     """Return a version of the contents of a message that replaces any instances of an emoji that the bot can't find with matching ones, if possible.
 
@@ -1305,7 +1306,6 @@ async def replace_discord_links(
         )
 
     # Get the channel IDs of all threads of the channel
-    assert isinstance(parent_channel, discord.TextChannel)
     for thread in parent_channel.threads:
         thread_id = thread.id
         if thread_id == channel_id:
@@ -1425,7 +1425,8 @@ async def delete_message_helper(message_id: int, channel_id: int):
 
                 bridged_channel = await globals.get_channel_from_id(target_channel_id)
                 if not isinstance(
-                    bridged_channel, (discord.TextChannel, discord.Thread)
+                    bridged_channel,
+                    (discord.TextChannel, discord.Thread),
                 ):
                     continue
 
@@ -1741,14 +1742,13 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
             )
             if isinstance(source_message_map, DBMessageMap):
                 # This message was bridged, so find the original one, react to it, and then find any other bridged messages from it
-                source_channel = await globals.get_channel_from_id(
-                    int(source_message_map.source_channel)
-                )
-                if not source_channel:
-                    # The source channel isn't valid or reachable anymore, so we can't find the other versions of this message
+                try:
+                    source_channel = await globals.get_channel_from_id(
+                        int(source_message_map.source_channel),
+                        assert_text_or_thread=True,
+                    )
+                except AssertionError:
                     return
-
-                assert isinstance(source_channel, (discord.TextChannel, discord.Thread))
 
                 source_channel_id = source_channel.id
                 source_message_id = int(source_message_map.source_message)
@@ -1816,7 +1816,8 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
 
                 bridged_channel = await globals.get_channel_from_id(target_channel_id)
                 if not isinstance(
-                    bridged_channel, (discord.TextChannel, discord.Thread)
+                    bridged_channel,
+                    (discord.TextChannel, discord.Thread),
                 ):
                     continue
 
@@ -2099,7 +2100,8 @@ async def unreact(
                     int(target_channel_id)
                 )
                 if not isinstance(
-                    target_channel, (discord.TextChannel, discord.Thread)
+                    target_channel,
+                    (discord.TextChannel, discord.Thread),
                 ):
                     return
 

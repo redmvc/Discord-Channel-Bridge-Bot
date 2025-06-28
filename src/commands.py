@@ -369,9 +369,7 @@ async def bridge_thread(interaction: discord.Interaction):
     name="auto_bridge_threads",
     description="Enable or disable automatic thread bridging from this channel.",
 )
-async def auto_bridge_threads(
-    interaction: discord.Interaction,
-):
+async def auto_bridge_threads(interaction: discord.Interaction):
     logger.debug(
         "User with ID %s ran command /auto_bridge_threads from channel with ID %s. Interaction ID: %s.",
         interaction.user.id,
@@ -636,7 +634,8 @@ async def demolish(interaction: discord.Interaction, target: str):
     channel_and_threads="Set to true to demolish bridges attached to this channel's parent and/or other threads.",
 )
 async def demolish_all(
-    interaction: discord.Interaction, channel_and_threads: bool | None = None
+    interaction: discord.Interaction,
+    channel_and_threads: bool | None = None,
 ):
     logger.debug(
         "User with ID %s ran command /demolish_all%s from channel with ID %s. Interaction ID: %s.",
@@ -727,11 +726,14 @@ async def demolish_all(
                         target_channel = await globals.get_channel_from_id(target_id)
                         if (
                             not isinstance(
-                                target_channel, (discord.TextChannel, discord.Thread)
+                                target_channel,
+                                (discord.TextChannel, discord.Thread),
                             )
                             or not (
-                                target_channel_member := await globals.get_channel_member(
-                                    target_channel, interaction.user.id
+                                target_channel_member
+                                := await globals.get_channel_member(
+                                    target_channel,
+                                    interaction.user.id,
                                 )
                             )
                             or not target_channel.permissions_for(
@@ -1111,7 +1113,8 @@ async def map_emoji(
     server_id_str="The ID of the server to load.",
 )
 async def hash_server_emoji(
-    interaction: discord.Interaction, server_id_str: str | None = None
+    interaction: discord.Interaction,
+    server_id_str: str | None = None,
 ):
     logger.debug(
         "User with ID %s ran command /hash_server_emoji%s from channel with ID %s. Interaction ID: %s.",
@@ -1433,7 +1436,8 @@ async def bridge_thread_helper(
 
 @beartype
 async def stop_auto_bridging_threads_helper(
-    channel_ids_to_remove: int | Iterable[int], session: SQLSession | None = None
+    channel_ids_to_remove: int | Iterable[int],
+    session: SQLSession | None = None,
 ):
     """Remove a group of channels from the auto_bridge_thread_channels table and list.
 
@@ -1481,7 +1485,8 @@ async def stop_auto_bridging_threads_helper(
 
 @beartype
 async def validate_auto_bridge_thread_channels(
-    channel_ids_to_check: int | Iterable[int], session: SQLSession | None = None
+    channel_ids_to_check: int | Iterable[int],
+    session: SQLSession | None = None,
 ):
     """Check whether each one of a list of channels are in auto_bridge_thread_channels and, if so, whether they should be and, if not, remove them from there.
 
@@ -1667,7 +1672,8 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
                         source_channel_id
                     )
                     if isinstance(
-                        source_channel, (discord.TextChannel, discord.Thread)
+                        source_channel,
+                        (discord.TextChannel, discord.Thread),
                     ):
                         try:
                             source_message = await source_channel.fetch_message(
@@ -1702,7 +1708,8 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
                         target_channel_id
                     )
                     if not isinstance(
-                        bridged_channel, (discord.TextChannel, discord.Thread)
+                        bridged_channel,
+                        (discord.TextChannel, discord.Thread),
                     ):
                         continue
 
@@ -1742,7 +1749,7 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
     try:
 
         async def get_list_of_reacting_users(
-            list_of_reacters: list[Coroutine[Any, Any, set[int]]]
+            list_of_reacters: list[Coroutine[Any, Any, set[int]]],
         ):
             gathered_users = await asyncio.gather(*list_of_reacters)
             set_of_users: set[int] = set().union(*gathered_users)

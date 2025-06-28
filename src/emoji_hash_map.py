@@ -389,7 +389,10 @@ class EmojiHashMap:
 
     @beartype
     async def delete_emoji(
-        self, emoji_id: int, update_db: bool = False, session: SQLSession | None = None
+        self,
+        emoji_id: int,
+        update_db: bool = False,
+        session: SQLSession | None = None,
     ):
         """Delete an emoji from the hash map. If `session` is included, delete it from the database also.
 
