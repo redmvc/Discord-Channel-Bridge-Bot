@@ -953,7 +953,11 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
             discord.Embed.from_dict(embed) for embed in payload.data.get("embeds")
         ]
         await edit_message_helper(
-            updated_message_content, embeds, payload.message_id, payload.channel_id
+            updated_message_content,
+            embeds,
+            payload.message_id,
+            payload.channel_id,
+            int(payload.data.get("type")) == discord.MessageType.reply.value,
         )
 
 
@@ -963,6 +967,7 @@ async def edit_message_helper(
     embeds: list[discord.Embed],
     message_id: int,
     channel_id: int,
+    message_is_reply: bool,
 ):
     """Edit bridged versions of a message, if possible.
 
@@ -971,6 +976,7 @@ async def edit_message_helper(
         - `embeds`: The updated embeds of the message.
         - `message_id`: The message ID.
         - `channel_id`: The ID of the channel the message being edited is in.
+        - `message_is_reply`: Whether the message being edited is a reply.
 
     #### Raises:
         - `HTTPException`: Editing a message failed.
@@ -1069,14 +1075,27 @@ async def edit_message_helper(
 
                         async def edit_message(
                             message_row: DBMessageMap,
+                            channel_specific_embeds: list[discord.Embed],
+                            bridged_channel: discord.TextChannel | discord.Thread,
                             content: str,
                             webhook: discord.Webhook,
                             thread_splat: ThreadSplat,
                             attach_embeds: bool,
                         ):
                             try:
+                                bridged_message_id = int(message_row.target_message)
+                                if message_is_reply and attach_embeds:
+                                    # The message being edited is a reply, I need to keep its embed
+                                    bridged_message_embeds = (
+                                        await bridged_channel.fetch_message(
+                                            bridged_message_id
+                                        )
+                                    ).embeds
+                                    if len(bridged_message_embeds) > 0:
+                                        reply_embed = bridged_message_embeds[-1]
+                                        channel_specific_embeds += [reply_embed]
                                 await webhook.edit_message(
-                                    message_id=int(message_row.target_message),
+                                    message_id=bridged_message_id,
                                     content=content,
                                     embeds=(
                                         channel_specific_embeds
@@ -1099,17 +1118,19 @@ async def edit_message_helper(
                                 )
                                 try:
                                     await bridges.demolish_bridges(
-                                        target_channel=bridged_channel, session=session
+                                        target_channel=bridged_channel,
+                                        session=session,
                                     )
                                 except Exception as e:
                                     logger.error(
                                         "Exception occurred when trying to demolish an invalid bridge after bridging a message edit: %s",
                                         e,
                                     )
-
                         async_message_edits.append(
                             edit_message(
                                 message_row,
+                                channel_specific_embeds,
+                                bridged_channel,
                                 truncated_content,
                                 webhook,
                                 thread_splat,
