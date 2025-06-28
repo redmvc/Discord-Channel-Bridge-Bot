@@ -49,15 +49,15 @@ If you set up a server for the bot to store emoji, you can run the command `/map
 If you have any issues with this bot, feel free to add them to the Issue Tracker or DM `redmagnos` on Discord.
 
 ## Contributing
-I greatly appreciate contributions! If you want to help make this bot better, feel free to submit a pull request. Make sure your PRs focus on a single aspect and don't have scope creep. This project follows PEP-8 guidelines with a column limit of 88.
+I greatly appreciate contributions! If you want to help make this bot better, feel free to submit a pull request. Make sure your PRs focus on a single feature or bugfix and don't have scope creep. This project follows PEP-8 guidelines with a column limit of 88.
 
 ### Git Commit Guidelines
-- Use present tense (e.g. "Add feature" not "Added feature")
+- Use present tense imperatives (e.g. "Add feature" not "Added feature")
 - Limit all lines to 72 characters or less.
 - Reference issues or pull requests outside of the first line.
   - Please use the shorthand `#123` and not the full URL.
 
-If you do not meet any of these guidelines, I'll poke you about it to fix them (unless I feel like fixing them myself).
+If you fail to meet any of these guidelines, I'll poke you about it to fix them (unless I feel like fixing them myself).
 
 ## License
 This project is licensed under the GNU General Public License v3.0 License. See the LICENSE file for details.
