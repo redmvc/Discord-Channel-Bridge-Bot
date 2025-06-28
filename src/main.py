@@ -720,6 +720,11 @@ async def bridge_message_to_target_channel(
                     "width": 18,
                 }
 
+                if reply_has_ping:
+                    # Discord represents ping "ON" vs "OFF" replies with an @ symbol before the reply author name
+                    # copy this behavior here
+                    replied_to_author_name = f"@{replied_to_author_name}"
+
                 if jump_url:
                     reply_embed_dict["url"] = jump_url
                     reply_embed_dict["description"] = (
@@ -752,10 +757,6 @@ async def bridge_message_to_target_channel(
                 display_name = discord.utils.escape_markdown(
                     message_replied_to.author.display_name
                 )
-                # Discord represents ping "ON" vs "OFF" replies with an @ symbol before the reply author name
-                # copy this behavior here
-                if reply_has_ping:
-                    display_name = "@" + display_name
 
                 if not replied_to_content:
                     replied_to_content = await replace_missing_emoji(
@@ -767,20 +768,21 @@ async def bridge_message_to_target_channel(
                         ),
                         session,
                     )
-                reply_embed_dict = create_reply_embed_dict(
-                    message_replied_to.author.display_avatar,
-                    display_name,
-                    replied_to_content,
-                    jump_url=message_replied_to.jump_url,
-                )
-                reply_embed = [discord.Embed.from_dict(reply_embed_dict)]
+                reply_embed = [
+                    discord.Embed.from_dict(
+                        create_reply_embed_dict(
+                            message_replied_to.author.display_avatar,
+                            display_name,
+                            replied_to_content,
+                            jump_url=message_replied_to.jump_url,
+                        )
+                    )
+                ]
             except discord.HTTPException:
                 if replied_to_content and replied_to_author:
                     replied_to_author_name = discord.utils.escape_markdown(
                         replied_to_author.name
                     )
-                    if reply_has_ping:
-                        replied_to_author_name = "@" + replied_to_author_name
 
                     reply_embed = [
                         discord.Embed.from_dict(
@@ -806,8 +808,6 @@ async def bridge_message_to_target_channel(
                 replied_to_author_name = discord.utils.escape_markdown(
                     replied_to_author.name
                 )
-                if reply_has_ping:
-                    replied_to_author_name = "@" + replied_to_author_name
 
                 reply_embed = [
                     discord.Embed.from_dict(
