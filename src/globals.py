@@ -13,7 +13,7 @@ from aiolimiter import AsyncLimiter
 from beartype import beartype
 from typing_extensions import NotRequired
 
-from validations import ArgumentError, HTTPResponseError, logger
+from validations import ArgumentError, HTTPResponseError, logger, validate_channels
 
 # discord.guild.GuildChannel isn't working in commands.py for some reason
 GuildChannel = (
@@ -109,14 +109,14 @@ auto_bridge_thread_channels: set[int] = set()
 # Server which can be used to store unknown emoji for mirroring reactions
 emoji_server: discord.Guild | None = None
 
-# URL of an image of the icon used by forwarded messages
-forwarded_message_icon_url = "https://cdn.discordapp.com/emojis/1263880469750091918.png"
-
 # Dictionary listing all apps whitelisted per channel
 per_channel_whitelist: dict[int, set[int]] = {}
 
 # Helper to prevent us from being rate limited
 rate_limiter = AsyncLimiter(1, 10)
+
+# Variable to keep track of messages that are still being bridged/edited before they can be edited/deleted
+message_lock: dict[int, asyncio.Lock] = {}
 
 # Type wildcard
 T = TypeVar("T", bound=Any)
@@ -124,8 +124,22 @@ T = TypeVar("T", bound=Any)
 
 @beartype
 async def get_channel_from_id(
-    channel_or_id: GuildChannel | discord.Thread | discord.abc.PrivateChannel | int,
-) -> GuildChannel | discord.Thread | discord.abc.PrivateChannel | None:
+    channel_or_id: (
+        GuildChannel
+        | discord.Thread
+        | discord.DMChannel
+        | discord.PartialMessageable
+        | discord.abc.PrivateChannel
+        | int
+    ),
+) -> (
+    GuildChannel
+    | discord.Thread
+    | discord.abc.PrivateChannel
+    | discord.PartialMessageable
+    | discord.DMChannel
+    | None
+):
     """Ensure that this function's argument is a valid Discord channel, when it may instead be a channel ID.
 
     #### Args:
@@ -151,7 +165,7 @@ async def get_channel_from_id(
 def get_id_from_channel(
     channel_or_id: GuildChannel | discord.Thread | discord.abc.PrivateChannel | int,
 ) -> int:
-    """Returns the ID of the channel passed as argument, or the argument itself if it is already an ID.
+    """Return the ID of the channel passed as argument, or the argument itself if it is already an ID.
 
     #### Args:
         - `channel_or_id`: A Discord channel or its ID.
@@ -170,6 +184,38 @@ def get_id_from_channel(
     )
     logger.error(err)
     raise err
+
+
+@beartype
+async def get_channel_parent(
+    channel_or_id: (
+        GuildChannel
+        | discord.Thread
+        | discord.DMChannel
+        | discord.PartialMessageable
+        | discord.GroupChannel
+        | int
+    ),
+) -> discord.TextChannel:
+    """Return the parent channel of its argument, or the argument itself if it does not have a parent. Errors if the channel passed as argument is not a `discord.TextChannel`, a `discord.Thread`, or the ID of one of those.
+
+    #### Args:
+        - `channel_or_id`: A Discord channel or its ID.
+
+    #### Raises:
+        - `ChannelTypeError`: The channel is not a text channel nor a thread off a text channel.
+
+    #### Returns:
+        - `discord.TextChannel`: The parent of the channel passed as argument, or the channel itself in case it is not a thread.
+    """
+    channel = validate_channels(channel_or_id=await get_channel_from_id(channel_or_id))[
+        "channel_or_id"
+    ]
+
+    if isinstance(channel, discord.TextChannel):
+        return channel
+
+    return cast(discord.TextChannel, channel.parent)
 
 
 @beartype
@@ -307,6 +353,20 @@ def hash_image(image: bytes) -> str:
         - `image`: The image bytes object.
     """
     return md5(image).hexdigest()
+
+
+@beartype
+def truncate(msg: str, length: int) -> str:
+    """Truncate a message to a certain length.
+
+    #### Args:
+        - `msg`: The message to truncate.
+        - `length`: Its maximum length.
+
+    #### Returns:
+        `str`: The truncated message.
+    """
+    return msg if len(msg) < length else msg[: length - 1] + "…"
 
 
 @beartype

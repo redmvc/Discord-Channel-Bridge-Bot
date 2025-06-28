@@ -36,7 +36,6 @@ class EmojiHashMap:
         self._hash_to_emoji: dict[str, set[int]] = {}
         self._hash_to_available_emoji: dict[str, set[int]] = {}
         self._hash_to_internal_emoji: dict[str, int] = {}
-        self.forward_message_emoji_id: int | None = None
 
         close_after = False
         try:
@@ -103,48 +102,6 @@ class EmojiHashMap:
             session.close()
 
         logger.info("Emoji hash map initialised.")
-
-    async def load_forwarded_message_emoji(self):
-        """Load the icon used by forwarded messages as an emoji."""
-        logger.info("Loading forwarded message emoji...")
-
-        try:
-            forwarded_message_icon = await globals.get_image_from_URL(
-                globals.forwarded_message_icon_url
-            )
-        except Exception as e:
-            logger.error(
-                "An error occurred while trying to fetch forwarded message icon image from URL: %s",
-                e,
-            )
-            return
-
-        forwarded_message_icon_hash = globals.hash_image(forwarded_message_icon)
-
-        if emoji_id := self._hash_to_internal_emoji.get(forwarded_message_icon_hash):
-            self.forward_message_emoji_id = emoji_id
-            logger.info("Loaded forwarded message emoji from emoji server.")
-            return
-
-        if (
-            available_forward_message_emoji := self._hash_to_available_emoji.get(
-                forwarded_message_icon_hash
-            )
-        ) and (emoji_id := next(iter(available_forward_message_emoji), None)):
-            self.forward_message_emoji_id = emoji_id
-            logger.info("Loaded forwarded message emoji from available server.")
-            return
-
-        emoji = await self.copy_emoji_into_server(
-            emoji_image=forwarded_message_icon,
-            emoji_image_hash=forwarded_message_icon_hash,
-            emoji_to_copy_name="forwarded_message",
-        )
-        if emoji:
-            self.forward_message_emoji_id = emoji.id
-            logger.info("Created forwarded message emoji in emoji server.")
-        else:
-            logger.info("Could not load forwarded message emoji.")
 
     @beartype
     def _add_emoji_to_map(
@@ -586,6 +543,7 @@ class EmojiHashMap:
         emoji_image: bytes | None = None,
         emoji_image_hash: str | None = None,
         emoji_to_copy_name: str | None = None,
+        session: SQLSession | None = None,
     ) -> discord.Emoji | None:
         """Try to create an emoji in the emoji server and, if successful, return it.
 
@@ -595,6 +553,7 @@ class EmojiHashMap:
             - `emoji_image`: An image to be directly loaded into the server. Defaults to None, in which case either `emoji_to_copy` or `emoji_to_copy_id` is used instead.
             - `emoji_image_hash`: The hash of `emoji_image`. Defaults to none, in which case it will be calculated from `emoji_image`.
             - `emoji_to_copy_name`: The name of a missing emoji, optionally preceded by an `"a:"` in case it's animated. Defaults to None, but must be included if either `emoji_to_copy_id` or `emoji_image` is.
+            - `session`: A connection to the database. Defaults to None, in which case a new one will be created for the DB operations.
 
         #### Raises:
             - `ArgumentError`: The number of arguments passed is incorrect.
@@ -647,22 +606,11 @@ class EmojiHashMap:
                 raise
 
             # Try to delete an emoji from the server and then add this again.
-            num_tries = 0
-            max_tries = 5
             emoji_to_delete: discord.Emoji | None = None
-            while num_tries < max_tries:
-                emoji_to_delete = random.choice(globals.emoji_server.emojis)
-                emoji_to_delete_id = emoji_to_delete.id
-                if emoji_to_delete_id != self.forward_message_emoji_id:
-                    break
-                num_tries += 1
+            emoji_to_delete = random.choice(globals.emoji_server.emojis)
+            emoji_to_delete_id = emoji_to_delete.id
             if not emoji_to_delete:
                 raise Exception("emoji_to_delete failed to be fetched somehow.")
-            elif num_tries == max_tries:
-                logger.warning(
-                    f"Tried to delete an emoji other than the forward message emoji {max_tries} times and failed."
-                )
-                self.forward_message_emoji_id = None
 
             await emoji_to_delete.delete()
 
@@ -677,49 +625,58 @@ class EmojiHashMap:
                 raise
 
         # Copied the emoji, going to update my table
-        session = None
+        if not session:
+            session = SQLSession(engine)
+            close_after = True
+        else:
+            close_after = False
+
         try:
-            with SQLSession(engine) as session:
-                if emoji_to_delete_id is not None:
-                    try:
-                        await self.delete_emoji(emoji_to_delete_id, session=session)
-                    except Exception as e:
-                        logger.error(
-                            "An error occurred when trying to delete an emoji from the hash map while running copy_emoji_into_server(): %s",
-                            e,
-                        )
+            if emoji_to_delete_id is not None:
+                try:
+                    await self.delete_emoji(emoji_to_delete_id, session=session)
+                except Exception as e:
+                    logger.error(
+                        "An error occurred when trying to delete an emoji from the hash map while running copy_emoji_into_server(): %s",
+                        e,
+                    )
+                    if session:
+                        session.rollback()
+                        if close_after:
+                            session.close()
 
-                        raise
+                    raise
 
-                await self.add_emoji(
-                    emoji=emoji,
-                    emoji_server_id=emoji_server_id,
+            await self.add_emoji(
+                emoji=emoji,
+                emoji_server_id=emoji_server_id,
+                image_hash=emoji_image_hash,
+                is_internal=True,
+                session=session,
+            )
+
+            if emoji_to_copy:
+                await self.map_emoji(
+                    external_emoji=emoji_to_copy,
+                    internal_emoji=emoji,
                     image_hash=emoji_image_hash,
-                    is_internal=True,
+                    session=session,
+                )
+            elif emoji_to_copy_id:
+                await self.map_emoji(
+                    external_emoji_id=emoji_to_copy_id,
+                    external_emoji_name=emoji_to_copy_name,
+                    internal_emoji=emoji,
+                    image_hash=emoji_image_hash,
                     session=session,
                 )
 
-                if emoji_to_copy:
-                    await self.map_emoji(
-                        external_emoji=emoji_to_copy,
-                        internal_emoji=emoji,
-                        image_hash=emoji_image_hash,
-                        session=session,
-                    )
-                elif emoji_to_copy_id:
-                    await self.map_emoji(
-                        external_emoji_id=emoji_to_copy_id,
-                        external_emoji_name=emoji_to_copy_name,
-                        internal_emoji=emoji,
-                        image_hash=emoji_image_hash,
-                        session=session,
-                    )
-
-                session.commit()
+            session.commit()
         except Exception as e:
             if session:
                 session.rollback()
-                session.close()
+                if close_after:
+                    session.close()
 
             if isinstance(e, SQLError):
                 logger.warning(
@@ -1011,7 +968,11 @@ class EmojiHashMap:
             return already_existing_hash
 
         _, image_hash = await self.add_emoji(
-            emoji=emoji, emoji_id=emoji_id, emoji_name=emoji_name, session=session
+            emoji=emoji,
+            emoji_id=emoji_id,
+            emoji_name=emoji_name,
+            update_db=True,
+            session=session,
         )
 
         return image_hash

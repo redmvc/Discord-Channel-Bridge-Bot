@@ -23,7 +23,13 @@ from database import (
     sql_retry,
     sql_upsert,
 )
-from validations import ArgumentError, logger, validate_channels, validate_webhook
+from validations import (
+    ArgumentError,
+    WebhookChannelError,
+    logger,
+    validate_channels,
+    validate_webhook,
+)
 
 
 class Bridge:
@@ -359,25 +365,18 @@ class Bridges:
 
         #### Raises:
             - `ChannelTypeError`: The source or target channels are not text channels nor threads off a text channel.
-            - `WebhookChannelError`: `webhook` is not attached to Bridge's target channel.
             - `HTTPException`: Deleting an existing webhook or creating a new one failed.
             - `Forbidden`: You do not have permissions to create or delete webhooks.
 
         #### Returns:
             - `Bridge`: The created `Bridge`.
         """
-        source_channel = await globals.get_channel_from_id(source)
-        if isinstance(target, int):
-            target_channel = await globals.get_channel_from_id(target)
-            validate_channels(
-                target_channel=target_channel, source_channel=source_channel
-            )
-            target_channel = cast(discord.TextChannel | discord.Thread, target_channel)
-            source_channel = cast(discord.TextChannel | discord.Thread, source_channel)
-        else:
-            target_channel = target
-            validate_channels(source_channel=source_channel)
-            source_channel = cast(discord.TextChannel | discord.Thread, source_channel)
+        validated_channels = validate_channels(
+            source=await globals.get_channel_from_id(source),
+            target=await globals.get_channel_from_id(target),
+        )
+        source_channel = validated_channels["source"]
+        target_channel = validated_channels["target"]
 
         logger.debug(
             "Creating bridge from #%s:%s (ID: %s) to #%s:%s (ID: %s)...",
@@ -445,7 +444,17 @@ class Bridges:
 
             existing_webhook = await self.webhooks.get_webhook(target_id)
             if webhook:
-                validate_webhook(webhook, target_channel)
+                try:
+                    validate_webhook(webhook, target_channel)
+                except WebhookChannelError:
+                    # Failed to find a webhook in the target channel, recreate one if it doesn't already exist
+                    try:
+                        await webhook.delete()
+                    except Exception:
+                        pass
+                    webhook = None
+
+            if webhook:
                 if existing_webhook and existing_webhook.id != webhook.id:
                     # If I already have a webhook, I'll destroy the one being passed
                     logger.debug(
@@ -947,9 +956,9 @@ class Webhooks:
 
         if not webhook or not webhook.channel_id:
             # Webhook wasn't given or wasn't valid
-            channel = await globals.get_channel_from_id(channel_or_id)
-            validate_channels(channel=channel)
-            channel = cast(discord.TextChannel | discord.Thread, channel)
+            channel = validate_channels(
+                channel=await globals.get_channel_from_id(channel_or_id)
+            )["channel"]
 
             logger.debug(
                 "Adding new webhook to #%s:%s (ID: %s)...",
@@ -963,25 +972,16 @@ class Webhooks:
                 channel.id,
             )
 
-            webhook_owner = channel
-            if isinstance(channel, discord.Thread) and isinstance(
-                channel.parent, discord.TextChannel
+            webhook_owner = await globals.get_channel_parent(channel)
+            if (webhook_id := self._webhook_by_channel.get(webhook_owner.id)) or (
+                webhook_id := self._webhook_by_parent.get(webhook_owner.id)
             ):
-                # Try to get the webhook associated with the parent channel
-                webhook_owner = channel.parent
-                if (webhook_id := self._webhook_by_channel.get(webhook_owner.id)) or (
-                    webhook_id := self._webhook_by_parent.get(webhook_owner.id)
-                ):
-                    webhook = self._webhooks.get(webhook_id)
-            elif webhook_id := self._webhook_by_parent.get(channel_id):
-                # I am the parent of some thread that had already created a webhook
+                # Try to get the webhook associated with a thread or its parent
                 webhook = self._webhooks.get(webhook_id)
 
             if not webhook or not webhook.channel_id:
                 # Webhook still doesn't exist, going to create it
-                webhook = await cast(discord.TextChannel, webhook_owner).create_webhook(
-                    name="Channel Bridge Bot"
-                )
+                webhook = await webhook_owner.create_webhook(name="Channel Bridge Bot")
         else:
             logger.debug(
                 "Adding webhook with ID %s to channel with ID %s...",
