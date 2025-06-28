@@ -746,6 +746,8 @@ async def bridge_message_to_target_channel(
 
             return reply_embed_dict
 
+        reply_error_msg = None
+        reply_embed = []
         if bridged_reply_to:
             # The message being replied to is also bridged to this channel, so I'll create an embed to represent this
             try:
@@ -779,31 +781,14 @@ async def bridge_message_to_target_channel(
                     )
                 ]
             except discord.HTTPException:
-                if replied_to_content and replied_to_author:
-                    replied_to_author_name = discord.utils.escape_markdown(
-                        replied_to_author.name
-                    )
-
-                    reply_embed = [
-                        discord.Embed.from_dict(
-                            create_reply_embed_dict(
-                                replied_to_author.display_avatar,
-                                replied_to_author_name,
-                                replied_to_content,
-                                error_msg="The message being replied to could not be loaded.",
-                            )
-                        )
-                    ]
-                else:
-                    reply_embed = [
-                        discord.Embed.from_dict(
-                            {
-                                "type": "rich",
-                                "description": "-# **↪** This message is a reply but the message being replied to could not be loaded.",
-                            }
-                        )
-                    ]
+                reply_error_msg = "The message being replied to could not be loaded."
+                bridged_reply_to = False
         else:
+            reply_error_msg = (
+                "The message being replied to has not been bridged or has been deleted."
+            )
+
+        if not bridged_reply_to:
             if replied_to_content and replied_to_author:
                 replied_to_author_name = discord.utils.escape_markdown(
                     replied_to_author.name
@@ -815,7 +800,7 @@ async def bridge_message_to_target_channel(
                             replied_to_author.display_avatar,
                             replied_to_author_name,
                             replied_to_content,
-                            error_msg="The message being replied to has not been bridged or has been deleted.",
+                            error_msg=reply_error_msg,
                         )
                     )
                 ]
