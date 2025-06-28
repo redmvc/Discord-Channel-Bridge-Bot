@@ -704,6 +704,12 @@ async def bridge_message_to_target_channel(
         ) -> dict[str, str | dict[str, int | str]]:
             reply_embed_dict: dict[str, str | dict[str, int | str]] = {"type": "rich"}
 
+            if jump_url:
+                reply_embed_dict["url"] = jump_url
+                reply_symbol = f"[↪]({jump_url})"
+            else:
+                reply_symbol = "↪"
+
             if (
                 replied_to_author_avatar
                 and replied_to_author_name
@@ -720,24 +726,24 @@ async def bridge_message_to_target_channel(
                     # copy this behavior here
                     replied_to_author_name = f"@{replied_to_author_name}"
 
-                if jump_url:
-                    reply_embed_dict["url"] = jump_url
-                    reply_embed_dict["description"] = (
-                        f"**[↪]({jump_url}) {replied_to_author_name}**  {replied_to_content}"
-                    )
-                elif error_msg:
-                    reply_embed_dict["description"] = (
-                        f"**↪ {replied_to_author_name}**  {replied_to_content}\n\n-# {error_msg}"
-                    )
-            elif jump_url:
-                reply_embed_dict["url"] = jump_url
-                reply_embed_dict["description"] = (
-                    f"**[↪]({jump_url})**\n\n-# Couldn't load contents of the message this message is replying to."
-                )
+                replied_to_author_name = " " + replied_to_author_name
+                replied_to_content = "  " + replied_to_content
             else:
-                reply_embed_dict["description"] = (
-                    "**↪\n\n-# This message is a reply but the message it's replying to could not be loaded."
-                )
+                replied_to_author_name = ""
+                replied_to_content = ""
+                if jump_url:
+                    error_msg = "Couldn't load contents of the message this message is replying to."
+                else:
+                    error_msg = "This message is a reply but the message it's replying to could not be loaded."
+
+            if error_msg:
+                error_msg = f"\n\n-# {error_msg}"
+            else:
+                error_msg = ""
+
+            reply_embed_dict["description"] = (
+                f"**{reply_symbol}{replied_to_author_name}**{replied_to_content}{error_msg}"
+            )
 
             return reply_embed_dict
 
