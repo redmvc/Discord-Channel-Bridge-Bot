@@ -33,8 +33,7 @@ from validations import (
 
 
 class Bridge:
-    """
-    A bridge from a source channel to a target channel.
+    """A bridge from a source channel to a target channel.
 
     Attributes
     ----------
@@ -61,8 +60,7 @@ class Bridge:
         source: discord.TextChannel | discord.Thread | int,
         target: discord.TextChannel | discord.Thread | int,
     ) -> "Bridge":
-        """
-        Create and return an outbound Bridge from source channel to target channel.
+        """Create and return an outbound Bridge from source channel to target channel.
 
         Parameters
         ----------
@@ -130,8 +128,7 @@ class Bridge:
 
 
 class Bridges:
-    """
-    A list of all bridges created.
+    """A list of all bridges created.
 
     Attributes
     ----------
@@ -146,8 +143,7 @@ class Bridges:
 
     @beartype
     async def load_from_database(self, session: SQLSession | None = None):
-        """
-        Load all bridges saved in the bot's connected database.
+        """Load all bridges saved in the bot's connected database.
 
         Parameters
         ----------
@@ -364,8 +360,7 @@ class Bridges:
         update_db: bool = True,
         session: SQLSession | None = None,
     ) -> Bridge:
-        """
-        Create a new Bridge from source channel to target channel (and a new webhook if necessary).
+        """Create a new Bridge from source channel to target channel (and a new webhook if necessary).
 
         Parameters
         ----------
@@ -570,8 +565,7 @@ class Bridges:
         session: SQLSession | None = None,
         one_sided: bool = False,
     ) -> None:
-        """
-        Destroy Bridges from source and/or to target channel.
+        """Destroy Bridges from source and/or to target channel.
 
         Parameters
         ----------
@@ -791,8 +785,7 @@ class Bridges:
         source: discord.TextChannel | discord.Thread | int,
         target: discord.TextChannel | discord.Thread | int,
     ) -> Bridge | None:
-        """
-        Return the Bridge from source channel to target channel if it exists, and None otherwise.
+        """Return the Bridge from source channel to target channel if it exists, and None otherwise.
 
         Parameters
         ----------
@@ -820,8 +813,7 @@ class Bridges:
         source: discord.TextChannel | discord.Thread | int,
         target: discord.TextChannel | discord.Thread | int,
     ) -> tuple[Bridge | None, Bridge | None]:
-        """
-        Return a tuple of Bridges, the first element of which is the Bridge from source to target and the second of which is the Bridge from target to source.
+        """Return a tuple of Bridges, the first element of which is the Bridge from source to target and the second of which is the Bridge from target to source.
 
         Parameters
         ----------
@@ -845,8 +837,7 @@ class Bridges:
         self,
         source: discord.TextChannel | discord.Thread | int,
     ) -> dict[int, Bridge] | None:
-        """
-        Return a dict with all Bridges from source channel, identified by the target channel id.
+        """Return a dict with all Bridges from source channel, identified by the target channel id.
 
         Parameters
         ----------
@@ -861,8 +852,7 @@ class Bridges:
         return self._outbound_bridges.get(globals.get_id_from_channel(source))
 
     def get_channels_with_outbound_bridges(self) -> set[int]:
-        """
-        Return a set with the IDs of all channels that have outbound bridges coming from them.
+        """Return a set with the IDs of all channels that have outbound bridges coming from them.
 
         Returns
         -------
@@ -875,8 +865,7 @@ class Bridges:
         self,
         target: discord.TextChannel | discord.Thread | int,
     ) -> dict[int, Bridge] | None:
-        """
-        Return a dict with all Bridges to target channel, identified by the source channel id.
+        """Return a dict with all Bridges to target channel, identified by the source channel id.
 
         Parameters
         ----------
@@ -899,8 +888,7 @@ class Bridges:
         include_webhooks: Literal[True],
         include_starting: bool = False,
     ) -> dict[int, discord.Webhook]:
-        """
-        Return a dictionary with those channels as keys and one webhook attached to each of those channels as values.
+        """Return a dictionary with those channels as keys and one webhook attached to each of those channels as values.
 
         Parameters
         ----------
@@ -926,8 +914,7 @@ class Bridges:
         include_webhooks: Literal[False],
         include_starting: bool = False,
     ) -> set[int]:
-        """
-        Return a set with all channel IDs reachable from a given source channel down an unbroken series of outbound or inbound bridges.
+        """Return a set with all channel IDs reachable from a given source channel down an unbroken series of outbound or inbound bridges.
 
         Parameters
         ----------
@@ -952,8 +939,7 @@ class Bridges:
         *,
         include_starting: bool = False,
     ) -> set[int]:
-        """
-        Return a set with all channel IDs reachable from a given source channel down an unbroken series of outbound or inbound bridges.
+        """Return a set with all channel IDs reachable from a given source channel down an unbroken series of outbound or inbound bridges.
 
         Parameters
         ----------
@@ -979,8 +965,7 @@ class Bridges:
         include_webhooks: bool = False,
         include_starting: bool = False,
     ) -> set[int] | dict[int, discord.Webhook]:
-        """
-        If `include_webhooks` is `False` (default), return a set with all channel IDs reachable from a given source channel down an unbroken series of outbound or inbound bridges; if it's `True`, return a dictionary with those channels as keys and one webhook attached to each of those channels as values.
+        """If `include_webhooks` is `False` (default), return a set with all channel IDs reachable from a given source channel down an unbroken series of outbound or inbound bridges; if it's `True`, return a dictionary with those channels as keys and one webhook attached to each of those channels as values.
 
         Parameters
         ----------
@@ -1083,8 +1068,7 @@ class Webhooks:
         channel_or_id: discord.TextChannel | discord.Thread | int,
         webhook: discord.Webhook | None = None,
     ) -> discord.Webhook:
-        """
-        Add a webhook to my list of webhooks. If no webhook is provided and the channel is not a thread whose parent already has a webhook, a new webhook is created.
+        """Add a webhook to my list of webhooks. If no webhook is provided and the channel is not a thread whose parent already has a webhook, a new webhook is created.
 
         Parameters
         ----------
@@ -1156,8 +1140,7 @@ class Webhooks:
         self,
         channel_or_id: discord.TextChannel | discord.Thread | int,
     ) -> discord.Webhook | None:
-        """
-        Return a webhook associated with a channel (or a thread's parent) or None if there isn't one.
+        """Return a webhook associated with a channel (or a thread's parent) or None if there isn't one.
 
         Parameters
         ----------
@@ -1203,8 +1186,7 @@ class Webhooks:
         self,
         channel_or_id: discord.TextChannel | discord.Thread | int,
     ) -> int | None:
-        """
-        Delete a channel from the list of webhooks and, if there are no longer any channels associated with its webhook, delete it and return its ID.
+        """Delete a channel from the list of webhooks and, if there are no longer any channels associated with its webhook, delete it and return its ID.
 
         Parameters
         ----------
