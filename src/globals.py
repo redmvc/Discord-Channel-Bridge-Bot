@@ -131,27 +131,18 @@ channel_lock: dict[int, asyncio.Lock] = {}
 
 # Type wildcard
 T = TypeVar("T", bound=Any)
-CH = TypeVar(
-    "CH",
-    bound=(
-        discord.abc.GuildChannel
-        | discord.abc.PrivateChannel
-        | discord.Thread
-        | discord.PartialMessageable
-    ),
-)
 
-
-@overload
-async def get_channel_from_id(
-    channel_or_id: int,
-) -> (
+DiscordChannel = (
     discord.abc.GuildChannel
     | discord.abc.PrivateChannel
     | discord.Thread
     | discord.PartialMessageable
-    | None
-): ...
+)
+CH = TypeVar("CH", bound=DiscordChannel)
+
+
+@overload
+async def get_channel_from_id(channel_or_id: int) -> DiscordChannel | None: ...
 
 
 @overload
@@ -159,13 +150,7 @@ async def get_channel_from_id(
     channel_or_id: int,
     *,
     ensure_text_or_thread: Literal[False] = False,
-) -> (
-    discord.abc.GuildChannel
-    | discord.abc.PrivateChannel
-    | discord.Thread
-    | discord.PartialMessageable
-    | None
-): ...
+) -> DiscordChannel | None: ...
 
 
 @overload
@@ -190,7 +175,7 @@ async def get_channel_from_id(
 
 @overload
 async def get_channel_from_id(
-    channel_or_id: discord.TextChannel | discord.Thread,
+    channel_or_id: DiscordChannel,
     *,
     ensure_text_or_thread: Literal[True],
 ) -> discord.TextChannel | discord.Thread: ...
@@ -198,22 +183,10 @@ async def get_channel_from_id(
 
 @beartype
 async def get_channel_from_id(
-    channel_or_id: (
-        discord.abc.GuildChannel
-        | discord.abc.PrivateChannel
-        | discord.Thread
-        | discord.PartialMessageable
-        | int
-    ),
+    channel_or_id: DiscordChannel | int,
     *,
     ensure_text_or_thread: bool = False,
-) -> (
-    discord.abc.GuildChannel
-    | discord.abc.PrivateChannel
-    | discord.Thread
-    | discord.PartialMessageable
-    | None
-):
+) -> DiscordChannel | None:
     """Ensure that this function's argument is a valid Discord channel, when it may instead be a channel ID.
 
     #### Args:
@@ -245,12 +218,8 @@ async def get_channel_from_id(
 
 
 @beartype
-def get_id_from_channel(
-    channel_or_id: (
-        discord.abc.GuildChannel | discord.Thread | discord.abc.PrivateChannel | int
-    ),
-) -> int:
-    """Return the ID of the channel passed as argument, or the argument itself if it is already an ID.
+def get_id_from_channel(channel_or_id: DiscordChannel | int) -> int:
+    """Return the ID of the Discord channel passed as argument, or the argument itself if it is already an ID.
 
     #### Args:
         - `channel_or_id`: A Discord channel or its ID.
@@ -266,16 +235,9 @@ def get_id_from_channel(
 
 @beartype
 async def get_channel_parent(
-    channel_or_id: (
-        discord.abc.GuildChannel
-        | discord.Thread
-        | discord.DMChannel
-        | discord.PartialMessageable
-        | discord.GroupChannel
-        | int
-    ),
+    channel_or_id: DiscordChannel | int,
 ) -> discord.TextChannel:
-    """Return the parent channel of its argument, or the argument itself if it does not have a parent. Errors if the channel passed as argument is not a `discord.TextChannel`, a `discord.Thread`, or the ID of one of those.
+    """Return the parent channel of the argument or the channel it refers to, or the argument itself if it does not have a parent. Raises a ChannelTypeError if the channel passed as argument is not a Discord text channel, a thread off one or the ID of one of those.
 
     #### Args:
         - `channel_or_id`: A Discord channel or its ID.
