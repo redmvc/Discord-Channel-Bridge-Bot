@@ -293,7 +293,9 @@ class EmojiHashMap:
         logger.debug("Adding %s to hash map.", emoji if emoji else emoji_id)
         if not emoji_id or not image_hash:
             emoji_id, emoji_name, _, emoji_url = globals.get_emoji_information(
-                emoji, emoji_id, emoji_name
+                emoji,
+                emoji_id,
+                emoji_name,
             )
             if not image_hash:
                 if not image:
@@ -731,7 +733,9 @@ class EmojiHashMap:
         """
         external_emoji_id, external_emoji_name, external_emoji_animated, _ = (
             globals.get_emoji_information(
-                external_emoji, external_emoji_id, external_emoji_name
+                external_emoji,
+                external_emoji_id,
+                external_emoji_name,
             )
         )
 
@@ -1036,7 +1040,9 @@ class EmojiHashMap:
         )
 
         emoji_id, emoji_name, _, _ = globals.get_emoji_information(
-            emoji, emoji_id, emoji_name
+            emoji,
+            emoji_id,
+            emoji_name,
         )
 
         if already_existing_hash := self._emoji_to_hash.get(emoji_id):
