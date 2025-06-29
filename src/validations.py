@@ -64,7 +64,8 @@ def validate_channels(
 
 
 def validate_webhook(
-    webhook: discord.Webhook, target_channel: discord.TextChannel | discord.Thread
+    webhook: discord.Webhook,
+    target_channel: discord.TextChannel | discord.Thread,
 ):
     """Raise `WebhookChannelError` if the webhook is not attached to the target channel or, if it's a thread, its parent.
 

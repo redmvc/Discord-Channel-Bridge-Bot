@@ -389,7 +389,10 @@ class EmojiHashMap:
 
     @beartype
     async def delete_emoji(
-        self, emoji_id: int, update_db: bool = False, session: SQLSession | None = None
+        self,
+        emoji_id: int,
+        update_db: bool = False,
+        session: SQLSession | None = None,
     ):
         """Delete an emoji from the hash map. If `session` is included, delete it from the database also.
 
@@ -576,7 +579,9 @@ class EmojiHashMap:
 
             emoji_to_copy_id, emoji_to_copy_name, _, emoji_to_copy_url = (
                 globals.get_emoji_information(
-                    emoji_to_copy, emoji_to_copy_id, emoji_to_copy_name
+                    emoji_to_copy,
+                    emoji_to_copy_id,
+                    emoji_to_copy_name,
                 )
             )
 
@@ -595,19 +600,21 @@ class EmojiHashMap:
         emoji_to_delete_id = None
         try:
             emoji = await globals.emoji_server.create_custom_emoji(
-                name=emoji_to_copy_name, image=emoji_image, reason="Bridging reaction."
+                name=emoji_to_copy_name,
+                image=emoji_image,
+                reason="Bridging reaction.",
             )
         except discord.Forbidden:
             logger.warning("Emoji server permissions not set correctly.")
             raise
         except discord.HTTPException:
-            if len(globals.emoji_server.emojis) < 50:
+            loaded_emojis = await globals.emoji_server.fetch_emojis()
+            if len(loaded_emojis) < 50:
                 # Something weird happened, the error was not due to a full server
                 raise
 
             # Try to delete an emoji from the server and then add this again.
-            emoji_to_delete: discord.Emoji | None = None
-            emoji_to_delete = random.choice(globals.emoji_server.emojis)
+            emoji_to_delete: discord.Emoji | None = random.choice(loaded_emojis)
             emoji_to_delete_id = emoji_to_delete.id
             if not emoji_to_delete:
                 raise Exception("emoji_to_delete failed to be fetched somehow.")
@@ -860,7 +867,10 @@ class EmojiHashMap:
 
     @beartype
     def get_accessible_emoji(
-        self, emoji_id: int, *, skip_self: bool = False
+        self,
+        emoji_id: int,
+        *,
+        skip_self: bool = False,
     ) -> discord.Emoji | None:
         """Return an emoji matching the ID passed. First tries to return the one matching the ID itself, then an internal equivalent, and finally any accessible ones.
 
@@ -895,6 +905,41 @@ class EmojiHashMap:
 
         return None
 
+    @overload
+    async def get_hash(
+        self,
+        *,
+        emoji: discord.PartialEmoji | discord.Emoji,
+        session: SQLSession | None = None,
+    ) -> str: ...
+
+    @overload
+    async def get_hash(
+        self,
+        *,
+        emoji_id: int | str,
+        session: SQLSession | None = None,
+    ) -> str | None: ...
+
+    @overload
+    async def get_hash(
+        self,
+        *,
+        emoji: None,
+        emoji_id: int | str,
+        emoji_name: None,
+        session: SQLSession | None = None,
+    ) -> str | None: ...
+
+    @overload
+    async def get_hash(
+        self,
+        *,
+        emoji_id: int | str,
+        emoji_name: str,
+        session: SQLSession | None = None,
+    ) -> str: ...
+
     @beartype
     async def get_hash(
         self,
@@ -928,8 +973,38 @@ class EmojiHashMap:
             return self._emoji_to_hash.get(int(emoji_id))
 
         return await self.ensure_hash_map(
-            emoji=emoji, emoji_id=emoji_id, emoji_name=emoji_name, session=session
+            emoji=emoji,
+            emoji_id=emoji_id,
+            emoji_name=emoji_name,
+            session=session,
         )
+
+    @overload
+    async def ensure_hash_map(
+        self,
+        *,
+        emoji: discord.Emoji | discord.PartialEmoji,
+        session: SQLSession | None = None,
+    ) -> str: ...
+
+    @overload
+    async def ensure_hash_map(
+        self,
+        *,
+        emoji_id: int | str,
+        emoji_name: str,
+        session: SQLSession | None = None,
+    ) -> str: ...
+
+    @overload
+    async def ensure_hash_map(
+        self,
+        *,
+        emoji: discord.Emoji | discord.PartialEmoji | None = None,
+        emoji_id: int | str | None = None,
+        emoji_name: str | None = None,
+        session: SQLSession | None = None,
+    ) -> str: ...
 
     @beartype
     async def ensure_hash_map(

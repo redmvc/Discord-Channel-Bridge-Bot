@@ -1,7 +1,7 @@
 aiolimiter==1.1.0
 beartype==0.18.5
 cryptography==43.0.0
-discord.py @ git+https://github.com/Rapptz/discord.py@99a7093
+discord.py==2.5.2
 sphinx==7.4.7
 SQLAlchemy==2.0.31
 typing_extensions==4.12.2
