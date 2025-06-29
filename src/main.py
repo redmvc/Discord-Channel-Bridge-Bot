@@ -38,7 +38,7 @@ from database import (
     engine,
     sql_retry,
 )
-from validations import ChannelTypeError, logger, validate_channels
+from validations import logger
 
 
 class ThreadSplat(TypedDict, total=False):
@@ -906,7 +906,7 @@ async def _bridge_message_to_target_channel(
                         attachments
                         if len(message_content) == 0
                         else []  # Only attach files on the last message
-                    ),  # TODO might throw HHTPException if too large?
+                    ),  # TODO: might throw HHTPException if too large?
                     wait=True,
                     **thread_splat,
                 )
@@ -2325,7 +2325,7 @@ async def reconnect():
 
     globals.is_connected = True
 
-    # Find all channels that have outgoing bridges.
+    # Find all channels that have outbound bridges.
     bridged_channel_ids = bridges.get_channels_with_outbound_bridges()
     if len(bridged_channel_ids) == 0:
         return
@@ -2363,10 +2363,11 @@ async def reconnect():
             message_id = int(bridged_message_row.source_message)
 
             try:
-                channel = validate_channels(
-                    channel=await globals.get_channel_from_id(channel_id),
-                )["channel"]
-            except ChannelTypeError:
+                channel = await globals.get_channel_from_id(
+                    channel_id,
+                    assert_text_or_thread=True,
+                )
+            except AssertionError:
                 continue
 
             if channel.last_message_id and channel.last_message_id == message_id:
