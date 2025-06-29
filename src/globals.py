@@ -112,6 +112,9 @@ command_tree = discord.app_commands.CommandTree(client)
 # This one is set to True once the bot has been initialised in main.py
 is_ready: bool = False
 
+# Set to True when the bot is connected and false when it's disconnected
+is_connected: bool = False
+
 # Channels which will automatically create threads in bridged channels
 auto_bridge_thread_channels: set[int] = set()
 
