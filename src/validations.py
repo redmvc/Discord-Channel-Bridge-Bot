@@ -36,14 +36,18 @@ def validate_channels(
     log_error: bool = True,
     **kwargs: Any,
 ) -> dict[str, discord.TextChannel | discord.Thread]:
-    """Raise `ChannelTypeError` if any of the channels passed as arguments is not a `discord.TextChannel` nor a `discord.Thread`, and otherwise return a tuple with the arguments cast to the right type.
+    """Raise ChannelTypeError if any of the objects passed as arguments is not a `~discord.TextChannel` nor a `~discord.Thread` off one, and otherwise return a dictionary with the arguments cast to the right type.
 
-    #### Args:
-        - `log_error`: Whether to register this error in the logger. Defaults to True.
-        - `kwargs`: The channels to validate.
+    Parameters
+    ----------
+    log_error : bool, optional
+        Whether to register this error in the logger. Defaults to True.
+    **kwags
+        The objects to validate.
 
-    #### Returns:
-        - The channels passed as arguments cast to the appropriate type.
+    Returns
+    -------
+    dict[str, `~discord.TextChannel` | `~discord.Thread`]
     """
     cast_channels: dict[str, discord.TextChannel | discord.Thread] = {}
     for channel_name, channel in kwargs.items():
@@ -67,14 +71,14 @@ def validate_webhook(
     webhook: discord.Webhook,
     target_channel: discord.TextChannel | discord.Thread,
 ):
-    """Raise `WebhookChannelError` if the webhook is not attached to the target channel or, if it's a thread, its parent.
+    """Raise WebhookChannelError if the webhook is not attached to the target channel or, if it's a thread, its parent.
 
-    #### Args:
-        - `webhook`: A Discord webhook.
-        - `target_channel`: The Discord text channel or thread to validate against.
-
-    #### Raises:
-        - `ChannelTypeError`: `target_channel` is a thread but not one that is off a text channel.
+    Parameters
+    ----------
+    webhook : `~discord.Webhook`
+        The webhook.
+    target_channel : `~discord.TextChannel` | `~discord.Thread`
+        The Discord text channel or thread to validate against.
     """
     if isinstance(target_channel, discord.TextChannel):
         target_channel_id = target_channel.id
