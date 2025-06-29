@@ -128,11 +128,10 @@ T = TypeVar("T", bound=Any)
 CH = TypeVar(
     "CH",
     bound=(
-        discord.guild.GuildChannel
-        | discord.Thread
-        | discord.DMChannel
-        | discord.PartialMessageable
+        discord.abc.GuildChannel
         | discord.abc.PrivateChannel
+        | discord.Thread
+        | discord.PartialMessageable
     ),
 )
 
@@ -141,11 +140,10 @@ CH = TypeVar(
 async def get_channel_from_id(
     channel_or_id: int,
 ) -> (
-    discord.guild.GuildChannel
-    | discord.Thread
+    discord.abc.GuildChannel
     | discord.abc.PrivateChannel
+    | discord.Thread
     | discord.PartialMessageable
-    | discord.DMChannel
     | None
 ): ...
 
@@ -154,13 +152,12 @@ async def get_channel_from_id(
 async def get_channel_from_id(
     channel_or_id: int,
     *,
-    assert_text_or_thread: Literal[False],
+    assert_text_or_thread: Literal[False] = False,
 ) -> (
-    discord.guild.GuildChannel
-    | discord.Thread
+    discord.abc.GuildChannel
     | discord.abc.PrivateChannel
+    | discord.Thread
     | discord.PartialMessageable
-    | discord.DMChannel
     | None
 ): ...
 
@@ -181,7 +178,7 @@ async def get_channel_from_id(channel_or_id: CH) -> CH: ...
 async def get_channel_from_id(
     channel_or_id: CH,
     *,
-    assert_text_or_thread: Literal[False],
+    assert_text_or_thread: Literal[False] = False,
 ) -> CH: ...
 
 
@@ -196,23 +193,19 @@ async def get_channel_from_id(
 @beartype
 async def get_channel_from_id(
     channel_or_id: (
-        discord.guild.GuildChannel
-        | discord.Thread
-        | discord.DMChannel
-        | discord.PartialMessageable
+        discord.abc.GuildChannel
         | discord.abc.PrivateChannel
+        | discord.Thread
+        | discord.PartialMessageable
         | int
     ),
     *,
     assert_text_or_thread: bool = False,
 ) -> (
-    discord.guild.GuildChannel
-    | discord.Thread
-    | discord.DMChannel
-    | discord.PartialMessageable
+    discord.abc.GuildChannel
     | discord.abc.PrivateChannel
+    | discord.Thread
     | discord.PartialMessageable
-    | discord.DMChannel
     | None
 ):
     """Ensure that this function's argument is a valid Discord channel, when it may instead be a channel ID.
@@ -243,7 +236,7 @@ async def get_channel_from_id(
 @beartype
 def get_id_from_channel(
     channel_or_id: (
-        discord.guild.GuildChannel | discord.Thread | discord.abc.PrivateChannel | int
+        discord.abc.GuildChannel | discord.Thread | discord.abc.PrivateChannel | int
     ),
 ) -> int:
     """Return the ID of the channel passed as argument, or the argument itself if it is already an ID.
@@ -263,7 +256,7 @@ def get_id_from_channel(
 @beartype
 async def get_channel_parent(
     channel_or_id: (
-        discord.guild.GuildChannel
+        discord.abc.GuildChannel
         | discord.Thread
         | discord.DMChannel
         | discord.PartialMessageable
@@ -294,7 +287,7 @@ async def get_channel_parent(
 
 @beartype
 async def get_channel_member(
-    channel: discord.guild.GuildChannel | discord.Thread,
+    channel: discord.abc.GuildChannel | discord.Thread,
     member_id: int,
 ) -> discord.Member | None:
     """Return a channel's member by their ID, or None if they can't be found.

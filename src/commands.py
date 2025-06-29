@@ -484,11 +484,10 @@ async def auto_bridge_threads(interaction: discord.Interaction):
 async def mention_to_channel(
     link_or_mention: str,
 ) -> (
-    discord.guild.GuildChannel
-    | discord.Thread
+    discord.abc.GuildChannel
     | discord.abc.PrivateChannel
+    | discord.Thread
     | discord.PartialMessageable
-    | discord.DMChannel
     | None
 ):
     """Return the channel referenced by a channel mention or a Discord link to a channel.
