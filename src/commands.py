@@ -1,6 +1,6 @@
 import asyncio
 import re
-from typing import Any, AsyncIterator, Coroutine, Iterable, Literal
+from typing import TYPE_CHECKING, Any, AsyncIterator, Coroutine, Iterable, Literal
 
 import discord
 from beartype import beartype
@@ -8,7 +8,6 @@ from sqlalchemy import Delete as SQLDelete
 from sqlalchemy import ScalarResult
 from sqlalchemy import Select as SQLSelect
 from sqlalchemy.exc import StatementError as SQLError
-from sqlalchemy.orm import Session as SQLSession
 
 import emoji_hash_map
 import globals
@@ -17,10 +16,13 @@ from database import (
     DBAppWhitelist,
     DBAutoBridgeThreadChannels,
     DBMessageMap,
-    engine,
+    Session,
     sql_retry,
 )
 from validations import ChannelTypeError, logger, validate_channels
+
+if TYPE_CHECKING:
+    from sqlalchemy.orm import Session as SQLSession
 
 
 @globals.command_tree.command(
@@ -230,7 +232,7 @@ async def bridge(
 
     session = None
     try:
-        with SQLSession(engine) as session:
+        with Session() as session:
             create_bridges: list[Coroutine[Any, Any, Bridge]] = []
             if direction != "inbound":
                 create_bridges.append(
@@ -431,7 +433,7 @@ async def auto_bridge_threads(interaction: discord.Interaction):
 
     session = None
     try:
-        with SQLSession(engine) as session:
+        with Session() as session:
             if message_channel.id not in globals.auto_bridge_thread_channels:
                 await sql_retry(
                     lambda: session.add(
@@ -579,7 +581,7 @@ async def demolish(interaction: discord.Interaction, target: str):
     await interaction.response.defer(thinking=True, ephemeral=True)
 
     try:
-        with SQLSession(engine) as session:
+        with Session() as session:
             await bridges.demolish_bridges(
                 source_channel=message_channel,
                 target_channel=target_channel,
@@ -704,7 +706,7 @@ async def demolish_all(
     session = None
     exceptions: set[int] = set()
     try:
-        with SQLSession(engine) as session:
+        with Session() as session:
             for channel_to_demolish_id, (
                 inbound_bridges,
                 outbound_bridges,
@@ -885,7 +887,7 @@ async def whitelist(interaction: discord.Interaction, apps: str):
     response: list[str] = []
     try:
         channel_id_str = str(channel.id)
-        with SQLSession(engine) as session:
+        with Session() as session:
             run_queries: list[Coroutine[Any, Any, Any]] = []
             if len(apps_to_add) > 0:
                 run_queries.append(
@@ -1031,7 +1033,7 @@ async def map_emoji(
 
     session = None
     try:
-        with SQLSession(engine) as session:
+        with Session() as session:
             image_hash = await emoji_hash_map.map.get_hash(
                 emoji=internal_emoji, session=session
             )
@@ -1274,7 +1276,7 @@ async def bridge_thread_helper(
     # The IDs of threads are the same as that of their originating messages so we should try to create threads from the same messages
     session = None
     try:
-        with SQLSession(engine) as session:
+        with Session() as session:
             matching_starting_messages: dict[int, int] = {}
             try:
                 # I don't need to store it I just need to know whether it exists
@@ -1435,7 +1437,7 @@ async def bridge_thread_helper(
 @beartype
 async def stop_auto_bridging_threads_helper(
     channel_ids_to_remove: int | Iterable[int],
-    session: SQLSession | None = None,
+    session: "SQLSession | None" = None,
 ):
     """Remove a group of channels from the auto_bridge_thread_channels table and list.
 
@@ -1460,7 +1462,7 @@ async def stop_auto_bridging_threads_helper(
     close_after = False
     try:
         if not session:
-            session = SQLSession(engine)
+            session = Session()
             close_after = True
 
         await sql_retry(
@@ -1489,7 +1491,7 @@ async def stop_auto_bridging_threads_helper(
 @beartype
 async def validate_auto_bridge_thread_channels(
     channel_ids_to_check: int | Iterable[int],
-    session: SQLSession | None = None,
+    session: "SQLSession | None" = None,
 ):
     """Check whether each one of a list of channels are in auto_bridge_thread_channels and, if so, whether they should be and, if not, remove them from there.
 
@@ -1659,7 +1661,7 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
     session = None
     at_least_one_inaccessible_bridge = False
     try:
-        with SQLSession(engine) as session:
+        with Session() as session:
             # We need to see whether this message is a bridged message and, if so, find its source
             select_message_map: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
                 DBMessageMap

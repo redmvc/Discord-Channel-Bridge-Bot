@@ -1,4 +1,4 @@
-from typing import Any, Callable, Iterable
+from typing import TYPE_CHECKING, Any, Callable, Iterable
 
 from beartype import beartype
 from sqlalchemy import Boolean, Integer
@@ -9,13 +9,14 @@ from sqlalchemy import UpdateBase, create_engine
 from sqlalchemy import insert as other_db_insert
 from sqlalchemy.dialects import mysql, postgresql, sqlite
 from sqlalchemy.exc import StatementError as SQLError
-from sqlalchemy.orm import DeclarativeBase, Mapped
-from sqlalchemy.orm import Session as SQLSession
-from sqlalchemy.orm import mapped_column
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 from sqlalchemy.sql._typing import _DMLTableArgument
 
 from globals import T, run_retries, settings
 from validations import logger
+
+if TYPE_CHECKING:
+    from sqlalchemy.orm import Session as SQLSession
 
 
 class DBBase(DeclarativeBase):
@@ -269,13 +270,13 @@ async def sql_upsert(
         # I'll do a manual update in this case
         session = None
         try:
-            with SQLSession(engine) as session:
+            with Session() as session:
                 index_values = [
                     getattr(table, idx) == insert_values[idx] for idx in indices
                 ]
                 upsert: UpdateBase
 
-                def select_existing(session: SQLSession):
+                def select_existing(session: "SQLSession"):
                     select_table: SQLSelect[tuple[Any]] = SQLSelect(table).where(
                         *index_values
                     )
@@ -347,13 +348,13 @@ async def sql_insert_ignore_duplicate(
         # I'll do a manual update in this case
         session = None
         try:
-            with SQLSession(engine) as session:
+            with Session() as session:
                 index_values = [
                     getattr(table, idx) == insert_values[idx] for idx in indices
                 ]
                 insert_unknown: UpdateBase
 
-                def select_existing(session: SQLSession):
+                def select_existing(session: "SQLSession"):
                     select_table: SQLSelect[tuple[Any]] = SQLSelect(table).where(
                         *index_values
                     )
@@ -407,6 +408,7 @@ engine = create_engine(
     pool_pre_ping=True,
     pool_recycle=3600,
 )
+Session = sessionmaker(engine)
 logger.info("Created.")
 
 # Create all tables represented by the above classes, if they haven't already been created

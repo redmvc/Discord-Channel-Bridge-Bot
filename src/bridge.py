@@ -1,7 +1,7 @@
 import asyncio
 import inspect
 from copy import deepcopy
-from typing import Any, Callable, Coroutine, Literal, overload
+from typing import TYPE_CHECKING, Any, Callable, Coroutine, Literal, overload
 
 import discord
 from beartype import beartype
@@ -11,14 +11,13 @@ from sqlalchemy import Select as SQLSelect
 from sqlalchemy import and_ as sql_and
 from sqlalchemy import or_ as sql_or
 from sqlalchemy.exc import StatementError as SQLError
-from sqlalchemy.orm import Session as SQLSession
 
 import globals
 from database import (
     DBBridge,
     DBMessageMap,
     DBWebhook,
-    engine,
+    Session,
     sql_insert_ignore_duplicate,
     sql_retry,
     sql_upsert,
@@ -30,6 +29,9 @@ from validations import (
     validate_channels,
     validate_webhook,
 )
+
+if TYPE_CHECKING:
+    from sqlalchemy.orm import Session as SQLSession
 
 
 class Bridge:
@@ -142,7 +144,7 @@ class Bridges:
         self.webhooks = Webhooks()
 
     @beartype
-    async def load_from_database(self, session: SQLSession | None = None):
+    async def load_from_database(self, session: "SQLSession | None" = None):
         """Load all bridges saved in the bot's connected database.
 
         Parameters
@@ -153,7 +155,7 @@ class Bridges:
         logger.info("Loading bridges from database...")
 
         if not session:
-            session = SQLSession(engine)
+            session = Session()
             close_after = True
         else:
             close_after = False
@@ -358,7 +360,7 @@ class Bridges:
         target: discord.TextChannel | discord.Thread | int,
         webhook: discord.Webhook | None = None,
         update_db: bool = True,
-        session: SQLSession | None = None,
+        session: "SQLSession | None" = None,
     ) -> Bridge:
         """Create a new Bridge from source channel to target channel (and a new webhook if necessary).
 
@@ -511,7 +513,7 @@ class Bridges:
         try:
             if not session:
                 close_after = True
-                session = SQLSession(engine)
+                session = Session()
 
             target_id_str = str(target_id)
             insert_bridge_row = await sql_insert_ignore_duplicate(
@@ -562,7 +564,7 @@ class Bridges:
         source_channel: discord.TextChannel | discord.Thread | int | None = None,
         target_channel: discord.TextChannel | discord.Thread | int | None = None,
         update_db: bool = True,
-        session: SQLSession | None = None,
+        session: "SQLSession | None" = None,
         one_sided: bool = False,
     ) -> None:
         """Destroy Bridges from source and/or to target channel.
@@ -731,7 +733,7 @@ class Bridges:
         close_after = False
         try:
             if not session:
-                session = SQLSession(engine)
+                session = Session()
                 close_after = True
 
             delete_demolished_bridges_and_messages: list[SQLDelete] = []

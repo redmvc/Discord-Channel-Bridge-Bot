@@ -5,6 +5,7 @@ import inspect
 import re
 from copy import deepcopy
 from typing import (
+    TYPE_CHECKING,
     Any,
     Coroutine,
     Literal,
@@ -23,7 +24,6 @@ from sqlalchemy import Select as SQLSelect
 from sqlalchemy import and_ as sql_and
 from sqlalchemy import or_ as sql_or
 from sqlalchemy.exc import StatementError as SQLError
-from sqlalchemy.orm import Session as SQLSession
 from sqlalchemy.sql import func
 
 import commands
@@ -35,10 +35,13 @@ from database import (
     DBAutoBridgeThreadChannels,
     DBMessageMap,
     DBReactionMap,
-    engine,
+    Session,
     sql_retry,
 )
 from validations import ChannelTypeError, logger
+
+if TYPE_CHECKING:
+    from sqlalchemy.orm import Session as SQLSession
 
 
 class ThreadSplat(TypedDict, total=False):
@@ -71,7 +74,7 @@ async def on_ready():
 
     session = None
     try:
-        with SQLSession(engine) as session:
+        with Session() as session:
             await bridges.load_from_database(session)
 
             # Try to identify hashed emoji
@@ -379,7 +382,7 @@ async def bridge_message_helper(message: discord.Message):
 
     session = None
     try:
-        with SQLSession(engine) as session:
+        with Session() as session:
             # Check whether this message is a reference to another message, i.e. if it's a reply or a forward
             message_reference = message.reference
             original_message = message
@@ -692,7 +695,7 @@ async def bridge_message_to_target_channel(
     forwarded_message: discord.Message | None,
     forwarded_message_channel_is_nsfw: bool,
     thread_splat: ThreadSplat,
-    session: SQLSession,
+    session: "SQLSession",
 ) -> list[BridgedMessage] | None:
     """Bridge a message to a channel and return a list of dictionaries with information about the message bridged. Multiple dictionaries are returned in case a message has to be split into multiple ones due to message length.
 
@@ -788,7 +791,7 @@ async def _bridge_message_to_target_channel(
     forwarded_message: discord.Message | None,
     forwarded_message_channel_is_nsfw: bool,
     thread_splat: ThreadSplat,
-    session: SQLSession,
+    session: "SQLSession",
 ) -> list[BridgedMessage] | None:
     """Helper function to bridge a message to a channel."""
     # Replace Discord links in the message and embed text
@@ -1127,7 +1130,7 @@ async def edit_message_helper(
     # Find all messages matching this one
     try:
         async_message_edits: list[Coroutine[Any, Any, None]] = []
-        with SQLSession(engine) as session:
+        with Session() as session:
             # Ensure that the message has emoji I have access to
             message_content = await replace_missing_emoji(message_content, session)
 
@@ -1292,7 +1295,7 @@ async def edit_message_helper(
 @beartype
 async def replace_missing_emoji(
     message_content: str,
-    session: SQLSession | None = None,
+    session: "SQLSession | None" = None,
 ) -> str:
     """Return a version of the contents of a message that replaces any instances of an emoji that the bot can't find with matching ones, if possible.
 
@@ -1330,7 +1333,7 @@ async def replace_missing_emoji(
         return message_content
 
     if not session:
-        session = SQLSession(engine)
+        session = Session()
         close_after = True
     else:
         close_after = False
@@ -1384,7 +1387,7 @@ async def replace_missing_emoji(
 async def replace_discord_links(
     content: None,
     channel: discord.TextChannel | discord.Thread,
-    session: SQLSession,
+    session: "SQLSession",
 ) -> None: ...
 
 
@@ -1392,7 +1395,7 @@ async def replace_discord_links(
 async def replace_discord_links(
     content: str,
     channel: discord.TextChannel | discord.Thread,
-    session: SQLSession,
+    session: "SQLSession",
 ) -> str: ...
 
 
@@ -1400,7 +1403,7 @@ async def replace_discord_links(
 async def replace_discord_links(
     content: str | None,
     channel: discord.TextChannel | discord.Thread,
-    session: SQLSession,
+    session: "SQLSession",
 ) -> str | None:
     """Return a version of the contents of a string that replaces any links to other messages within the same channel or parent channel to appropriately bridged ones.
 
@@ -1579,7 +1582,7 @@ async def delete_message_helper(message_id: int, channel_id: int):
     session = None
     try:
         async_message_deletes: list[Coroutine[Any, Any, None]] = []
-        with SQLSession(engine) as session:
+        with Session() as session:
             select_message_map: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
                 DBMessageMap
             ).where(DBMessageMap.source_message == message_id)
@@ -1883,7 +1886,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                 target_emoji_name=bridged_emoji_name,
             )
 
-        with SQLSession(engine) as session:
+        with Session() as session:
             # Let me check whether I've already reacted to bridged messages in some of these channels
             select_reaction_map: SQLSelect[tuple[DBReactionMap]] = SQLSelect(
                 DBReactionMap
@@ -2185,7 +2188,7 @@ async def unreact(
 
     session = None
     try:
-        with SQLSession(engine) as session:
+        with Session() as session:
             # First I find all of the messages that got this reaction bridged to them
             conditions = [DBReactionMap.source_message == str(payload.message_id)]
             if removed_emoji_id:
@@ -2444,7 +2447,7 @@ async def reconnect():
     if len(bridged_channel_ids) == 0:
         return
 
-    with SQLSession(engine) as session:
+    with Session() as session:
         # Find the latest bridged messages from each channel
         try:
             subquery = (

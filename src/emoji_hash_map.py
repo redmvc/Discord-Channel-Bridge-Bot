@@ -1,6 +1,6 @@
 import asyncio
 import random
-from typing import Any, Coroutine, Literal, Sequence, overload
+from typing import TYPE_CHECKING, Any, Coroutine, Literal, Sequence, overload
 
 import discord
 from beartype import beartype
@@ -11,18 +11,20 @@ from sqlalchemy import Update as SQLUpdate
 from sqlalchemy import UpdateBase
 from sqlalchemy import not_ as sql_not
 from sqlalchemy.exc import StatementError as SQLError
-from sqlalchemy.orm import Session as SQLSession
 
 import globals
-from database import DBEmoji, engine, sql_retry, sql_upsert
+from database import DBEmoji, Session, sql_retry, sql_upsert
 from validations import ArgumentError, logger
+
+if TYPE_CHECKING:
+    from sqlalchemy.orm import Session as SQLSession
 
 
 class EmojiHashMap:
     """A mapping between emoji IDs and hashes of their images."""
 
     @beartype
-    def __init__(self, session: SQLSession | None = None):
+    def __init__(self, session: "SQLSession | None" = None):
         """Initialise the emoji hash map from the emoji table.
 
         Parameters
@@ -40,7 +42,7 @@ class EmojiHashMap:
         close_after = False
         try:
             if not session:
-                session = SQLSession(engine)
+                session = Session()
                 close_after = True
 
             select_hashed_emoji: SQLSelect[tuple[DBEmoji]] = SQLSelect(DBEmoji)
@@ -177,7 +179,7 @@ class EmojiHashMap:
         image: bytes | None = None,
         image_hash: str | None = None,
         accessible: bool = False,
-        session: SQLSession | None = None,
+        session: "SQLSession | None" = None,
     ):
         """Inserts an emoji into the `emoji` database table.
 
@@ -242,7 +244,7 @@ class EmojiHashMap:
         close_after = False
         try:
             if not session:
-                session = SQLSession(engine)
+                session = Session()
                 close_after = True
 
             upsert_emoji = await self.upsert_emoji(
@@ -281,7 +283,7 @@ class EmojiHashMap:
         accessible: bool = False,
         is_internal: bool = False,
         update_db: bool = False,
-        session: SQLSession | None = None,
+        session: "SQLSession | None" = None,
     ) -> tuple[int, str]:
         """Insert an emoji into the hash map and, optionally, into the emoji database table, then return a tuple with the emoji ID and the hash of its image.
 
@@ -351,7 +353,7 @@ class EmojiHashMap:
             close_after = False
             try:
                 if not session:
-                    session = SQLSession(engine)
+                    session = Session()
                     close_after = True
 
                 await self._add_emoji_to_database(
@@ -431,7 +433,7 @@ class EmojiHashMap:
         self,
         emoji_id: int,
         update_db: bool = False,
-        session: SQLSession | None = None,
+        session: "SQLSession | None" = None,
     ):
         """Delete an emoji from the hash map. If `session` is included, delete it from the database also.
 
@@ -478,7 +480,7 @@ class EmojiHashMap:
             close_after = False
             try:
                 if not session:
-                    session = SQLSession(engine)
+                    session = Session()
                     close_after = True
 
                 await sql_retry(
@@ -600,7 +602,7 @@ class EmojiHashMap:
 
         session = None
         try:
-            with SQLSession(engine) as session:
+            with Session() as session:
                 for server in servers:
                     logger.debug("Loading server %s...", server.name)
 
@@ -641,7 +643,7 @@ class EmojiHashMap:
         emoji_image: bytes | None = None,
         emoji_image_hash: str | None = None,
         emoji_to_copy_name: str | None = None,
-        session: SQLSession | None = None,
+        session: "SQLSession | None" = None,
     ) -> discord.Emoji | None:
         """Try to create an emoji in the emoji server and, if successful, return it.
 
@@ -750,7 +752,7 @@ class EmojiHashMap:
 
         # Copied the emoji, going to update my table
         if not session:
-            session = SQLSession(engine)
+            session = Session()
             close_after = True
         else:
             close_after = False
@@ -826,7 +828,7 @@ class EmojiHashMap:
         external_emoji_name: str | None = None,
         internal_emoji: discord.Emoji,
         image_hash: str | None = None,
-        session: SQLSession | None = None,
+        session: "SQLSession | None" = None,
     ) -> bool:
         """Attempt to create a mapping between external and internal emoji, recording it locally and saving it in the emoji table. Return True if creating the map succeeded and False otherwise.
 
@@ -884,7 +886,7 @@ class EmojiHashMap:
         close_after = False
         try:
             if not session:
-                session = SQLSession(engine)
+                session = Session()
                 close_after = True
             if not image_hash:
                 if partial_or_full_emoji := (external_emoji or full_emoji):
@@ -1184,7 +1186,7 @@ class EmojiHashMap:
         self,
         *,
         emoji: discord.PartialEmoji | discord.Emoji,
-        session: SQLSession | None = None,
+        session: "SQLSession | None" = None,
     ) -> str:
         """Return the hash of an emoji. Will ensure the emoji is in the hash map by adding it if it's not.
 
@@ -1211,7 +1213,7 @@ class EmojiHashMap:
         self,
         *,
         emoji_id: int | str,
-        session: SQLSession | None = None,
+        session: "SQLSession | None" = None,
     ) -> str | None:
         """Return the hash of an emoji. If an emoji with this ID can't be found in our existing hash map nor fetched from the client, returns None; otherwise will ensure the emoji is in the hash map by adding it if it's not.
 
@@ -1248,7 +1250,7 @@ class EmojiHashMap:
         emoji: None,
         emoji_id: int | str,
         emoji_name: None,
-        session: SQLSession | None = None,
+        session: "SQLSession | None" = None,
     ) -> str | None:
         """Return the hash of an emoji. If an emoji with this ID can't be found in our existing hash map nor fetched from the client, returns None; otherwise will ensure the emoji is in the hash map by adding it if it's not.
 
@@ -1284,7 +1286,7 @@ class EmojiHashMap:
         *,
         emoji_id: int | str,
         emoji_name: str,
-        session: SQLSession | None = None,
+        session: "SQLSession | None" = None,
     ) -> str:
         """Return the hash of an emoji. Will ensure the emoji is in the hash map by adding it if it's not.
 
@@ -1315,7 +1317,7 @@ class EmojiHashMap:
         emoji: discord.PartialEmoji | discord.Emoji | None = None,
         emoji_id: int | str | None = None,
         emoji_name: str | None = None,
-        session: SQLSession | None = None,
+        session: "SQLSession | None" = None,
     ) -> str | None:
         """Return the hash of an emoji.
 
@@ -1376,7 +1378,7 @@ class EmojiHashMap:
         emoji: discord.Emoji | discord.PartialEmoji | None = None,
         emoji_id: int | str | None = None,
         emoji_name: str | None = None,
-        session: SQLSession | None = None,
+        session: "SQLSession | None" = None,
     ) -> str:
         """Check that the emoji is in the hash map and, if not, add it to the map and to the database, then return the hash.
 
