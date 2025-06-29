@@ -12,7 +12,6 @@ from sqlalchemy.exc import StatementError as SQLError
 from sqlalchemy.orm import DeclarativeBase, Mapped
 from sqlalchemy.orm import Session as SQLSession
 from sqlalchemy.orm import mapped_column
-from sqlalchemy.sql._typing import _DMLTableArgument
 
 from globals import T, run_retries, settings
 from validations import logger
@@ -203,7 +202,7 @@ class DBAppWhitelist(DBBase):
 @beartype
 async def sql_upsert(
     *,
-    table: _DMLTableArgument,
+    table: Any,
     indices: Iterable[str],
     ignored_cols: Iterable[str] | None = None,
     **kwargs: Any,
