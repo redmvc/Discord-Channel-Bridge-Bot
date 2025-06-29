@@ -1,21 +1,18 @@
 from typing import Any, Callable, Iterable
 
 from beartype import beartype
-from sqlalchemy import (
-    Boolean,
-    Integer,
-    String,
-    UniqueConstraint,
-    UpdateBase,
-    create_engine,
-)
+from sqlalchemy import Boolean, Integer
 from sqlalchemy import Select as SQLSelect
+from sqlalchemy import String, UniqueConstraint
 from sqlalchemy import Update as SQLUpdate
+from sqlalchemy import UpdateBase, create_engine
 from sqlalchemy import insert as other_db_insert
 from sqlalchemy.dialects import mysql, postgresql, sqlite
 from sqlalchemy.exc import StatementError as SQLError
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.orm import DeclarativeBase, Mapped
 from sqlalchemy.orm import Session as SQLSession
+from sqlalchemy.orm import mapped_column
+from sqlalchemy.sql._typing import _DMLTableArgument
 
 from globals import T, run_retries, settings
 from validations import logger
@@ -33,12 +30,14 @@ class DBBridge(DBBase):
     """
     An SQLAlchemy ORM class representing a database table tracking existing bridges between channels and/or threads.
 
-    #### Columns
+    Columns
+    -------
     - `id (INT)`: The id number of a bridge, has `PRIMARY KEY` and `AUTO_INCREMENT`.
     - `source (VARCHAR(32))`: The ID of the bridge's source channel or thread.
     - `target (VARCHAR(32))`: The ID of the bridge's target channel or thread.
 
-    #### Constraints
+    Constraints
+    -----------
     - `unique_source_target (UNIQUE(source, target))`: A combination of source and target channel or thread IDs has to be unique.
     """
 
@@ -56,7 +55,8 @@ class DBWebhook(DBBase):
     """
     An SQLAlchemy ORM class representing a database table tracking webhooks managed by the bot in each channel.
 
-    #### Columns
+    Columns
+    -------
     - `channel (VARCHAR(32))`: The ID of the bridge's target channel or thread. Has `PRIMARY KEY`.
     - `webhook (VARCHAR(32))`: The ID of the webhook attached to the target channel which bridges messages to it.
     """
@@ -71,7 +71,8 @@ class DBMessageMap(DBBase):
     """
     An SQLAlchemy ORM class representing a database table listing the mappings between bridged messages.
 
-    #### Columns
+    Columns
+    -------
     - `id (INT)`: The id number of a mapping, has `PRIMARY KEY` and `AUTO_INCREMENT`.
     - `source_message (VARCHAR(32))`: The ID of the message in the original channel.
     - `source_channel (VARCHAR(32))`: The ID of the channel or thread that message was sent to.
@@ -98,7 +99,8 @@ class DBReactionMap(DBBase):
     """
     An SQLAlchemy ORM class representing a database table listing the mappings between bridged reactions.
 
-    #### Columns
+    Columns
+    -------
     - `id (INT)`: The id number of a mapping, has `PRIMARY KEY` and `AUTO_INCREMENT`.
     - `source_emoji (VARCHAR(30))`: The ID of the emoji in the source message.
     - `source_message (VARCHAR(32))`: The ID of the message in the original channel.
@@ -108,7 +110,8 @@ class DBReactionMap(DBBase):
     - `target_emoji_id (VARCHAR(32))`: The ID of the emoji in the target message.
     - `target_emoji_name (VARCHAR(32))`: The name of the emoji in the target message.
 
-    #### Constraints
+    Constraints
+    -----------
     - `unique_emoji_source_target (UNIQUE(source_emoji, source_message, target_message))`: A combination of source emoji, source message, and target message has to be unique.
     """
 
@@ -136,7 +139,8 @@ class DBAutoBridgeThreadChannels(DBBase):
     """
     An SQLAlchemy ORM class representing a database table listing all channels that will automatically bridge newly-created threads.
 
-    #### Columns
+    Columns
+    -------
     - `id (INT)`: The id number of an entry, has `PRIMARY KEY` and `AUTO_INCREMENT`.
     - `channel (VARCHAR(32))`: The ID of the channel that has auto-bridge-threads enabled.
     """
@@ -151,7 +155,8 @@ class DBEmoji(DBBase):
     """
     An SQLAlchemy ORM class representing a database table storing information about emoji.
 
-    #### Columns
+    Columns
+    -------
     - `id (VARCHAR(32))`: The emoji ID, has `PRIMARY KEY`.
     - `name (VARCHAR(32))`: The name of the emoji.
     - `server_id (VARCHAR(32))`: The ID of the server this emoji belongs to.
@@ -174,12 +179,14 @@ class DBAppWhitelist(DBBase):
     """
     An SQLAlchemy ORM class representing a database table storing IDs for applications/bots that are whitelisted for bridging messages in a given channel.
 
-    #### Columns
+    Columns
+    -------
     - `id (INT)`: The id number of an entry, has `PRIMARY KEY` and `AUTO_INCREMENT`.
     - `channel (VARCHAR(32))`: The ID of a source channel.
     - `application (VARCHAR(32))`: The ID of the application whose messages should be allowed through from that channel.
 
-    #### Constraints
+    Constraints
+    -----------
     - `unique_channel_app (UNIQUE(channel, application))`: A combination of channel and application IDs has to be unique.
     """
 
@@ -196,22 +203,34 @@ class DBAppWhitelist(DBBase):
 @beartype
 async def sql_upsert(
     *,
-    table: Any,
+    table: _DMLTableArgument,
     indices: Iterable[str],
     ignored_cols: Iterable[str] | None = None,
     **kwargs: Any,
 ) -> UpdateBase:
-    """Return an `UpdateBase` for inserting values into a table if a set of indices is not duplicated or updating them if it is.
+    """Return an `~sqlalchemy.UpdateBase` for inserting values into a table if a set of indices is not duplicated or updating them if it is.
 
-    #### Args:
-        - `table`: The table to insert into.
-        - `indices`: A list with the names of the indices (i.e. the columns whose uniqueness will be checked).
-        - `ignored_cols`: A list with the names of columns whose values should not be updated but which aren't, themselves, unique indices.
-        - `kwargs`: Named arguments for the values to insert or update. The values in `indices` must be a [proper subset](https://en.wikipedia.org/wiki/Subset) of the keys in `kwargs` (i.e. all `indices` should be in `kwargs.keys()` but there should be at least one key in `kwargs` that isn't in `indices`).
+    Parameters
+    ----------
+    table : `~sqlalchemy.sql._typing._DMLTableArgument`
+        The table to insert into.
+    indices : Iterable[str]
+        A list with the names of the indices (i.e. the columns whose uniqueness will be checked).
+    ignored_cols : Iterable[str] | None, optional
+        A list with the names of columns whose values should not be updated but which aren't, themselves, unique indices. Defaults to None.
+    **kwargs : Any
+        Named arguments for the values to insert or update. The values in `indices` must be a [proper subset](https://en.wikipedia.org/wiki/Subset) of the keys in `kwargs` (i.e. all `indices` should be in `kwargs.keys()` but there should be at least one key in `kwargs` that isn't in `indices`).
 
-    #### Raises:
-        - `ValueError`: `indices` is not a proper subset of `kwargs.keys()`.
-        - `SQLError`: SQL statement inferred from arguments was invalid or database connection failed. This error can only be raised if the database dialect is not MySQL, PostgreSQL, nor SQLite.
+    Returns
+    -------
+    `~sqlalchemy.UpdateBase`
+
+    Raises
+    ------
+    ValueError
+        `indices` is not a proper subset of `kwargs.keys()`.
+    `~sqlalchemy.exc.StatementError`
+        SQL statement inferred from arguments was invalid or database connection failed. This error can only be raised if the database dialect is not MySQL, PostgreSQL, nor SQLite.
     """
     indices = set(indices)
     insert_values = kwargs
@@ -285,15 +304,25 @@ async def sql_insert_ignore_duplicate(
     indices: Iterable[str],
     **kwargs: Any,
 ) -> UpdateBase:
-    """Return an `UpdateBase` for inserting values into a table if a set of indices is not duplicated.
+    """Return an `~sqlalchemy.UpdateBase` for inserting values into a table if a set of indices is not duplicated.
 
-    #### Args:
-        - `table`: The table to insert into.
-        - `indices`: A list with the names of the indices (i.e. the columns whose uniqueness will be checked).
-        - `kwargs`: Named arguments for the values to insert or update. The values in `indices` must be a [proper subset](https://en.wikipedia.org/wiki/Subset) of the keys in `kwargs` (i.e. all `indices` should be in `kwargs.keys()` but there should be at least one key in `kwargs` that isn't in `indices`).
+    Parameters
+    ----------
+    table : `~sqlalchemy.sql._typing._DMLTableArgument`
+        The table to insert into.
+    indices : Iterable[str]
+        A list with the names of the indices (i.e. the columns whose uniqueness will be checked).
+    **kwargs : Any
+        Named arguments for the values to insert or update. The values in `indices` must be a [proper subset](https://en.wikipedia.org/wiki/Subset) of the keys in `kwargs` (i.e. all `indices` should be in `kwargs.keys()` but there should be at least one key in `kwargs` that isn't in `indices`).
 
-    #### Raises:
-        - `SQLError`: SQL statement inferred from arguments was invalid or database connection failed. This error can only be raised if the database dialect is not MySQL, PostgreSQL, nor SQLite.
+    Returns
+    -------
+    `~sqlalchemy.UpdateBase`
+
+    Raises
+    ------
+    `~sqlalchemy.exc.StatementError`
+        SQL statement inferred from arguments was invalid or database connection failed. This error can only be raised if the database dialect is not MySQL, PostgreSQL, nor SQLite.
     """
     indices = set(indices)
     insert_values = kwargs
@@ -353,15 +382,20 @@ async def sql_retry(
     num_retries: int = 5,
     time_to_wait: float | int = 10,
 ) -> T:
-    """Run an SQL function and retry it every time an SQLError occurs up to a certain maximum number of tries. If it succeeds, return its result; otherwise, raise the error.
+    """Run an SQL function and retry it every time an `~sqlalchemy.exc.StatementError` occurs up to a certain maximum number of tries. If it succeeds, return its result; otherwise, raise the error.
 
-    #### Args:
-        - `fun`: The function to run.
-        - `num_retries`: The number of times to try the function again.
-        - `time_to_wait`: How long to wait between retries.
+    Parameters
+    ----------
+    fun : Callable[..., T]
+        The function to run.
+    num_retries : int, optional
+        The number of times to try the function again. If set to 0 or less, will be set to 1.
+    time_to_wait : float | int, optional
+        Time in seconds to wait between retries; only used if `num_retries` is greater than 1. If set to 0 or less, will set `num_retries` to 1. Defaults to 5.
 
-    #### Returns:
-        - `T`: The result of calling `fun()`.
+    Returns
+    -------
+    T
     """
     return await run_retries(fun, num_retries, time_to_wait, SQLError)
 
