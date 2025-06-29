@@ -202,9 +202,12 @@ class EmojiHashMap:
             - `RuntimeError`: Session connection failed.
             - `ServerTimeoutError`: Connection to server timed out.
         """
-        emoji_id, emoji_name, emoji_animated_inferred, emoji_url = (
-            globals.get_emoji_information(emoji, emoji_id, emoji_name)
-        )
+        (
+            emoji_id,
+            emoji_name,
+            emoji_animated_inferred,
+            emoji_url,
+        ) = await globals.get_emoji_information(emoji, emoji_id, emoji_name)
         logger.debug("Adding emoji with ID %s to database...", emoji_id)
 
         if emoji_animated is None:
@@ -292,7 +295,7 @@ class EmojiHashMap:
         """
         logger.debug("Adding %s to hash map.", emoji if emoji else emoji_id)
         if not emoji_id or not image_hash:
-            emoji_id, emoji_name, _, emoji_url = globals.get_emoji_information(
+            emoji_id, emoji_name, _, emoji_url = await globals.get_emoji_information(
                 emoji,
                 emoji_id,
                 emoji_name,
@@ -579,12 +582,15 @@ class EmojiHashMap:
                 emoji_to_copy if emoji_to_copy else emoji_to_copy_id,
             )
 
-            emoji_to_copy_id, emoji_to_copy_name, _, emoji_to_copy_url = (
-                globals.get_emoji_information(
-                    emoji_to_copy,
-                    emoji_to_copy_id,
-                    emoji_to_copy_name,
-                )
+            (
+                emoji_to_copy_id,
+                emoji_to_copy_name,
+                _,
+                emoji_to_copy_url,
+            ) = await globals.get_emoji_information(
+                emoji_to_copy,
+                emoji_to_copy_id,
+                emoji_to_copy_name,
             )
 
             emoji_image = await globals.get_image_from_URL(emoji_to_copy_url)
@@ -731,12 +737,15 @@ class EmojiHashMap:
             - `RuntimeError`: Session connection failed.
             - `ServerTimeoutError`: Connection to server timed out.
         """
-        external_emoji_id, external_emoji_name, external_emoji_animated, _ = (
-            globals.get_emoji_information(
-                external_emoji,
-                external_emoji_id,
-                external_emoji_name,
-            )
+        (
+            external_emoji_id,
+            external_emoji_name,
+            external_emoji_animated,
+            _,
+        ) = await globals.get_emoji_information(
+            external_emoji,
+            external_emoji_id,
+            external_emoji_name,
         )
 
         full_emoji = globals.client.get_emoji(external_emoji_id)
@@ -1039,7 +1048,7 @@ class EmojiHashMap:
             "Ensuring that emoji %s is in hash map.", emoji if emoji else emoji_id
         )
 
-        emoji_id, emoji_name, _, _ = globals.get_emoji_information(
+        emoji_id, emoji_name, _, _ = await globals.get_emoji_information(
             emoji,
             emoji_id,
             emoji_name,
