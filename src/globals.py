@@ -22,13 +22,7 @@ from aiolimiter import AsyncLimiter
 from beartype import beartype
 from typing_extensions import NotRequired
 
-from validations import (
-    ArgumentError,
-    ChannelTypeError,
-    HTTPResponseError,
-    logger,
-    validate_channels,
-)
+from validations import ArgumentError, ChannelTypeError, HTTPResponseError, logger
 
 
 class Settings(TypedDict):
@@ -248,14 +242,17 @@ async def get_channel_parent(
     #### Returns:
         - `discord.TextChannel`: The parent of the channel passed as argument, or the channel itself in case it is not a thread.
     """
-    channel = validate_channels(channel_or_id=await get_channel_from_id(channel_or_id))[
-        "channel_or_id"
-    ]
+    channel = await get_channel_from_id(channel_or_id, ensure_text_or_thread=True)
 
-    if isinstance(channel, discord.TextChannel):
-        return channel
+    if isinstance(channel, discord.Thread):
+        channel = channel.parent
 
-    return cast(discord.TextChannel, channel.parent)
+    if not isinstance(channel, discord.TextChannel):
+        raise ChannelTypeError(
+            "The channel or ID passed as argument does not refer to a Discord text channel or a Thread."
+        )
+
+    return channel
 
 
 @beartype
