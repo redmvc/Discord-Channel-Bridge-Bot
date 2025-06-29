@@ -24,15 +24,6 @@ from typing_extensions import NotRequired
 
 from validations import ArgumentError, HTTPResponseError, logger, validate_channels
 
-# discord.guild.GuildChannel isn't working in commands.py for some reason
-GuildChannel = (
-    discord.VoiceChannel
-    | discord.StageChannel
-    | discord.ForumChannel
-    | discord.TextChannel
-    | discord.CategoryChannel
-)
-
 
 class Settings(TypedDict):
     """
@@ -140,7 +131,7 @@ T = TypeVar("T", bound=Any)
 @overload
 async def get_channel_from_id(
     channel_or_id: (
-        GuildChannel
+        discord.guild.GuildChannel
         | discord.Thread
         | discord.DMChannel
         | discord.PartialMessageable
@@ -148,7 +139,7 @@ async def get_channel_from_id(
         | int
     ),
 ) -> (
-    GuildChannel
+    discord.guild.GuildChannel
     | discord.Thread
     | discord.abc.PrivateChannel
     | discord.PartialMessageable
@@ -160,7 +151,7 @@ async def get_channel_from_id(
 @overload
 async def get_channel_from_id(
     channel_or_id: (
-        GuildChannel
+        discord.guild.GuildChannel
         | discord.Thread
         | discord.DMChannel
         | discord.PartialMessageable
@@ -170,7 +161,7 @@ async def get_channel_from_id(
     *,
     assert_text_or_thread: Literal[False],
 ) -> (
-    GuildChannel
+    discord.guild.GuildChannel
     | discord.Thread
     | discord.abc.PrivateChannel
     | discord.PartialMessageable
@@ -182,7 +173,7 @@ async def get_channel_from_id(
 @overload
 async def get_channel_from_id(
     channel_or_id: (
-        GuildChannel
+        discord.guild.GuildChannel
         | discord.Thread
         | discord.DMChannel
         | discord.PartialMessageable
@@ -197,7 +188,7 @@ async def get_channel_from_id(
 @beartype
 async def get_channel_from_id(
     channel_or_id: (
-        GuildChannel
+        discord.guild.GuildChannel
         | discord.Thread
         | discord.DMChannel
         | discord.PartialMessageable
@@ -207,7 +198,7 @@ async def get_channel_from_id(
     *,
     assert_text_or_thread: bool = False,
 ) -> (
-    GuildChannel
+    discord.guild.GuildChannel
     | discord.Thread
     | discord.abc.PrivateChannel
     | discord.PartialMessageable
@@ -241,7 +232,9 @@ async def get_channel_from_id(
 
 @beartype
 def get_id_from_channel(
-    channel_or_id: GuildChannel | discord.Thread | discord.abc.PrivateChannel | int,
+    channel_or_id: (
+        discord.guild.GuildChannel | discord.Thread | discord.abc.PrivateChannel | int
+    ),
 ) -> int:
     """Return the ID of the channel passed as argument, or the argument itself if it is already an ID.
 
@@ -267,7 +260,7 @@ def get_id_from_channel(
 @beartype
 async def get_channel_parent(
     channel_or_id: (
-        GuildChannel
+        discord.guild.GuildChannel
         | discord.Thread
         | discord.DMChannel
         | discord.PartialMessageable
@@ -298,7 +291,7 @@ async def get_channel_parent(
 
 @beartype
 async def get_channel_member(
-    channel: GuildChannel | discord.Thread,
+    channel: discord.guild.GuildChannel | discord.Thread,
     member_id: int,
 ) -> discord.Member | None:
     """Return a channel's member by their ID, or None if they can't be found.
