@@ -2394,11 +2394,13 @@ async def reconnect():
 
             # Try to bridge them
             for message_to_bridge in messages_after_latest_bridged:
-                if message_to_bridge.id != message_id:
-                    try:
-                        await on_message(message_to_bridge)
-                    except Exception:
-                        break
+                if message_to_bridge.id == message_id:
+                    continue
+
+                try:
+                    await on_message(message_to_bridge)
+                except Exception:
+                    break
 
 
 app_token = globals.settings.get("app_token")
