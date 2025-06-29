@@ -2320,7 +2320,7 @@ async def reconnect():
     """
     Mark the bot as connected and try to check for new messages that haven't been bridged.
     """
-    if not globals.is_ready or globals.is_connected:
+    if (not globals.is_ready) or globals.is_connected:
         return
 
     globals.is_connected = True
