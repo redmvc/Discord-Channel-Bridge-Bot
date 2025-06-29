@@ -354,7 +354,7 @@ async def get_image_from_URL(url: str) -> bytes:
 
 
 @beartype
-def get_emoji_information(
+async def get_emoji_information(
     emoji: discord.PartialEmoji | discord.Emoji | None = None,
     emoji_id: int | str | None = None,
     emoji_name: str | None = None,
@@ -362,12 +362,12 @@ def get_emoji_information(
     """Return a tuple with emoji ID, emoji name, whether the emoji is animated, and the URL for its image.
 
     #### Args:
-        - `emoji`: A Discord emoji. Defaults to None, in which case the values below will be used instead.
-        - `emoji_id`: The ID of an emoji. Will only be used if `emoji` is None. Defaults to None.
-        - `emoji_name`: The name of the emoji. Defaults to None, but must be included if `emoji_id` is. If it starts with `"a:"` the emoji will be marked as animated.
+        - `emoji`: A custom Discord emoji. Defaults to None, in which case `emoji_id` and `emoji_name` are used instead.
+        - `emoji_id`: The ID of a a custom emoji. Defaults to None. Only used if `emoji` is not present.
+        - `emoji_name`: The name of the emoji. Defaults to None, in which case the client will try to find an emoji with ID `emoji_id`. If it's included, it must start with the string "a:" if the emoji animated. Only used if `emoji` is not present.
 
     #### Raises:
-        - `ArgumentError`: Neither `emoji` nor `emoji_id` were passed, or `emoji_id` was passed but not `emoji_name`.
+        - `ArgumentError`: Neither `emoji` nor `emoji_id` were passed, or `emoji_id` was passed, `emoji` and `emoji_name` weren't, and the client couldn't find an accessible emoji with ID `emoji_id`.
         - `ValueError`: `emoji` argument was passed and had type `PartialEmoji` but it was not a custom emoji, or `emoji_id` argument was passed and had type `str` but it was not a valid numerical ID.
     """
     if emoji:
@@ -385,38 +385,59 @@ def get_emoji_information(
     else:
         if not emoji_id:
             err = ArgumentError(
-                f"Error in function {inspect.stack()[1][3]}(): either emoji or both emoji_id and emoji_name must be passed as argument to get_emoji_information()."
-            )
-            logger.error(err)
-            raise err
-        elif not emoji_name:
-            err = ArgumentError(
-                f"Error in function {inspect.stack()[1][3]}(): if emoji_id is passed as argument to get_emoji_information(), emoji_name must also be."
+                f"Error in function {inspect.stack()[1][3]}(): at least one of emoji or emoji_id must be passed as argument to get_emoji_information()."
             )
             logger.error(err)
             raise err
 
-        if emoji_animated := emoji_name.startswith("a:"):
-            emoji_name = emoji_name[2:]
-        elif emoji_name.startswith(":"):
-            emoji_name = emoji_name[1:]
+        try:
+            emoji_id = int(emoji_id)
+        except ValueError:
+            err = ValueError(
+                f"Error in function {inspect.stack()[1][3]}(): emoji_id was passed as an argument to get_emoji_information() and had type str but was not convertible to an ID."
+            )
+            logger.error(err)
+            raise err
 
-        if emoji_animated:
-            ext = "gif"
+        if emoji_name:
+            if emoji_animated := emoji_name.startswith("a:"):
+                emoji_name = emoji_name[2:]
+            elif emoji_name.startswith(":"):
+                emoji_name = emoji_name[1:]
+
+            if emoji_animated:
+                ext = "gif"
+            else:
+                ext = "png"
+            emoji_url = f"https://cdn.discordapp.com/emojis/{emoji_id}.{ext}?v=1"
         else:
-            ext = "png"
-        emoji_url = f"https://cdn.discordapp.com/emojis/{emoji_id}.{ext}?v=1"
+            # If I don't have the name for the emoji, I'll try to find it
+            for e in client.emojis:
+                if e.id == emoji_id:
+                    emoji = e
+                    break
 
-    try:
-        emoji_id_int = int(emoji_id)
-    except ValueError:
-        err = ValueError(
-            f"Error in function {inspect.stack()[1][3]}(): emoji_id was passed as an argument to get_emoji_information() and had type str but was not convertible to an ID."
-        )
-        logger.error(err)
-        raise err
+            if not emoji:
+                emoji = client.get_emoji(emoji_id)
 
-    return (emoji_id_int, emoji_name, emoji_animated, emoji_url)
+            if not emoji:
+                try:
+                    emoji = await client.fetch_application_emoji(emoji_id)
+                except Exception:
+                    emoji = None
+
+            if not emoji:
+                err = ArgumentError(
+                    f"Error in function {inspect.stack()[1][3]}(): emoji_id was passed as argument to get_emoji_information(), emoji_name wasn't, and couldn't find the emoji accessible to the client."
+                )
+                logger.error(err)
+                raise err
+
+            emoji_name = emoji.name
+            emoji_animated = emoji.animated
+            emoji_url = emoji.url
+
+    return (emoji_id, emoji_name, emoji_animated, emoji_url)
 
 
 @beartype
