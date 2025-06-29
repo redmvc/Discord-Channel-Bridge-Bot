@@ -204,7 +204,7 @@ class DBAppWhitelist(DBBase):
 @beartype
 async def sql_upsert(
     *,
-    table: _DMLTableArgument,
+    table: Any,
     indices: Iterable[str],
     ignored_cols: Iterable[str] | None = None,
     **kwargs: Any,
