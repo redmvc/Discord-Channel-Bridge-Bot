@@ -125,18 +125,21 @@ channel_lock: dict[int, asyncio.Lock] = {}
 
 # Type wildcard
 T = TypeVar("T", bound=Any)
-
-
-@overload
-async def get_channel_from_id(
-    channel_or_id: (
+CH = TypeVar(
+    "CH",
+    bound=(
         discord.guild.GuildChannel
         | discord.Thread
         | discord.DMChannel
         | discord.PartialMessageable
         | discord.abc.PrivateChannel
-        | int
     ),
+)
+
+
+@overload
+async def get_channel_from_id(
+    channel_or_id: int,
 ) -> (
     discord.guild.GuildChannel
     | discord.Thread
@@ -149,14 +152,7 @@ async def get_channel_from_id(
 
 @overload
 async def get_channel_from_id(
-    channel_or_id: (
-        discord.guild.GuildChannel
-        | discord.Thread
-        | discord.DMChannel
-        | discord.PartialMessageable
-        | discord.abc.PrivateChannel
-        | int
-    ),
+    channel_or_id: int,
     *,
     assert_text_or_thread: Literal[False],
 ) -> (
@@ -171,14 +167,27 @@ async def get_channel_from_id(
 
 @overload
 async def get_channel_from_id(
-    channel_or_id: (
-        discord.guild.GuildChannel
-        | discord.Thread
-        | discord.DMChannel
-        | discord.PartialMessageable
-        | discord.abc.PrivateChannel
-        | int
-    ),
+    channel_or_id: int,
+    *,
+    assert_text_or_thread: Literal[True],
+) -> discord.TextChannel | discord.Thread: ...
+
+
+@overload
+async def get_channel_from_id(channel_or_id: CH) -> CH: ...
+
+
+@overload
+async def get_channel_from_id(
+    channel_or_id: CH,
+    *,
+    assert_text_or_thread: Literal[False],
+) -> CH: ...
+
+
+@overload
+async def get_channel_from_id(
+    channel_or_id: discord.TextChannel | discord.Thread,
     *,
     assert_text_or_thread: Literal[True],
 ) -> discord.TextChannel | discord.Thread: ...
@@ -199,6 +208,8 @@ async def get_channel_from_id(
 ) -> (
     discord.guild.GuildChannel
     | discord.Thread
+    | discord.DMChannel
+    | discord.PartialMessageable
     | discord.abc.PrivateChannel
     | discord.PartialMessageable
     | discord.DMChannel
