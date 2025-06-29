@@ -1,6 +1,6 @@
 import asyncio
 import re
-from typing import TYPE_CHECKING, Any, AsyncIterator, Coroutine, Iterable, Literal
+from typing import Any, AsyncIterator, Coroutine, Iterable, Literal
 
 import discord
 from beartype import beartype
@@ -8,6 +8,7 @@ from sqlalchemy import Delete as SQLDelete
 from sqlalchemy import ScalarResult
 from sqlalchemy import Select as SQLSelect
 from sqlalchemy.exc import StatementError as SQLError
+from sqlalchemy.orm import Session as SQLSession
 
 import emoji_hash_map
 import globals
@@ -20,9 +21,6 @@ from database import (
     sql_retry,
 )
 from validations import ChannelTypeError, logger, validate_channels
-
-if TYPE_CHECKING:
-    from sqlalchemy.orm import Session as SQLSession
 
 
 @globals.command_tree.command(
@@ -1437,7 +1435,7 @@ async def bridge_thread_helper(
 @beartype
 async def stop_auto_bridging_threads_helper(
     channel_ids_to_remove: int | Iterable[int],
-    session: "SQLSession | None" = None,
+    session: SQLSession | None = None,
 ):
     """Remove a group of channels from the auto_bridge_thread_channels table and list.
 
@@ -1491,7 +1489,7 @@ async def stop_auto_bridging_threads_helper(
 @beartype
 async def validate_auto_bridge_thread_channels(
     channel_ids_to_check: int | Iterable[int],
-    session: "SQLSession | None" = None,
+    session: SQLSession | None = None,
 ):
     """Check whether each one of a list of channels are in auto_bridge_thread_channels and, if so, whether they should be and, if not, remove them from there.
 

@@ -1,7 +1,7 @@
 import asyncio
 import inspect
 from copy import deepcopy
-from typing import TYPE_CHECKING, Any, Callable, Coroutine, Literal, overload
+from typing import Any, Callable, Coroutine, Literal, overload
 
 import discord
 from beartype import beartype
@@ -11,6 +11,7 @@ from sqlalchemy import Select as SQLSelect
 from sqlalchemy import and_ as sql_and
 from sqlalchemy import or_ as sql_or
 from sqlalchemy.exc import StatementError as SQLError
+from sqlalchemy.orm import Session as SQLSession
 
 import globals
 from database import (
@@ -29,9 +30,6 @@ from validations import (
     validate_channels,
     validate_webhook,
 )
-
-if TYPE_CHECKING:
-    from sqlalchemy.orm import Session as SQLSession
 
 
 class Bridge:
@@ -144,7 +142,7 @@ class Bridges:
         self.webhooks = Webhooks()
 
     @beartype
-    async def load_from_database(self, session: "SQLSession | None" = None):
+    async def load_from_database(self, session: SQLSession | None = None):
         """Load all bridges saved in the bot's connected database.
 
         Parameters
@@ -360,7 +358,7 @@ class Bridges:
         target: discord.TextChannel | discord.Thread | int,
         webhook: discord.Webhook | None = None,
         update_db: bool = True,
-        session: "SQLSession | None" = None,
+        session: SQLSession | None = None,
     ) -> Bridge:
         """Create a new Bridge from source channel to target channel (and a new webhook if necessary).
 
@@ -564,7 +562,7 @@ class Bridges:
         source_channel: discord.TextChannel | discord.Thread | int | None = None,
         target_channel: discord.TextChannel | discord.Thread | int | None = None,
         update_db: bool = True,
-        session: "SQLSession | None" = None,
+        session: SQLSession | None = None,
         one_sided: bool = False,
     ) -> None:
         """Destroy Bridges from source and/or to target channel.

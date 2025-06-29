@@ -5,7 +5,6 @@ import inspect
 import re
 from copy import deepcopy
 from typing import (
-    TYPE_CHECKING,
     Any,
     Coroutine,
     Literal,
@@ -24,6 +23,7 @@ from sqlalchemy import Select as SQLSelect
 from sqlalchemy import and_ as sql_and
 from sqlalchemy import or_ as sql_or
 from sqlalchemy.exc import StatementError as SQLError
+from sqlalchemy.orm import Session as SQLSession
 from sqlalchemy.sql import func
 
 import commands
@@ -39,9 +39,6 @@ from database import (
     sql_retry,
 )
 from validations import ChannelTypeError, logger
-
-if TYPE_CHECKING:
-    from sqlalchemy.orm import Session as SQLSession
 
 
 class ThreadSplat(TypedDict, total=False):
@@ -695,7 +692,7 @@ async def bridge_message_to_target_channel(
     forwarded_message: discord.Message | None,
     forwarded_message_channel_is_nsfw: bool,
     thread_splat: ThreadSplat,
-    session: "SQLSession",
+    session: SQLSession,
 ) -> list[BridgedMessage] | None:
     """Bridge a message to a channel and return a list of dictionaries with information about the message bridged. Multiple dictionaries are returned in case a message has to be split into multiple ones due to message length.
 
@@ -791,7 +788,7 @@ async def _bridge_message_to_target_channel(
     forwarded_message: discord.Message | None,
     forwarded_message_channel_is_nsfw: bool,
     thread_splat: ThreadSplat,
-    session: "SQLSession",
+    session: SQLSession,
 ) -> list[BridgedMessage] | None:
     """Helper function to bridge a message to a channel."""
     # Replace Discord links in the message and embed text
@@ -1295,7 +1292,7 @@ async def edit_message_helper(
 @beartype
 async def replace_missing_emoji(
     message_content: str,
-    session: "SQLSession | None" = None,
+    session: SQLSession | None = None,
 ) -> str:
     """Return a version of the contents of a message that replaces any instances of an emoji that the bot can't find with matching ones, if possible.
 
@@ -1387,7 +1384,7 @@ async def replace_missing_emoji(
 async def replace_discord_links(
     content: None,
     channel: discord.TextChannel | discord.Thread,
-    session: "SQLSession",
+    session: SQLSession,
 ) -> None: ...
 
 
@@ -1395,7 +1392,7 @@ async def replace_discord_links(
 async def replace_discord_links(
     content: str,
     channel: discord.TextChannel | discord.Thread,
-    session: "SQLSession",
+    session: SQLSession,
 ) -> str: ...
 
 
@@ -1403,7 +1400,7 @@ async def replace_discord_links(
 async def replace_discord_links(
     content: str | None,
     channel: discord.TextChannel | discord.Thread,
-    session: "SQLSession",
+    session: SQLSession,
 ) -> str | None:
     """Return a version of the contents of a string that replaces any links to other messages within the same channel or parent channel to appropriately bridged ones.
 
