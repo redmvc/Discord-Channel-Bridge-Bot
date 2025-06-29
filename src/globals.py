@@ -247,14 +247,7 @@ def get_id_from_channel(
     if isinstance(channel_or_id, int):
         return channel_or_id
 
-    if channel_or_id.id:
-        return channel_or_id.id
-
-    err = ValueError(
-        f"Error in function {inspect.stack()[1][3]}(): argument passed to function get_id_from_channel() was not a valid channel nor an ID."
-    )
-    logger.error(err)
-    raise err
+    return channel_or_id.id
 
 
 @beartype
