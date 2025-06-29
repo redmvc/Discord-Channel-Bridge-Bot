@@ -21,10 +21,10 @@ from sqlalchemy import Delete as SQLDelete
 from sqlalchemy import ScalarResult
 from sqlalchemy import Select as SQLSelect
 from sqlalchemy import and_ as sql_and
-from sqlalchemy import func
 from sqlalchemy import or_ as sql_or
 from sqlalchemy.exc import StatementError as SQLError
 from sqlalchemy.orm import Session as SQLSession
+from sqlalchemy.sql import func
 
 import commands
 import emoji_hash_map
