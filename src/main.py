@@ -38,7 +38,7 @@ from database import (
     engine,
     sql_retry,
 )
-from validations import logger
+from validations import ChannelTypeError, logger
 
 
 class ThreadSplat(TypedDict, total=False):
@@ -487,7 +487,7 @@ async def bridge_message_helper(message: discord.Message):
                         # Try to find the author of the original message
                         reply_source_channel = await globals.get_channel_from_id(
                             reply_source_channel_id,
-                            assert_text_or_thread=True,
+                            ensure_text_or_thread=True,
                         )
                         source_replied_to = await reply_source_channel.fetch_message(
                             source_replied_to_id
@@ -535,7 +535,7 @@ async def bridge_message_helper(message: discord.Message):
 
                 target_channel = await globals.get_channel_from_id(
                     target_id,
-                    assert_text_or_thread=True,
+                    ensure_text_or_thread=True,
                 )
 
                 thread_splat: ThreadSplat = {}
@@ -1812,9 +1812,9 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                 try:
                     source_channel = await globals.get_channel_from_id(
                         int(source_message_map.source_channel),
-                        assert_text_or_thread=True,
+                        ensure_text_or_thread=True,
                     )
-                except AssertionError:
+                except ChannelTypeError:
                     return
 
                 source_channel_id = source_channel.id
@@ -2365,9 +2365,9 @@ async def reconnect():
             try:
                 channel = await globals.get_channel_from_id(
                     channel_id,
-                    assert_text_or_thread=True,
+                    ensure_text_or_thread=True,
                 )
-            except AssertionError:
+            except ChannelTypeError:
                 continue
 
             if channel.last_message_id and channel.last_message_id == message_id:

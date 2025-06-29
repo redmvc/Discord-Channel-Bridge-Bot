@@ -22,7 +22,13 @@ from aiolimiter import AsyncLimiter
 from beartype import beartype
 from typing_extensions import NotRequired
 
-from validations import ArgumentError, HTTPResponseError, logger, validate_channels
+from validations import (
+    ArgumentError,
+    ChannelTypeError,
+    HTTPResponseError,
+    logger,
+    validate_channels,
+)
 
 
 class Settings(TypedDict):
@@ -152,7 +158,7 @@ async def get_channel_from_id(
 async def get_channel_from_id(
     channel_or_id: int,
     *,
-    assert_text_or_thread: Literal[False] = False,
+    ensure_text_or_thread: Literal[False] = False,
 ) -> (
     discord.abc.GuildChannel
     | discord.abc.PrivateChannel
@@ -166,7 +172,7 @@ async def get_channel_from_id(
 async def get_channel_from_id(
     channel_or_id: int,
     *,
-    assert_text_or_thread: Literal[True],
+    ensure_text_or_thread: Literal[True],
 ) -> discord.TextChannel | discord.Thread: ...
 
 
@@ -178,7 +184,7 @@ async def get_channel_from_id(channel_or_id: CH) -> CH: ...
 async def get_channel_from_id(
     channel_or_id: CH,
     *,
-    assert_text_or_thread: Literal[False] = False,
+    ensure_text_or_thread: Literal[False] = False,
 ) -> CH: ...
 
 
@@ -186,7 +192,7 @@ async def get_channel_from_id(
 async def get_channel_from_id(
     channel_or_id: discord.TextChannel | discord.Thread,
     *,
-    assert_text_or_thread: Literal[True],
+    ensure_text_or_thread: Literal[True],
 ) -> discord.TextChannel | discord.Thread: ...
 
 
@@ -200,7 +206,7 @@ async def get_channel_from_id(
         | int
     ),
     *,
-    assert_text_or_thread: bool = False,
+    ensure_text_or_thread: bool = False,
 ) -> (
     discord.abc.GuildChannel
     | discord.abc.PrivateChannel
@@ -212,7 +218,7 @@ async def get_channel_from_id(
 
     #### Args:
         - `channel_or_id`: Either a Discord channel or an ID of same.
-        - `assert_text_or_thread`: Whether to assert that the channel is either a TextChannel or a Thread before returning. Defaults to False.
+        - `ensure_text_or_thread`: Whether to assert that the channel is either a TextChannel or a Thread before returning. Defaults to False.
 
     #### Returns:
         - If the argument is a channel, returns it unchanged; otherwise, returns a channel with the ID passed, or None if it couldn't be found.
@@ -227,8 +233,13 @@ async def get_channel_from_id(
     else:
         channel = channel_or_id
 
-    if assert_text_or_thread:
-        assert isinstance(channel, discord.TextChannel | discord.Thread)
+    if ensure_text_or_thread:
+        try:
+            assert isinstance(channel, discord.TextChannel | discord.Thread)
+        except AssertionError:
+            raise ChannelTypeError(
+                "`ensure_text_or_thread` was set to True but the channel or ID passed as argument does not refer to a TextChannel or a Thread."
+            )
 
     return channel
 

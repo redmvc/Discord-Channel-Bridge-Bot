@@ -105,7 +105,7 @@ class Bridge:
     async def source_channel(self) -> discord.TextChannel | discord.Thread:
         return await globals.get_channel_from_id(
             self.source_id,
-            assert_text_or_thread=True,
+            ensure_text_or_thread=True,
         )
 
     @property
@@ -117,7 +117,7 @@ class Bridge:
     async def target_channel(self) -> discord.TextChannel | discord.Thread:
         return await globals.get_channel_from_id(
             self.target_id,
-            assert_text_or_thread=True,
+            ensure_text_or_thread=True,
         )
 
     @property
