@@ -671,7 +671,7 @@ async def get_emoji_information(
     emoji : discord.PartialEmoji | discord.Emoji | None, optional
         A custom Discord emoji. Defaults to None, in which case `emoji_id` and `emoji_name` are used instead.
     emoji_id : int | str | None, optional
-        The ID of a a custom emoji. Defaults to None. Only used if `emoji` is not present.
+        The ID of a custom emoji. Defaults to None. Only used if `emoji` is not present.
     emoji_name : str | None, optional
         The name of the emoji. Defaults to None, in which case the client will try to find an emoji with ID `emoji_id`. If it's included, it must start with the string "a:" if the emoji animated. Only used if `emoji` is not present.
 
