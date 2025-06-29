@@ -481,22 +481,17 @@ async def auto_bridge_threads(interaction: discord.Interaction):
 
 
 @beartype
-async def mention_to_channel(
-    link_or_mention: str,
-) -> (
-    discord.abc.GuildChannel
-    | discord.abc.PrivateChannel
-    | discord.Thread
-    | discord.PartialMessageable
-    | None
-):
-    """Return the channel referenced by a channel mention or a Discord link to a channel.
+async def mention_to_channel(link_or_mention: str) -> globals.DiscordChannel | None:
+    """Return the channel referenced by a channel mention or a Discord link to a channel, if it's valid, or None if it isn't.
 
-    #### Args:
-        - `link_or_mention`: Either a mention of a Discord channel (`<#channel_id>`) or a Discord link to it (`https://discord.com/channels/server_id/channel_id`).
+    Parameters
+    ----------
+    link_or_mention : str
+        Either a mention of a Discord channel with format "<#channel_id>" or a Discord link to one with format "https://discord.com/channels/server_id/channel_id".
 
-    #### Returns:
-        - The channel whose ID is given by `channel_id`.
+    Returns
+    -------
+    `~discord.abc.GuildChannel` | `~discord.abc.PrivateChannel` | `~discord.Thread` | `~discord.PartialMessageable` | None
     """
     if link_or_mention.startswith("https://discord.com/channels"):
         try:
@@ -1236,10 +1231,14 @@ async def bridge_thread_helper(
 ):
     """Create threads matching the current one across bridges.
 
-    #### Args:
-        - `thread_to_bridge`: The thread to bridge.
-        - `user_id`: ID of the user that created the thread.
-        - `interaction`: The interaction that called this function, if any. Defaults to None.
+    Parameters
+    ----------
+    thread_to_bridge : `~discord.Thread`
+        The thread to bridge.
+    user_id : int
+        The ID of the user that created the thread.
+    interaction : `~discord.Interaction` | None, optional
+        The interaction that called this function, if any. Defaults to None.
     """
     thread_parent = await globals.get_channel_parent(thread_to_bridge)
 
@@ -1440,12 +1439,17 @@ async def stop_auto_bridging_threads_helper(
 ):
     """Remove a group of channels from the auto_bridge_thread_channels table and list.
 
-    #### Args:
-        - `channel_ids_to_remove`: The IDs of the channels to remove.
-        - `session`: SQL session for accessing the database. Optional, default None.
+    Parameters
+    ----------
+    channel_ids_to_remove : int | Iterable[int]
+        The IDs of the channels to remove.
+    session : `~sqlalchemy.orm.Session` | None, optional
+        An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
 
-    #### Raises:
-        - `SQLError`: Something went wrong accessing or modifying the database.
+    Raises
+    ------
+    `sqlalchemy.exc.StatementError`
+        Something went wrong accessing or modifying the database.
     """
     if not isinstance(channel_ids_to_remove, set):
         if isinstance(channel_ids_to_remove, int):
@@ -1489,12 +1493,17 @@ async def validate_auto_bridge_thread_channels(
 ):
     """Check whether each one of a list of channels are in auto_bridge_thread_channels and, if so, whether they should be and, if not, remove them from there.
 
-    #### Args:
-        - `channel_ids_to_check`: IDs of the channels to check.
-        - `session`: SQL session for accessing the database. Optional, default None.
+    Parameters
+    ----------
+    channel_ids_to_check : int | Iterable[int]
+        The IDs of the channels to check.
+    session : `~sqlalchemy.orm.Session` | None, optional
+        An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
 
-    #### Raises:
-        - `SQLError`: Something went wrong accessing or modifying the database.
+    Raises
+    ------
+    `sqlalchemy.exc.StatementError`
+        Something went wrong accessing or modifying the database.
     """
     if not isinstance(channel_ids_to_check, set):
         if isinstance(channel_ids_to_check, int):
