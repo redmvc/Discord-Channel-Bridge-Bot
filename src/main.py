@@ -2376,14 +2376,13 @@ async def reconnect():
 
             # There might be unbridged messages, try to find them
             try:
-                latest_bridged_message = channel.last_message
-                if not latest_bridged_message:
-                    latest_bridged_message = await channel.fetch_message(message_id)
+                latest_bridged_message = channel.get_partial_message(message_id)
 
                 messages_after_latest_bridged = [
                     message
                     async for message in channel.history(
-                        after=latest_bridged_message.created_at, oldest_first=True
+                        after=latest_bridged_message.created_at,
+                        oldest_first=True,
                     )
                 ]
             except discord.Forbidden as e:
