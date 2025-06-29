@@ -863,6 +863,10 @@ class Bridges:
     def get_channels_with_outbound_bridges(self) -> set[int]:
         """
         Return a set with the IDs of all channels that have outbound bridges coming from them.
+
+        Returns
+        -------
+        set[int]
         """
         return set(self._outbound_bridges.keys())
 
