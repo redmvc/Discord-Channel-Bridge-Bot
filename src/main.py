@@ -53,11 +53,16 @@ async def on_ready():
 
     This function is called when the client is done preparing the data received from Discord. Usually after login is successful and the Client.guilds and co. are filled up.
 
-    #### Raises:
-        - `ChannelTypeError`: The source or target channels of some existing Bridge are not text channels nor threads off a text channel.
-        - `WebhookChannelError`: Webhook of some existing Bridge is not attached to Bridge's target channel.
-        - `HTTPException`: Deleting an existing webhook or creating a new one failed.
-        - `Forbidden`: You do not have permissions to create or delete webhooks for some of the channels in existing Bridges.
+    Raises
+    ------
+    ChannelTypeError
+        The source or target channels of some existing Bridge are not text channels nor threads off a text channel.
+    WebhookChannelError
+        Webhook of some existing Bridge is not attached to Bridge's target channel.
+    `~discord.HTTPException`
+        Deleting an existing webhook or creating a new one failed.
+    `~discord.Forbidden`
+        You do not have permissions to create or delete webhooks for some of the channels in existing Bridges.
     """
     if globals.is_ready:
         return
@@ -224,9 +229,12 @@ async def on_typing(
 ):
     """Make the bot start typing across bridges when a user on the source end of a bridge does so.
 
-    #### Args:
-        - `channel`: The a user is typing in.
-        - `user`: The user that is typing in the channel.
+    Parameters
+    ----------
+    channel : `~discord.abc.Messageable`
+        The a user is typing in.
+    user : `~discord.User` | `~discord.Member`
+        The user that is typing in the channel.
     """
     if not (
         globals.is_ready
@@ -261,13 +269,23 @@ async def on_typing(
 async def on_message(message: discord.Message):
     """Mirror a message across bridges, if possible.
 
-    This function is called when a Message is created and sent. Requires Intents.messages to be enabled.
+    This function is called when a Message is created and sent. Requires `~discord.Intents.messages` to be enabled.
 
-    #### Raises:
-        - `HTTPException`: Sending a message failed.
-        - `NotFound`: One of the webhooks was not found.
-        - `Forbidden`: The authorization token for one of the webhooks is incorrect.
-        - `ValueError`: The length of embeds was invalid, there was no token associated with one of the webhooks or ephemeral was passed with the improper webhook type or there was no state attached with one of the webhooks when giving it a view.
+    Parameters
+    ----------
+    message : `~discord.Message`
+        The message to bridge.
+
+    Raises
+    ------
+    `~discord.HTTPException`
+        Sending a message failed.
+    `~discord.NotFound`
+        One of the webhooks was not found.
+    `~discord.Forbidden`
+        The authorization token for one of the webhooks is incorrect.
+    ValueError
+        The length of embeds was invalid, there was no token associated with one of the webhooks or ephemeral was passed with the improper webhook type or there was no state attached with one of the webhooks when giving it a view.
     """
     lock = asyncio.Lock()
     async with lock:
@@ -314,16 +332,25 @@ async def on_message(message: discord.Message):
 
 @beartype
 async def bridge_message_helper(message: discord.Message):
-    """Mirror a message to any of its outbound bridge targets.
+    """Mirror a message to all of its outbound bridge targets.
 
-    #### Args:
-        - `message`: The message to bridge.
+    This function is called when a Message is created and sent. Requires `~discord.Intents.messages` to be enabled.
 
-    #### Raises:
-        - `HTTPException`: Sending a message failed.
-        - `NotFound`: One of the webhooks was not found.
-        - `Forbidden`: The authorization token for one of the webhooks is incorrect.
-        - `ValueError`: The length of embeds was invalid, there was no token associated with one of the webhooks or ephemeral was passed with the improper webhook type or there was no state attached with one of the webhooks when giving it a view.
+    Parameters
+    ----------
+    message : `~discord.Message`
+        The message to bridge.
+
+    Raises
+    ------
+    `~discord.HTTPException`
+        Sending a message failed.
+    `~discord.NotFound`
+        One of the webhooks was not found.
+    `~discord.Forbidden`
+        The authorization token for one of the webhooks is incorrect.
+    ValueError
+        The length of embeds was invalid, there was no token associated with one of the webhooks or ephemeral was passed with the improper webhook type or there was no state attached with one of the webhooks when giving it a view.
     """
     message_channel_id = message.channel.id
     outbound_bridges = bridges.get_outbound_bridges(message_channel_id)
@@ -669,27 +696,46 @@ async def bridge_message_to_target_channel(
 ) -> list[BridgedMessage] | None:
     """Bridge a message to a channel and return a list of dictionaries with information about the message bridged. Multiple dictionaries are returned in case a message has to be split into multiple ones due to message length.
 
-    #### Args:
-        - `message`: The message being bridged.
-        - `message_content`: Its contents.
-        - `message_attachments`: Its attachments.
-        - `message_embeds`: Its embeds.
-        - `people_to_ping`: A set of IDs of people that were @-mentioned in the original message and who haven't already been pinged.
-        - `target_channel`: The channel the message is being bridged to.
-        - `webhook`: The webhook that will send the message.
-        - `webhook_channel`: The parent channel the webhook is attached to.
-        - `message_is_reply`: Whether the message being bridged is replying to another message.
-        - `replied_to_author`: The author of the message the message being bridged is replying to.
-        - `replied_to_content`: The content of the message the message being bridged is replying to.
-        - `bridged_reply_to`: The ID of a message the message being bridged is replying to on the target channel.
-        - `reply_has_ping`: Whether the reply is pinging the original message.
-        - `forwarded_message`: A message being forwarded, in case it is a forward.
-        - `forwarded_message_channel_is_nsfw`: Whether the origin channel of the message being forwarded from is NSFW.
-        - `thread_splat`: A splat with the thread this message is being bridged to, if any.
-        - `session`: A connection to the database.
+    Parameters
+    ----------
+    sent_message : `~discord.Message`
+        The message being bridged.
+    message_content : str
+        Its contents.
+    message_attachments : list[`~discord.Attachment`]
+        Its attachments.
+    message_embeds : list[`~discord.Embed`]
+        Its embeds.
+    people_to_ping : set[int]
+        A set of IDs of people that were @-mentioned in the original message and who haven't already been pinged.
+    target_channel : `~discord.TextChannel` | `~discord.Thread`
+        The channel or thread the message is being bridged to.
+    webhook : `~discord.Webhook`
+        The webhook that will send the message.
+    webhook_channel : `~discord.TextChannel`
+        The channel the webhook is attached to.
+    message_is_reply : bool
+        Whether the message being bridged is replying to another message.
+    replied_to_author : `~discord.User` | `~discord.Member` | None
+        The author of the message the message being bridged is replying to, if it is a reply.
+    replied_to_content : str | None
+        The content of the message the message being bridged is replying to. Defaults to None, in which case it will be fetched from the matching message in the target channel if it can.
+    bridged_reply_to : int | None
+        The ID of a message the message being bridged is replying to in the target channel.
+    reply_has_ping : bool
+        Whether the reply is pinging the author of the original message
+    forwarded_message : `~discord.Message` | None
+        A message being forwarded, in case it is a forward.
+    forwarded_message_channel_is_nsfw : bool
+        Whether the origin channel of the message being forwarded from is NSFW.
+    thread_splat : ThreadSplat
+        A splat with the thread this message is being bridged to, if any.
+    session : `~sqlalchemy.orm.Session`
+        An SQLAlchemy ORM Session connecting to the database.
 
-    #### Returns:
-        - `list[BridgedMessage]`: A dictionary with data about the bridged message (or multiple messages in case it had to be split).
+    Returns
+    -------
+    list[BridgedMessage] | None
     """
     logger.debug(
         "Bridging message with ID %s to channel with ID %s.",
@@ -744,6 +790,7 @@ async def _bridge_message_to_target_channel(
     thread_splat: ThreadSplat,
     session: SQLSession,
 ) -> list[BridgedMessage] | None:
+    """Helper function to bridge a message to a channel."""
     # Replace Discord links in the message and embed text
     message_content = await replace_discord_links(
         message_content,
@@ -994,13 +1041,19 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
 
     This function is called when a message is edited. Unlike `on_message_edit()`, this is called regardless of the state of the internal message cache.
 
-    #### Args:
-        - `payload`: The raw event payload data.
+    Parameters
+    ----------
+    payload : `~discord.RawMessageUpdateEvent`
+        The raw event payload data.
 
-    #### Raises:
-        - `HTTPException`: Editing a message failed.
-        - `Forbidden`: Tried to edit a message that is not yours.
-        - `ValueError`: The length of embeds was invalid, there was no token associated with a webhook or a webhook had no state.
+    Raises
+    ------
+    `~discord.HTTPException`
+        Editing a message failed.
+    `~discord.Forbidden`
+        Tried to edit a message that is not yours.
+    ValueError
+        The length of embeds was invalid, there was no token associated with a webhook or a webhook had no state.
     """
     lock = globals.message_lock.get(payload.message_id)
     if not lock:
@@ -1040,17 +1093,27 @@ async def edit_message_helper(
 ):
     """Edit bridged versions of a message, if possible.
 
-    #### Args:
-        - `message_content`: The updated contents of the message.
-        - `embeds`: The updated embeds of the message.
-        - `message_id`: The message ID.
-        - `channel_id`: The ID of the channel the message being edited is in.
-        - `message_is_reply`: Whether the message being edited is a reply.
+    Parameters
+    ----------
+    message_content : str
+        The updated contents of the message.
+    embeds : list[`~discord.Embed`]
+        The updated embeds of the message.
+    message_id : int
+        The message ID.
+    channel_id : int
+        The ID of the channel the message being edited is in.
+    message_is_reply : bool
+        Whether the message being edited is a reply.
 
-    #### Raises:
-        - `HTTPException`: Editing a message failed.
-        - `Forbidden`: Tried to edit a message that is not yours.
-        - `ValueError`: The length of embeds was invalid, there was no token associated with a webhook or a webhook had no state.
+    Raises
+    ------
+    `~discord.HTTPException`
+        Editing a message failed.
+    `~discord.Forbidden`
+        Tried to edit a message that is not the Bridge's.
+    ValueError
+        The length of embeds was invalid, there was no token associated with a webhook or a webhook had no state.
     """
     logger.debug("Bridging edit to message with ID %s.", message_id)
 
@@ -1233,15 +1296,27 @@ async def replace_missing_emoji(
 ) -> str:
     """Return a version of the contents of a message that replaces any instances of an emoji that the bot can't find with matching ones, if possible.
 
-    #### Args:
-        - `message_content`: The content of the message to process.
-        - `session`: A connection to the database. Defaults to None, in which case a new one will be created for the DB operations.
+    Parameters
+    ----------
+    message_content : str
+        The content of the message to process.
+    session : `~sqlalchemy.orm.Session` | None, optional
+        An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
 
-    #### Raises
-        - `HTTPResponseError`: HTTP request to fetch image returned a status other than 200.
-        - `InvalidURL`: URL generated from emoji was not valid.
-        - `RuntimeError`: Session connection failed.
-        - `ServerTimeoutError`: Connection to server timed out.
+    Returns
+    -------
+    str
+
+    Raises
+    ------
+    `~discord.HTTPResponseError`
+        HTTP request to fetch image returned a status other than 200.
+    `~discord.InvalidURL`
+        URL generated from emoji was not valid.
+    `~discord.RuntimeError`
+        Session connection failed.
+    `~discord.ServerTimeoutError`
+        Connection to server timed out.
     """
     if not globals.emoji_server:
         # If we don't have an emoji server to store our own versions of emoji in then there's nothing we can do
@@ -1329,14 +1404,25 @@ async def replace_discord_links(
 ) -> str | None:
     """Return a version of the contents of a string that replaces any links to other messages within the same channel or parent channel to appropriately bridged ones.
 
-    #### Args:
-        - `content`: The string to process.
-        - `channel`: The channel this message is being processed for.
-        - `session`: A connection to the database.
+    Parameters
+    ----------
+    content : str | None
+        The string to process. If set to None, this function returns None.
+    channel : `~discord.TextChannel` | `~discord.Thread`
+        The channel this message is being processed for.
+    session : `~sqlalchemy.orm.Session`
+        An SQLAlchemy ORM Session connecting to the database.
 
-    #### Raises
-        - `RuntimeError`: Session connection failed.
-        - `ServerTimeoutError`: Connection to server timed out.
+    Returns
+    -------
+    str | None
+
+    Raises
+    ------
+    `~discord.RuntimeError`
+        Session connection failed.
+    `~discord.ServerTimeoutError`
+        Connection to server timed out.
     """
     if content is None:
         return None
@@ -1426,15 +1512,23 @@ async def replace_discord_links(
 
 @globals.client.event
 async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
-    """This function is called when a message is deleted. Unlike `on_message_delete()`, this is called regardless of the message being in the internal message cache or not.
+    """Delete bridged versions of a message.
 
-    #### Args:
-        - `payload`: The raw event payload data.
+    This function is called when a message is deleted. Unlike `on_message_delete()`, this is called regardless of the message being in the internal message cache or not.
 
-    #### Raises:
-        - `HTTPException`: Deleting a message failed.
-        - `Forbidden`: Tried to delete a message that is not yours.
-        - `ValueError`: A webhook does not have a token associated with it.
+    Parameters
+    ----------
+    payload : `~discord.RawMessageDeleteEvent`
+        The raw event payload data.
+
+    Raises
+    ------
+    `~discord.HTTPException`
+        Deleting a message failed.
+    `~discord.Forbidden`
+        Tried to delete a message that is not yours.
+    ValueError
+        A webhook does not have a token associated with it.
     """
     lock = globals.message_lock.get(payload.message_id)
     if not lock:
@@ -1456,14 +1550,21 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
 async def delete_message_helper(message_id: int, channel_id: int):
     """Delete bridged versions of a message, if possible.
 
-    #### Args:
-        - `message_id`: The message ID.
-        - `channel_id`: The ID of the channel the message being edited is in.
+    Parameters
+    ----------
+    message_id : int
+        The message ID.
+    channel_id : int
+        The ID of the channel the message being deleted is in.
 
-    #### Raises:
-        - `HTTPException`: Deleting a message failed.
-        - `Forbidden`: Tried to delete a message that is not yours.
-        - `ValueError`: A webhook does not have a token associated with it.
+    Raises
+    ------
+    `~discord.HTTPException`
+        Deleting a message failed.
+    `~discord.Forbidden`
+        Tried to delete a message that is not yours.
+    ValueError
+        A webhook does not have a token associated with it.
     """
     logger.debug("Bridging deletion of message with ID %s.", message_id)
 
@@ -1623,14 +1724,21 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
 
     This function is called when a message has a reaction added. Unlike `on_reaction_add()`, this is called regardless of the state of the internal message cache.
 
-    #### Args:
-        - `payload`: The raw event payload data.
+    Parameters
+    ----------
+    payload : `~discord.RawReactionActionEvent`
+        The raw event payload data.
 
-    #### Raises
-        - `HTTPResponseError`: HTTP request to fetch image returned a status other than 200.
-        - `InvalidURL`: URL generated from emoji was not valid.
-        - `RuntimeError`: Session connection failed.
-        - `ServerTimeoutError`: Connection to server timed out.
+    Raises
+    ------
+    `~discord.HTTPResponseError`
+        HTTP request to fetch image returned a status other than 200.
+    `~discord.InvalidURL`
+        URL generated from emoji was not valid.
+    `~discord.RuntimeError`
+        Session connection failed.
+    `~discord.ServerTimeoutError`
+        Connection to server timed out.
     """
     if not await globals.wait_until_ready():
         return
@@ -1936,8 +2044,10 @@ async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
 
     This function is called when a message has a reaction removed. Unlike `on_reaction_remove()`, this is called regardless of the state of the internal message cache.
 
-    #### Args:
-        - `payload`: The raw event payload data.
+    Parameters
+    ----------
+    payload : `~discord.RawReactionActionEvent`
+        The raw event payload data.
     """
     if not await globals.wait_until_ready():
         return
@@ -1992,8 +2102,10 @@ async def on_raw_reaction_clear_emoji(payload: discord.RawReactionClearEmojiEven
 
     This function is called when a message has a specific reaction removed it. Unlike `on_reaction_clear_emoji()`, this is called regardless of the state of the internal message cache.
 
-    #### Args:
-        - `payload`: The raw event payload data.
+    Parameters
+    ----------
+    payload : `~discord.RawReactionClearEmojiEvent`
+        The raw event payload data.
     """
     if not await globals.wait_until_ready():
         return
@@ -2021,8 +2133,10 @@ async def on_raw_reaction_clear(payload: discord.RawReactionClearEvent):
 
     This function is called when a message has all its reactions removed. Unlike `on_reaction_clear()`, this is called regardless of the state of the internal message cache.
 
-    #### Args:
-        - `payload`: The raw event payload data.
+    Parameters
+    ----------
+    payload : `~discord.RawReactionClearEvent`
+        The raw event payload data.
     """
     if not await globals.wait_until_ready():
         return
@@ -2049,8 +2163,10 @@ async def unreact(
 ):
     """Remove all reactions by the bot using a given emoji (or all emoji) on messages bridged from the current one (but not the current one itself).
 
-    #### Args:
-        - `payload`: The argument of the call to `on_raw_reaction_remove()`, `on_raw_reaction_clear_emoji()`, or `on_raw_reaction_clear()`.
+    Parameters
+    ----------
+    payload : `~discord.RawReactionActionEvent` | `~discord.RawReactionClearEmojiEvent` | `~discord.RawReactionClearEvent`
+        The argument of the call to `on_raw_reaction_remove()`, `on_raw_reaction_clear_emoji()`, or `on_raw_reaction_clear()`.
     """
     if isinstance(payload, discord.RawReactionClearEvent):
         # Clear all reactions
@@ -2230,8 +2346,10 @@ async def on_thread_create(thread: discord.Thread):
 
     This function is called whenever a thread is created.
 
-    #### Args:
-        - `thread`: The thread that was created.
+    Parameters
+    ----------
+    thread : `~discord.Thread`
+        The thread that was created.
     """
     # Bridge a thread from a channel that has auto_bridge_threads enabled
     if not isinstance(thread.parent, discord.TextChannel):
@@ -2300,9 +2418,7 @@ async def on_guild_remove(server: discord.Guild):
 
 @globals.client.event
 async def on_disconnect():
-    """
-    Mark the bot as disconnected.
-    """
+    """Mark the bot as disconnected."""
     globals.is_connected = False
 
 
@@ -2317,9 +2433,7 @@ async def on_resumed():
 
 
 async def reconnect():
-    """
-    Mark the bot as connected and try to check for new messages that haven't been bridged.
-    """
+    """Mark the bot as connected and try to check for new messages that haven't been bridged."""
     if (not globals.is_ready) or globals.is_connected:
         return
 
