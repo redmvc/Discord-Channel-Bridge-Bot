@@ -24,19 +24,9 @@ from typing_extensions import NotRequired
 
 from validations import ArgumentError, ChannelTypeError, HTTPResponseError, logger
 
-# discord.guild.GuildChannel isn't working in commands.py for some reason
-GuildChannel = (
-    discord.VoiceChannel
-    | discord.StageChannel
-    | discord.ForumChannel
-    | discord.TextChannel
-    | discord.CategoryChannel
-)
-
 
 class Settings(TypedDict):
-    """
-    An Typed Dictionary with the bot's settings. The `settings.json` file must contain a `"context"` entry whose value is another key in the file with the attributes below. For example:
+    """A TypedDict with the bot's settings. The `settings.json` file must contain a `"context"` entry whose value is another key in the file with the attributes below. For example:
 
     .. code-block:: json
         {
@@ -136,92 +126,206 @@ channel_lock: dict[int, asyncio.Lock] = {}
 # Type wildcard
 T = TypeVar("T", bound=Any)
 
-
-@overload
-async def get_channel_from_id(
-    channel_or_id: (
-        GuildChannel
-        | discord.Thread
-        | discord.DMChannel
-        | discord.PartialMessageable
-        | discord.abc.PrivateChannel
-        | int
-    ),
-) -> (
-    GuildChannel
-    | discord.Thread
+DiscordChannel = (
+    discord.abc.GuildChannel
     | discord.abc.PrivateChannel
-    | discord.PartialMessageable
-    | discord.DMChannel
-    | None
-): ...
-
-
-@overload
-async def get_channel_from_id(
-    channel_or_id: (
-        GuildChannel
-        | discord.Thread
-        | discord.DMChannel
-        | discord.PartialMessageable
-        | discord.abc.PrivateChannel
-        | int
-    ),
-    *,
-    assert_text_or_thread: Literal[False],
-) -> (
-    GuildChannel
     | discord.Thread
-    | discord.abc.PrivateChannel
     | discord.PartialMessageable
-    | discord.DMChannel
-    | None
-): ...
+)
+CH = TypeVar("CH", bound=DiscordChannel)
+
+
+@overload
+async def get_channel_from_id(channel_or_id: int) -> DiscordChannel | None:
+    """Return a channel with the ID passed as argument, or None if it couldn't be found.
+
+    Parameters
+    ----------
+    channel_or_id : int
+        The ID of a channel.
+
+    Returns
+    -------
+    :class:`~discord.abc.GuildChannel` | :class:`~discord.abc.PrivateChannel` | :class:`~discord.Thread` | :class:`~discord.PartialMessageable` | None
+
+    Raises
+    ------
+    :class:`~discord.InvalidData`
+        An unknown channel type was received from Discord when trying to find a channel from the ID.
+    :class:`~discord.HTTPException`
+        Retrieving a channel from the ID failed.
+    :class:`~discord.NotFound`
+        Invalid channel ID.
+    :class:`~discord.Forbidden`
+        The client does not not have permission to fetch the channel with that ID.
+    """
+    ...
 
 
 @overload
 async def get_channel_from_id(
-    channel_or_id: (
-        GuildChannel
-        | discord.Thread
-        | discord.DMChannel
-        | discord.PartialMessageable
-        | discord.abc.PrivateChannel
-        | int
-    ),
+    channel_or_id: int,
     *,
-    assert_text_or_thread: Literal[True],
-) -> discord.TextChannel | discord.Thread: ...
+    ensure_text_or_thread: Literal[False] = False,
+) -> DiscordChannel | None:
+    """Return a channel with the ID passed as argument, or None if it couldn't be found.
+
+    Parameters
+    ----------
+    channel_or_id : int
+        The ID of a channel.
+    ensure_text_or_thread : bool, optional
+        Whether to assert that the channel is either a Discord text channel or a Thread before returning. Defaults to False.
+
+    Returns
+    -------
+    :class:`~discord.abc.GuildChannel` | :class:`~discord.abc.PrivateChannel` | :class:`~discord.Thread` | :class:`~discord.PartialMessageable` | None
+
+    Raises
+    ------
+    :class:`~discord.InvalidData`
+        An unknown channel type was received from Discord when trying to find a channel from the ID.
+    :class:`~discord.HTTPException`
+        Retrieving a channel from the ID failed.
+    :class:`~discord.NotFound`
+        Invalid channel ID.
+    :class:`~discord.Forbidden`
+        The client does not not have permission to fetch the channel with that ID.
+    """
+    ...
+
+
+@overload
+async def get_channel_from_id(
+    channel_or_id: int,
+    *,
+    ensure_text_or_thread: Literal[True],
+) -> discord.TextChannel | discord.Thread:
+    """Return the TextChannel or Thread with the ID passed as argument, or None if it couldn't be found.
+
+    Parameters
+    ----------
+    channel_or_id : int
+        The ID of a channel.
+    ensure_text_or_thread : bool, optional
+        Whether to assert that the channel is either a Discord text channel or a Thread before returning. Defaults to False.
+
+    Returns
+    -------
+    :class:`~discord.TextChannel` | :class:`~discord.Thread`
+
+    Raises
+    ------
+    ChannelTypeError
+        The channel with the ID passed as argument is not a Discord text channel or a Thread.
+    :class:`~discord.InvalidData`
+        An unknown channel type was received from Discord when trying to find a channel from the ID.
+    :class:`~discord.HTTPException`
+        Retrieving a channel from the ID failed.
+    :class:`~discord.NotFound`
+        Invalid channel ID.
+    :class:`~discord.Forbidden`
+        The client does not not have permission to fetch the channel with that ID.
+    """
+    ...
+
+
+@overload
+async def get_channel_from_id(channel_or_id: CH) -> CH:
+    """Return the channel passed as argument.
+
+    Parameters
+    ----------
+    channel_or_id : :class:`~discord.abc.GuildChannel` | :class:`~discord.abc.PrivateChannel` | :class:`~discord.Thread` | :class:`~discord.PartialMessageable`
+        A Discord channel.
+
+    Returns
+    -------
+    :class:`~discord.abc.GuildChannel` | :class:`~discord.abc.PrivateChannel` | :class:`~discord.Thread` | :class:`~discord.PartialMessageable`
+    """
+    ...
+
+
+@overload
+async def get_channel_from_id(
+    channel_or_id: CH,
+    *,
+    ensure_text_or_thread: Literal[False] = False,
+) -> CH:
+    """Return the channel passed as argument.
+
+    Parameters
+    ----------
+    channel_or_id : :class:`~discord.abc.GuildChannel` | :class:`~discord.abc.PrivateChannel` | :class:`~discord.Thread` | :class:`~discord.PartialMessageable`
+        A Discord channel.
+    ensure_text_or_thread : bool, optional
+        Whether to assert that the channel is either a Discord text channel or a Thread before returning. Defaults to False.
+
+    Returns
+    -------
+    :class:`~discord.abc.GuildChannel` | :class:`~discord.abc.PrivateChannel` | :class:`~discord.Thread` | :class:`~discord.PartialMessageable`
+    """
+    ...
+
+
+@overload
+async def get_channel_from_id(
+    channel_or_id: DiscordChannel,
+    *,
+    ensure_text_or_thread: Literal[True],
+) -> discord.TextChannel | discord.Thread:
+    """Return the channel passed as argument.
+
+    Parameters
+    ----------
+    channel_or_id : :class:`~discord.TextChannel` | :class:`~discord.Thread`
+        A Discord channel.
+    ensure_text_or_thread : bool, optional
+        Whether to assert that the channel is either a Discord text channel or a Thread before returning. Defaults to False.
+
+    Returns
+    -------
+    :class:`~discord.TextChannel` | :class:`~discord.Thread`
+
+    Raises
+    ------
+    ChannelTypeError
+        The channel passed as argument is not a Discord text channel or a Thread.
+    """
+    ...
 
 
 @beartype
 async def get_channel_from_id(
-    channel_or_id: (
-        GuildChannel
-        | discord.Thread
-        | discord.DMChannel
-        | discord.PartialMessageable
-        | discord.abc.PrivateChannel
-        | int
-    ),
+    channel_or_id: DiscordChannel | int,
     *,
-    assert_text_or_thread: bool = False,
-) -> (
-    GuildChannel
-    | discord.Thread
-    | discord.abc.PrivateChannel
-    | discord.PartialMessageable
-    | discord.DMChannel
-    | None
-):
-    """Ensure that this function's argument is a valid Discord channel, when it may instead be a channel ID.
+    ensure_text_or_thread: bool = False,
+) -> DiscordChannel | None:
+    """If the argument is a channel, return it unchanged; otherwise, return a channel with the ID passed as argument, or None if it couldn't be found.
 
-    #### Args:
-        - `channel_or_id`: Either a Discord channel or an ID of same.
-        - `assert_text_or_thread`: Whether to assert that the channel is either a TextChannel or a Thread before returning. Defaults to False.
+    Parameters
+    ----------
+    channel_or_id : :class:`~discord.abc.GuildChannel` | :class:`~discord.abc.PrivateChannel` | :class:`~discord.Thread` | :class:`~discord.PartialMessageable` | int
+        Either a Discord channel or an ID of same.
+    ensure_text_or_thread : bool, optional
+        Whether to assert that the channel is either a Discord text channel or a Thread before returning. Defaults to False.
 
-    #### Returns:
-        - If the argument is a channel, returns it unchanged; otherwise, returns a channel with the ID passed, or None if it couldn't be found.
+    Returns
+    -------
+    :class:`~discord.abc.GuildChannel` | :class:`~discord.abc.PrivateChannel` | :class:`~discord.Thread` | :class:`~discord.PartialMessageable` | None
+
+    Raises
+    ------
+    ChannelTypeError
+        `ensure_text_or_thread` was set to True but the channel or ID passed as argument does not refer to a Discord text channel or a Thread.
+    :class:`~discord.InvalidData`
+        An unknown channel type was received from Discord when trying to find a channel from the ID.
+    :class:`~discord.HTTPException`
+        Retrieving a channel from the ID failed.
+    :class:`~discord.NotFound`
+        Invalid channel ID.
+    :class:`~discord.Forbidden`
+        The client does not not have permission to fetch the channel with that ID.
     """
     if isinstance(channel_or_id, int):
         channel = client.get_channel(channel_or_id)
@@ -233,60 +337,131 @@ async def get_channel_from_id(
     else:
         channel = channel_or_id
 
-    if assert_text_or_thread:
-        assert isinstance(channel, discord.TextChannel | discord.Thread)
+    if ensure_text_or_thread:
+        try:
+            assert isinstance(channel, discord.TextChannel | discord.Thread)
+        except AssertionError:
+            raise ChannelTypeError(
+                "`ensure_text_or_thread` was set to True but the channel or ID passed as argument does not refer to a Discord text channel or a Thread."
+            )
 
     return channel
 
 
+@overload
+def get_id_from_channel(channel_or_id: int) -> int:
+    """Return the argument unchanged.
+
+    Parameters
+    ----------
+    channel_or_id : int
+        The ID of a Discord channel.
+
+    Returns
+    -------
+    int
+    """
+    ...
+
+
+@overload
+def get_id_from_channel(channel_or_id: DiscordChannel) -> int:
+    """Return the ID of the Discord channel passed as argument.
+
+    Parameters
+    ----------
+    channel_or_id : :class:`~discord.abc.GuildChannel` | :class:`~discord.abc.PrivateChannel` | :class:`~discord.Thread` | :class:`~discord.PartialMessageable`
+        A Discord channel.
+
+    Returns
+    -------
+    int
+    """
+    ...
+
+
 @beartype
-def get_id_from_channel(
-    channel_or_id: GuildChannel | discord.Thread | discord.abc.PrivateChannel | int,
-) -> int:
-    """Return the ID of the channel passed as argument, or the argument itself if it is already an ID.
+def get_id_from_channel(channel_or_id: DiscordChannel | int) -> int:
+    """Return the ID of the Discord channel passed as argument, or the argument itself if it is already an ID.
 
-    #### Args:
-        - `channel_or_id`: A Discord channel or its ID.
+    Parameters
+    ----------
+    channel_or_id : :class:`~discord.abc.GuildChannel` | :class:`~discord.abc.PrivateChannel` | :class:`~discord.Thread` | :class:`~discord.PartialMessageable` | int
+        A Discord channel.
 
-    #### Returns:
-        - `int`: The ID of the channel passed as argument.
+    Returns
+    -------
+    int
     """
     if isinstance(channel_or_id, int):
         return channel_or_id
 
-    if channel_or_id.id:
-        return channel_or_id.id
+    return channel_or_id.id
 
-    err = ValueError(
-        f"Error in function {inspect.stack()[1][3]}(): argument passed to function get_id_from_channel() was not a valid channel nor an ID."
-    )
-    logger.error(err)
-    raise err
+
+@overload
+async def get_channel_parent(channel_or_id: int) -> discord.TextChannel:
+    """Fetch the channel the ID passed as argument matches and return its parent or the channel itself if it does not have a parent. Raises a ChannelTypeError if the channel referred to by the argument is not a Discord text channel or a thread off one.
+
+    Parameters
+    ----------
+    channel_or_id : int
+        The ID of a Discord channel.
+
+    Returns
+    -------
+    :class:`~discord.TextChannel`
+
+    Raises
+    ------
+    ChannelTypeError
+        The ID passed as argument does not refer to a Discord text channel or a Thread.
+    """
+    ...
+
+
+@overload
+async def get_channel_parent(channel_or_id: DiscordChannel) -> discord.TextChannel:
+    """Return the parent channel of the argument, or the argument itself if it does not have a parent. Raises a ChannelTypeError if the channel passed as argument is not a Discord text channel or a thread off one.
+
+    Parameters
+    ----------
+    channel_or_id : :class:`~discord.abc.GuildChannel` | :class:`~discord.abc.PrivateChannel` | :class:`~discord.Thread` | :class:`~discord.PartialMessageable`
+        A Discord channel.
+
+    Returns
+    -------
+    :class:`~discord.TextChannel`
+
+    Raises
+    ------
+    ChannelTypeError
+        The channel passed as argument is not a Discord text channel or a thread off one.
+    """
+    ...
 
 
 @beartype
 async def get_channel_parent(
-    channel_or_id: (
-        GuildChannel
-        | discord.Thread
-        | discord.DMChannel
-        | discord.PartialMessageable
-        | discord.GroupChannel
-        | int
-    ),
+    channel_or_id: DiscordChannel | int,
 ) -> discord.TextChannel:
-    """Return the parent channel of its argument, or the argument itself if it does not have a parent. Errors if the channel passed as argument is not a `discord.TextChannel`, a `discord.Thread`, or the ID of one of those.
+    """Return the parent channel of the argument or the channel it refers to, or the argument itself if it does not have a parent. Raises a ChannelTypeError if the channel passed as argument is not a Discord text channel, a thread off one or the ID of one of those.
 
-    #### Args:
-        - `channel_or_id`: A Discord channel or its ID.
+    Parameters
+    ----------
+    channel_or_id : :class:`~discord.abc.GuildChannel` | :class:`~discord.abc.PrivateChannel` | :class:`~discord.Thread` | :class:`~discord.PartialMessageable` | int
+        Either a Discord channel or an ID of same.
 
-    #### Raises:
-        - `ChannelTypeError`: The channel is not a text channel nor a thread off a text channel.
+    Returns
+    -------
+    :class:`~discord.TextChannel`
 
-    #### Returns:
-        - `discord.TextChannel`: The parent of the channel passed as argument, or the channel itself in case it is not a thread.
+    Raises
+    ------
+    ChannelTypeError
+        The channel or ID passed as argument does not refer to a Discord text channel or a thread off one.
     """
-    channel = await get_channel_from_id(channel_or_id, assert_text_or_thread=True)
+    channel = await get_channel_from_id(channel_or_id, ensure_text_or_thread=True)
 
     if isinstance(channel, discord.Thread):
         channel = channel.parent
@@ -301,21 +476,37 @@ async def get_channel_parent(
 
 @beartype
 async def get_channel_member(
-    channel: GuildChannel | discord.Thread,
+    channel: discord.abc.GuildChannel | discord.Thread,
     member_id: int,
 ) -> discord.Member | None:
     """Return a channel's member by their ID, or None if they can't be found.
 
-    #### Args:
-        - `channel`: The channel to look for a member in.
-        - `member_id`: Their ID.
+    Parameters
+    ----------
+    channel : :class:`~discord.abc.GuildChannel` | :class:`~discord.Thread`
+        A Discord channel in a server.
+    member_id : int
+        The ID of the channel member.
+
+    Returns
+    -------
+    :class:`~discord.Member` | None
+
+    Raises
+    ------
+    :class:`~discord.HTTPException`
+        Fetching the member failed.
+    :class:`~discord.NotFound`
+        The member could not be found.
+    :class:`~discord.Forbidden`
+        The client does not not have access to the server the channel is in.
     """
     channel_member = channel.guild.get_member(member_id)
     if not channel_member:
         try:
             channel_member = await channel.guild.fetch_member(member_id)
         except Exception:
-            channel_member = None
+            return None
 
     return channel_member
 
@@ -324,14 +515,25 @@ async def get_channel_member(
 async def get_image_from_URL(url: str) -> bytes:
     """Return an image stored in a URL.
 
-    #### Args:
-        - `url`: The URL of the image to get.
+    Parameters
+    ----------
+    url : str
+        The URL of the image to get.
 
-    #### Raises:
-        - `HTTPResponseError`: HTTP request to fetch image returned a status other than 200.
-        - `InvalidURL`: Argument was not a valid URL.
-        - `RuntimeError`: Session connection failed.
-        - `ServerTimeoutError`: Connection to server timed out.
+    Returns
+    -------
+    bytes
+
+    Raises
+    ------
+    HTTPResponseError
+        HTTP request to fetch image returned a status other than 200.
+    InvalidURL
+        Argument was not a valid URL.
+    RuntimeError
+        Session connection failed.
+    ServerTimeoutError
+        Connection to server timed out.
     """
     image_bytes: io.BytesIO | None = None
     async with aiohttp.ClientSession(
@@ -356,22 +558,133 @@ async def get_image_from_URL(url: str) -> bytes:
     return image_bytes.read()
 
 
+@overload
+async def get_emoji_information(
+    emoji: discord.PartialEmoji | discord.Emoji,
+) -> tuple[int, str, bool, str]:
+    """Process the custom emoji passed as argument and return a tuple whose elements are:
+    - its ID;
+    - its name;
+    - whether the emoji is animated;
+    - and the URL for its image.
+
+    Parameters
+    ----------
+    emoji : :class:`~discord.PartialEmoji` | :class:`~discord.Emoji`
+        A custom Discord emoji.
+
+    Returns
+    -------
+    tuple[int, str, bool, str]
+
+    Raises
+    ------
+    ValueError
+        `emoji` had type :class:`~discord.PartialEmoji` but it was not a custom emoji.
+    """
+    ...
+
+
+@overload
+async def get_emoji_information(
+    emoji: None,
+    emoji_id: int | str,
+) -> tuple[int, str, bool, str]:
+    """Process the custom emoji passed as argument and return a tuple whose elements are:
+    - its ID;
+    - its name;
+    - whether the emoji is animated;
+    - and the URL for its image.
+
+    Parameters
+    ----------
+    emoji_id : int | str
+        The ID of a a custom emoji.
+
+    Returns
+    -------
+    tuple[int, str, bool, str]
+
+    Raises
+    ------
+    ArgumentError
+        The client couldn't find an accessible emoji with ID `emoji_id`.
+    ValueError
+        `emoji_id` argument had type `str` but it was not a valid numerical ID.
+    """
+    ...
+
+
+@overload
+async def get_emoji_information(
+    emoji: None,
+    emoji_id: int | str,
+    emoji_name: str,
+) -> tuple[int, str, bool, str]:
+    """Process the custom emoji passed as argument and return a tuple whose elements are:
+    - its ID;
+    - its name;
+    - whether the emoji is animated;
+    - and the URL for its image.
+
+    Parameters
+    ----------
+    emoji_id : int | str
+        The ID of a a custom emoji.
+    emoji_name : str
+        The name of the emoji. It must start with the string "a:" if the emoji is animated.
+
+    Returns
+    -------
+    tuple[int, str, bool, str]
+
+    Raises
+    ------
+    ValueError
+        `emoji_id` had type `str` but it was not a valid numerical ID.
+    """
+    ...
+
+
+@overload
+async def get_emoji_information(
+    emoji: discord.PartialEmoji | discord.Emoji | None = None,
+    emoji_id: int | str | None = None,
+    emoji_name: str | None = None,
+) -> tuple[int, str, bool, str]: ...
+
+
 @beartype
 async def get_emoji_information(
     emoji: discord.PartialEmoji | discord.Emoji | None = None,
     emoji_id: int | str | None = None,
     emoji_name: str | None = None,
 ) -> tuple[int, str, bool, str]:
-    """Return a tuple with emoji ID, emoji name, whether the emoji is animated, and the URL for its image.
+    """Process the custom emoji passed as argument and return a tuple whose elements are:
+    - its ID;
+    - its name;
+    - whether the emoji is animated;
+    - and the URL for its image.
 
-    #### Args:
-        - `emoji`: A custom Discord emoji. Defaults to None, in which case `emoji_id` and `emoji_name` are used instead.
-        - `emoji_id`: The ID of a a custom emoji. Defaults to None. Only used if `emoji` is not present.
-        - `emoji_name`: The name of the emoji. Defaults to None, in which case the client will try to find an emoji with ID `emoji_id`. If it's included, it must start with the string "a:" if the emoji animated. Only used if `emoji` is not present.
+    Parameters
+    ----------
+    emoji : discord.PartialEmoji | discord.Emoji | None, optional
+        A custom Discord emoji. Defaults to None, in which case `emoji_id` and `emoji_name` are used instead.
+    emoji_id : int | str | None, optional
+        The ID of a custom emoji. Defaults to None. Only used if `emoji` is not present.
+    emoji_name : str | None, optional
+        The name of the emoji. Defaults to None, in which case the client will try to find an emoji with ID `emoji_id`. If it's included, it must start with the string "a:" if the emoji animated. Only used if `emoji` is not present.
 
-    #### Raises:
-        - `ArgumentError`: Neither `emoji` nor `emoji_id` were passed, or `emoji_id` was passed, `emoji` and `emoji_name` weren't, and the client couldn't find an accessible emoji with ID `emoji_id`.
-        - `ValueError`: `emoji` argument was passed and had type `PartialEmoji` but it was not a custom emoji, or `emoji_id` argument was passed and had type `str` but it was not a valid numerical ID.
+    Returns
+    -------
+    tuple[int, str, bool, str]
+
+    Raises
+    ------
+    ArgumentError
+        Neither `emoji` nor `emoji_id` were passed, or `emoji_id` was passed, `emoji` and `emoji_name` weren't, and the client couldn't find an accessible emoji with ID `emoji_id`.
+    ValueError
+        `emoji` argument was passed and had type `PartialEmoji` but it was not a custom emoji, or `emoji_id` argument was passed and had type `str` but it was not a valid numerical ID.
     """
     if emoji:
         if not emoji.id:
@@ -427,14 +740,11 @@ async def get_emoji_information(
                 try:
                     emoji = await client.fetch_application_emoji(emoji_id)
                 except Exception:
-                    emoji = None
-
-            if not emoji:
-                err = ArgumentError(
-                    f"Error in function {inspect.stack()[1][3]}(): emoji_id was passed as argument to get_emoji_information(), emoji_name wasn't, and couldn't find the emoji accessible to the client."
-                )
-                logger.error(err)
-                raise err
+                    err = ArgumentError(
+                        f"Error in function {inspect.stack()[1][3]}(): emoji_id was passed as argument to get_emoji_information(), emoji_name wasn't, and couldn't find the emoji accessible to the client."
+                    )
+                    logger.error(err)
+                    raise err
 
             emoji_name = emoji.name
             emoji_animated = emoji.animated
@@ -445,24 +755,35 @@ async def get_emoji_information(
 
 @beartype
 def hash_image(image: bytes) -> str:
-    """Return a string with a hash of an image.
+    """Return a string with the MD5 hash of an image.
 
-    #### Args:
-        - `image`: The image bytes object.
+    Parameters
+    ----------
+    image : bytes
+        The image bytes object.
+
+    Returns
+    -------
+    str
     """
     return md5(image).hexdigest()
 
 
 @beartype
 def truncate(msg: str, length: int) -> str:
-    """Truncate a message to a certain length.
+    """Return `msg` truncated to `length` plus a "…" character at the end.
 
-    #### Args:
-        - `msg`: The message to truncate.
-        - `length`: Its maximum length.
+    Parameters
+    ----------
+    msg : str
+        The message to truncate.
+    length : int
+        Its maximum length.
 
-    #### Returns:
-        `str`: The truncated message.
+    Returns
+    -------
+    str
+        _description_
     """
     return msg if len(msg) < length else msg[: length - 1] + "…"
 
@@ -473,11 +794,18 @@ async def wait_until_ready(
     time_to_wait: float | int = 100,
     polling_rate: float | int = 1,
 ) -> bool:
-    """Return True when the bot is ready or False if it times out.
+    """Wait until the bot is ready and return True when that happens, or return False if it times out.
 
-    #### Args:
-        - `time_to_wait`: The amount of time in seconds to wait for the bot to get ready. Values less than 0 will be treated as 0. Defaults to 100.
-        - `polling_rate`: The amount of time in seconds to wait between checks for the variable. Values less than 1 will be treated as 1. Defaults to 1.
+    Parameters
+    ----------
+    time_to_wait : float | int, optional
+        The amount of time in seconds to wait for the bot to get ready. Values less than 0 will be treated as 0. Defaults to 100.
+    polling_rate : float | int, optional
+        The amount of time in seconds to wait between checks for the variable. Values less than 1 will be treated as 1. Defaults to 1.
+
+    Returns
+    -------
+    bool
     """
     global is_ready
     if is_ready:
@@ -505,14 +833,20 @@ async def run_retries(
 ) -> T:
     """Run a function and retry it every time an exception occurs up to a certain maximum number of tries. If it succeeds, return its result; otherwise, raise the error.
 
-    #### Args:
-        - `fun`: The function to run.
-        - `num_retries`: The number of times to try the function again. If set to 0 or less, will be set to 1.
-        - `time_to_wait`: Time in seconds to wait between retries; only used if `num_retries` is greater than 1. If set to 0 or less, will set `num_retries` to 1. Defaults to 5.
-        - `exceptions_to_catch`: An exception type or a list of exception types to catch. Defaults to None, in which case all types will be caught.
+    Parameters
+    ----------
+    fun : Callable[..., T]
+        The function to run.
+    num_retries : int, optional
+        The number of times to try the function again. If set to 0 or less, will be set to 1.
+    time_to_wait : float | int, optional
+        Time in seconds to wait between retries; only used if `num_retries` is greater than 1. If set to 0 or less, will set `num_retries` to 1. Defaults to 5.
+    exceptions_to_catch : type | tuple[type] | None, optional
+        An exception type or a list of exception types to catch. Defaults to None, in which case all types will be caught.
 
-    #### Returns:
-        - `T`: The result of calling `fun()`.
+    Returns
+    -------
+    T
     """
     if num_retries < 1:
         num_retries = 1
