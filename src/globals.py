@@ -26,8 +26,7 @@ from validations import ArgumentError, HTTPResponseError, logger, validate_chann
 
 
 class Settings(TypedDict):
-    """
-    An Typed Dictionary with the bot's settings. The `settings.json` file must contain a `"context"` entry whose value is another key in the file with the attributes below. For example:
+    """A TypedDict with the bot's settings. The `settings.json` file must contain a `"context"` entry whose value is another key in the file with the attributes below. For example:
 
     .. code-block:: json
         {
