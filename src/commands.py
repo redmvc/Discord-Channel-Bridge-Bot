@@ -491,7 +491,7 @@ async def mention_to_channel(link_or_mention: str) -> globals.DiscordChannel | N
 
     Returns
     -------
-    `~discord.abc.GuildChannel` | `~discord.abc.PrivateChannel` | `~discord.Thread` | `~discord.PartialMessageable` | None
+    :class:`~discord.abc.GuildChannel` | :class:`~discord.abc.PrivateChannel` | :class:`~discord.Thread` | :class:`~discord.PartialMessageable` | None
     """
     if link_or_mention.startswith("https://discord.com/channels"):
         try:
@@ -1233,11 +1233,11 @@ async def bridge_thread_helper(
 
     Parameters
     ----------
-    thread_to_bridge : `~discord.Thread`
+    thread_to_bridge : :class:`~discord.Thread`
         The thread to bridge.
     user_id : int
         The ID of the user that created the thread.
-    interaction : `~discord.Interaction` | None, optional
+    interaction : :class:`~discord.Interaction` | None, optional
         The interaction that called this function, if any. Defaults to None.
     """
     thread_parent = await globals.get_channel_parent(thread_to_bridge)
@@ -1443,7 +1443,7 @@ async def stop_auto_bridging_threads_helper(
     ----------
     channel_ids_to_remove : int | Iterable[int]
         The IDs of the channels to remove.
-    session : `~sqlalchemy.orm.Session` | None, optional
+    session : :class:`~sqlalchemy.orm.Session` | None, optional
         An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
 
     Raises
@@ -1497,7 +1497,7 @@ async def validate_auto_bridge_thread_channels(
     ----------
     channel_ids_to_check : int | Iterable[int]
         The IDs of the channels to check.
-    session : `~sqlalchemy.orm.Session` | None, optional
+    session : :class:`~sqlalchemy.orm.Session` | None, optional
         An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
 
     Raises

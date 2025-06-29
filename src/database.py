@@ -208,11 +208,11 @@ async def sql_upsert(
     ignored_cols: Iterable[str] | None = None,
     **kwargs: Any,
 ) -> UpdateBase:
-    """Return an `~sqlalchemy.UpdateBase` for inserting values into a table if a set of indices is not duplicated or updating them if it is.
+    """Return an :class:`~sqlalchemy.UpdateBase` for inserting values into a table if a set of indices is not duplicated or updating them if it is.
 
     Parameters
     ----------
-    table : `~sqlalchemy.sql._typing._DMLTableArgument`
+    table : :class:`~sqlalchemy.sql._typing._DMLTableArgument`
         The table to insert into.
     indices : Iterable[str]
         A list with the names of the indices (i.e. the columns whose uniqueness will be checked).
@@ -223,13 +223,13 @@ async def sql_upsert(
 
     Returns
     -------
-    `~sqlalchemy.UpdateBase`
+    :class:`~sqlalchemy.UpdateBase`
 
     Raises
     ------
     ValueError
         `indices` is not a proper subset of `kwargs.keys()`.
-    `~sqlalchemy.exc.StatementError`
+    :class:`~sqlalchemy.exc.StatementError`
         SQL statement inferred from arguments was invalid or database connection failed. This error can only be raised if the database dialect is not MySQL, PostgreSQL, nor SQLite.
     """
     indices = set(indices)
@@ -304,11 +304,11 @@ async def sql_insert_ignore_duplicate(
     indices: Iterable[str],
     **kwargs: Any,
 ) -> UpdateBase:
-    """Return an `~sqlalchemy.UpdateBase` for inserting values into a table if a set of indices is not duplicated.
+    """Return an :class:`~sqlalchemy.UpdateBase` for inserting values into a table if a set of indices is not duplicated.
 
     Parameters
     ----------
-    table : `~sqlalchemy.sql._typing._DMLTableArgument`
+    table : :class:`~sqlalchemy.sql._typing._DMLTableArgument`
         The table to insert into.
     indices : Iterable[str]
         A list with the names of the indices (i.e. the columns whose uniqueness will be checked).
@@ -317,11 +317,11 @@ async def sql_insert_ignore_duplicate(
 
     Returns
     -------
-    `~sqlalchemy.UpdateBase`
+    :class:`~sqlalchemy.UpdateBase`
 
     Raises
     ------
-    `~sqlalchemy.exc.StatementError`
+    :class:`~sqlalchemy.exc.StatementError`
         SQL statement inferred from arguments was invalid or database connection failed. This error can only be raised if the database dialect is not MySQL, PostgreSQL, nor SQLite.
     """
     indices = set(indices)
@@ -382,7 +382,7 @@ async def sql_retry(
     num_retries: int = 5,
     time_to_wait: float | int = 10,
 ) -> T:
-    """Run an SQL function and retry it every time an `~sqlalchemy.exc.StatementError` occurs up to a certain maximum number of tries. If it succeeds, return its result; otherwise, raise the error.
+    """Run an SQL function and retry it every time an :class:`~sqlalchemy.exc.StatementError` occurs up to a certain maximum number of tries. If it succeeds, return its result; otherwise, raise the error.
 
     Parameters
     ----------

@@ -27,7 +27,7 @@ class EmojiHashMap:
 
         Parameters
         ----------
-        session : `~sqlalchemy.orm.Session` | None, optional
+        session : :class:`~sqlalchemy.orm.Session` | None, optional
             An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
         """
         logger.info("Initialising emoji hash map...")
@@ -183,7 +183,7 @@ class EmojiHashMap:
 
         Parameters
         ----------
-        emoji : `~discord.PartialEmoji` | `~discord.Emoji` | None, optional
+        emoji : :class:`~discord.PartialEmoji` | :class:`~discord.Emoji` | None, optional
             The Discord emoji to insert. Defaults to None, in which case `emoji_id` and `emoji_name` will be used instead.
         emoji_id : int | str | None, optional
             The ID of the emoji to insert. Defaults to None. Only used if `emoji` is not present.
@@ -199,7 +199,7 @@ class EmojiHashMap:
             The hash of the emoji image. Defaults to None, in which case it will be calculated from the other arguments.
         accessible : bool, optional
             Whether the bot can access the emoji. Defaults to False.
-        session : `~sqlalchemy.orm.Session` | None, optional
+        session : :class:`~sqlalchemy.orm.Session` | None, optional
             An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
 
         Raises
@@ -287,7 +287,7 @@ class EmojiHashMap:
 
         Parameters
         ----------
-        emoji : `~discord.PartialEmoji` | `~discord.Emoji` | None, optional
+        emoji : :class:`~discord.PartialEmoji` | :class:`~discord.Emoji` | None, optional
             The Discord emoji to insert. Defaults to None, in which case `emoji_id` and `emoji_name` will be used instead.
         emoji_id : int | str | None, optional
             The ID of the emoji to insert. Defaults to None. Only used if `emoji` is not present.
@@ -307,7 +307,7 @@ class EmojiHashMap:
             If set to True, will set `accessible` to True and add the emoji to the internal emoji hash map. Defaults to False.
         update_db : bool, optional
             Whether the emoji should be inserted into the database. Defaults to False. Including `session` is equivalent to setting this variable to True.
-        session : `~sqlalchemy.orm.Session` | None, optional
+        session : :class:`~sqlalchemy.orm.Session` | None, optional
             An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
 
         Returns
@@ -388,7 +388,7 @@ class EmojiHashMap:
         image_hash: str,
         accessible: bool = False,
     ) -> UpdateBase:
-        """Return an `~sqlalchemy.UpdateBase` for upserting an emoji into the database.
+        """Return an :class:`~sqlalchemy.UpdateBase` for upserting an emoji into the database.
 
         Parameters
         ----------
@@ -407,7 +407,7 @@ class EmojiHashMap:
 
         Returns
         -------
-        `~sqlalchemy.UpdateBase`
+        :class:`~sqlalchemy.UpdateBase`
         """
         if emoji_server_id:
             upsert_server_id = {"server_id": str(emoji_server_id)}
@@ -441,7 +441,7 @@ class EmojiHashMap:
             The ID of the emoji to delete.
         update_db : bool, optional
             Whether the emoji should be deleted from the database. Defaults to False. Including `session` is equivalent to setting this variable to True.
-        session : `~sqlalchemy.orm.Session` | None, optional
+        session : :class:`~sqlalchemy.orm.Session` | None, optional
             An SQLAlchemy ORM Session connecting to the database. If set to None and `update_db` is True a new one will be created. Defaults to None
         """
         if not self._emoji_to_hash.get(emoji_id):
@@ -647,7 +647,7 @@ class EmojiHashMap:
 
         Parameters
         ----------
-        emoji_to_copy : `~discord.PartialEmoji` | None, optional
+        emoji_to_copy : :class:`~discord.PartialEmoji` | None, optional
             The emoji to copy into the emoji server. Defaults to None, in which case `emoji_to_copy_name` and either `emoji_to_copy_id` or `emoji_image` are used instead.
         emoji_to_copy_id : str | int | None, optional
             The ID of the missing emoji. Defaults to None, in which case `emoji_image` is used instead. Only used if `emoji_to_copy` is None.
@@ -657,12 +657,12 @@ class EmojiHashMap:
             The hash of `emoji_image`. Defaults to None, in which case it will be calculated from `emoji_image`.
         emoji_to_copy_name : str | None, optional
             The name of a missing emoji, optionally preceded by an "a:" in case it's animated. Defaults to None, but must be included if either `emoji_to_copy_id` or `emoji_image` is.
-        session : `~sqlalchemy.orm.Session` | None, optional
+        session : :class:`~sqlalchemy.orm.Session` | None, optional
             An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
 
         Returns
         -------
-        `~discord.Emoji` | None
+        :class:`~discord.Emoji` | None
 
         Raises
         ------
@@ -670,7 +670,7 @@ class EmojiHashMap:
             The number of arguments passed is incorrect.
         ValueError
             `emoji_to_copy` argument was passed and had type `PartialEmoji` but it was not a custom emoji, or `emoji_to_copy_id` argument was passed and had type `str` but it was not a valid numerical ID.
-        `~discord.Forbidden`
+        :class:`~discord.Forbidden`
             Emoji server permissions not set correctly.
         HTTPResponseError
             HTTP request to fetch emoji image returned a status other than 200.
@@ -832,17 +832,17 @@ class EmojiHashMap:
 
         Parameters
         ----------
-        external_emoji : `~discord.PartialEmoji` | None, optional
+        external_emoji : :class:`~discord.PartialEmoji` | None, optional
             The custom emoji that is not present in any servers the bot is in. Defaults to None, in which case `external_emoji_id` will be used to fetch it instead.
         external_emoji_id : int | str | None, optional
             The ID of a custom emoji. Defaults to None. Only used if `external_emoji` is not present.
         external_emoji_name : str | None, optional
             The name of the emoji. Defaults to None, in which case the client will try to find an emoji with ID `external_emoji_id`. If it's included, it must start with the string "a:" if the emoji animated. Only used if `external_emoji` is not present.
-        internal_emoji : `~discord.Emoji`
+        internal_emoji : :class:`~discord.Emoji`
             An emoji the bot has in its emoji server.
         image_hash : str | None, optional
             The hash of the image associated with this emoji. Defaults to None, in which case will use the hash associated with `internal_emoji`.
-        session : `~sqlalchemy.orm.Session` | None, optional
+        session : :class:`~sqlalchemy.orm.Session` | None, optional
             An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
 
         Returns
@@ -930,7 +930,7 @@ class EmojiHashMap:
 
         Parameters
         ----------
-        emoji : `~discord.PartialEmoji` | int | str
+        emoji : :class:`~discord.PartialEmoji` | int | str
             The emoji to find matches for or ID of same.
         only_accessible : bool, optional
             If set to True will return only emoji that are accessible by the bot. Defaults to False.
@@ -953,7 +953,7 @@ class EmojiHashMap:
 
         Parameters
         ----------
-        emoji : `~discord.PartialEmoji` | int | str
+        emoji : :class:`~discord.PartialEmoji` | int | str
             The emoji to find matches for or ID of same.
         only_accessible : bool, optional
             If set to True will return only emoji that are accessible by the bot. Defaults to False.
@@ -978,7 +978,7 @@ class EmojiHashMap:
 
         Parameters
         ----------
-        emoji : `~discord.PartialEmoji` | int | str
+        emoji : :class:`~discord.PartialEmoji` | int | str
             The emoji to find matches for or ID of same.
         only_accessible : bool, optional
             If set to True will return only emoji that are accessible by the bot. Defaults to False.
@@ -1003,7 +1003,7 @@ class EmojiHashMap:
 
         Parameters
         ----------
-        emoji : `~discord.PartialEmoji` | int | str
+        emoji : :class:`~discord.PartialEmoji` | int | str
             The emoji to find matches for or ID of same.
         only_accessible : bool, optional
             If set to True will return only emoji that are accessible by the bot. Defaults to False.
@@ -1084,7 +1084,7 @@ class EmojiHashMap:
 
         Returns
         -------
-        `~discord.Emoji` | None
+        :class:`~discord.Emoji` | None
         """
         ...
 
@@ -1106,7 +1106,7 @@ class EmojiHashMap:
 
         Returns
         -------
-        `~discord.Emoji` | None
+        :class:`~discord.Emoji` | None
         """
         ...
 
@@ -1128,7 +1128,7 @@ class EmojiHashMap:
 
         Returns
         -------
-        `~discord.Emoji` | None
+        :class:`~discord.Emoji` | None
         """
         ...
 
@@ -1150,7 +1150,7 @@ class EmojiHashMap:
 
         Returns
         -------
-        `~discord.Emoji` | None
+        :class:`~discord.Emoji` | None
         """
         logger.debug(
             "Fetching accessible emoji matching ID %s with skip_self = %s.",
@@ -1190,9 +1190,9 @@ class EmojiHashMap:
 
         Parameters
         ----------
-        emoji : `~discord.PartialEmoji` | `~discord.Emoji`
+        emoji : :class:`~discord.PartialEmoji` | :class:`~discord.Emoji`
             The emoji to get a hash for.
-        session : `~sqlalchemy.orm.Session` | None, optional
+        session : :class:`~sqlalchemy.orm.Session` | None, optional
             An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
 
         Returns
@@ -1219,7 +1219,7 @@ class EmojiHashMap:
         ----------
         emoji_id : int | str
             The ID of the emoji to get a hash for.
-        session : `~sqlalchemy.orm.Session` | None, optional
+        session : :class:`~sqlalchemy.orm.Session` | None, optional
             An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
 
         Returns
@@ -1256,7 +1256,7 @@ class EmojiHashMap:
         ----------
         emoji_id : int | str
             The ID of the emoji to get a hash for.
-        session : `~sqlalchemy.orm.Session` | None, optional
+        session : :class:`~sqlalchemy.orm.Session` | None, optional
             An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
 
         Returns
@@ -1294,7 +1294,7 @@ class EmojiHashMap:
             The ID of the emoji to get a hash for.
         emoji_name : str
             The name of the emoji. It must start with the string "a:" if the emoji animated.
-        session : `~sqlalchemy.orm.Session` | None, optional
+        session : :class:`~sqlalchemy.orm.Session` | None, optional
             An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
 
         Returns
@@ -1323,13 +1323,13 @@ class EmojiHashMap:
 
         Parameters
         ----------
-        emoji : `~discord.PartialEmoji` | `~discord.Emoji` | None, optional
+        emoji : :class:`~discord.PartialEmoji` | :class:`~discord.Emoji` | None, optional
             The emoji to get a hash for. Defaults to None, in which case `emoji_id` is used instead.
         emoji_id : int | str | None, optional
             The ID of the emoji to get a hash for. Defaults to None. Only used if `emoji` isn't present.
         emoji_name : str | None, optional
             The name of the emoji. Defaults to None, in which case the client will try to find an emoji with ID `emoji_id`. If it's included, it must start with the string "a:" if the emoji animated. Only used if `emoji` is not present.
-        session : `~sqlalchemy.orm.Session` | None, optional
+        session : :class:`~sqlalchemy.orm.Session` | None, optional
             An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
 
         Returns
@@ -1382,13 +1382,13 @@ class EmojiHashMap:
 
         Parameters
         ----------
-        emoji : `~discord.PartialEmoji` | `~discord.Emoji` | None, optional
+        emoji : :class:`~discord.PartialEmoji` | :class:`~discord.Emoji` | None, optional
             The emoji to get a hash for. Defaults to None, in which case `emoji_id` is used instead.
         emoji_id : int | str | None, optional
             The ID of the emoji to get a hash for. Defaults to None. Only used if `emoji` isn't present.
         emoji_name : str | None, optional
             The name of the emoji. Defaults to None, in which case the client will try to find an emoji with ID `emoji_id`. If it's included, it must start with the string "a:" if the emoji animated. Only used if `emoji` is not present.
-        session : `~sqlalchemy.orm.Session` | None, optional
+        session : :class:`~sqlalchemy.orm.Session` | None, optional
             An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
 
         Returns

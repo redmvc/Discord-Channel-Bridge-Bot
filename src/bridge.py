@@ -64,9 +64,9 @@ class Bridge:
 
         Parameters
         ----------
-        source : `~discord.TextChannel` | `~discord.Thread` | int
+        source : :class:`~discord.TextChannel` | :class:`~discord.Thread` | int
             Source channel or ID of same.
-        target : `~discord.TextChannel` | `~discord.Thread` | int
+        target : :class:`~discord.TextChannel` | :class:`~discord.Thread` | int
             Target channel or ID of same.
 
         Raises
@@ -76,7 +76,7 @@ class Bridge:
 
         Returns
         -------
-        `~bridge.Bridge`
+        :class:`~bridge.Bridge`
         """
         logger.debug("Creating bridge from %s to %s.", source, target)
 
@@ -132,7 +132,7 @@ class Bridges:
 
     Attributes
     ----------
-    webhooks : `~bridge.Webhooks`
+    webhooks : :class:`~bridge.Webhooks`
         The webhooks associated with each target channel.
     """
 
@@ -147,7 +147,7 @@ class Bridges:
 
         Parameters
         ----------
-        session : `~sqlalchemy.orm.Session` | None, optional
+        session : :class:`~sqlalchemy.orm.Session` | None, optional
             An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
         """
         logger.info("Loading bridges from database...")
@@ -364,20 +364,20 @@ class Bridges:
 
         Parameters
         ----------
-        source : `~discord.TextChannel` | `~discord.Thread` | int
+        source : :class:`~discord.TextChannel` | :class:`~discord.Thread` | int
             Source channel or ID of same.
-        target : `~discord.TextChannel` | `~discord.Thread` | int
+        target : :class:`~discord.TextChannel` | :class:`~discord.Thread` | int
             Target channel or ID of same.
-        webhook : `~discord.Webhook` | None, optional
+        webhook : :class:`~discord.Webhook` | None, optional
             An already-existing webhook connecting these channels. Defaults to None, in which case a new one will be created.
         update_db : bool, optional
             Whether to update the database when creating the Bridge. Defaults to True.
-        session : `~sqlalchemy.orm.Session` | None, optional
+        session : :class:`~sqlalchemy.orm.Session` | None, optional
             An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created. Only used if `update_db` is True.
 
         Returns
         -------
-        `~bridge.Bridge`
+        :class:`~bridge.Bridge`
 
         Raises
         ------
@@ -569,13 +569,13 @@ class Bridges:
 
         Parameters
         ----------
-        source_channel : `~discord.TextChannel` | `~discord.Thread` | int | None, optional
+        source_channel : :class:`~discord.TextChannel` | :class:`~discord.Thread` | int | None, optional
             Source channel or ID of same. Defaults to None, in which case will demolish all inbound bridges to `target_channel`.
-        target_channel : `~discord.TextChannel` | `~discord.Thread` | int | None, optional
+        target_channel : :class:`~discord.TextChannel` | :class:`~discord.Thread` | int | None, optional
             Target channel or ID of same. Defaults to None, in which case will demolish all outbound bridges from `source_channel`.
         update_db : bool, optional
             Whether to update the database when creating the Bridge. Defaults to True.
-        session : `~sqlalchemy.orm.Session` | None, optional
+        session : :class:`~sqlalchemy.orm.Session` | None, optional
             An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created. Only used if `update_db` is True.
         one_sided : bool, optional
             Whether to demolish only the bridge going from `source_channel` to `target_channel`, rather than both. Defaults to False. Only used if both `source_channel` and `target_channel` are present.
@@ -789,14 +789,14 @@ class Bridges:
 
         Parameters
         ----------
-        source : `~discord.TextChannel` | `~discord.Thread` | int
+        source : :class:`~discord.TextChannel` | :class:`~discord.Thread` | int
             Source channel or ID of same.
-        target : `~discord.TextChannel` | `~discord.Thread` | int
+        target : :class:`~discord.TextChannel` | :class:`~discord.Thread` | int
             Target channel or ID of same.
 
         Returns
         -------
-        `~bridge.Bridge` | None
+        :class:`~bridge.Bridge` | None
         """
         logger.debug("Fetching one-way bridge from %s to %s.", source, target)
         source_id = globals.get_id_from_channel(source)
@@ -817,14 +817,14 @@ class Bridges:
 
         Parameters
         ----------
-        source : `~discord.TextChannel` | `~discord.Thread` | int
+        source : :class:`~discord.TextChannel` | :class:`~discord.Thread` | int
             Source channel or ID of same.
-        target : `~discord.TextChannel` | `~discord.Thread` | int
+        target : :class:`~discord.TextChannel` | :class:`~discord.Thread` | int
             Target channel or ID of same.
 
         Returns
         -------
-        tuple[`~bridge.Bridge` | None, `~bridge.Bridge` | None]
+        tuple[:class:`~bridge.Bridge` | None, :class:`~bridge.Bridge` | None]
         """
         logger.debug("Fetching bridges between %s and %s.", source, target)
         return (
@@ -841,12 +841,12 @@ class Bridges:
 
         Parameters
         ----------
-        source : `~discord.TextChannel` | `~discord.Thread` | int
+        source : :class:`~discord.TextChannel` | :class:`~discord.Thread` | int
             Source channel or ID of same.
 
         Returns
         -------
-        dict[int, `~bridge.Bridge`] | None
+        dict[int, :class:`~bridge.Bridge`] | None
         """
         logger.debug("Fetching outbound bridges from %s.", source)
         return self._outbound_bridges.get(globals.get_id_from_channel(source))
@@ -869,12 +869,12 @@ class Bridges:
 
         Parameters
         ----------
-        target : `~discord.TextChannel` | `~discord.Thread` | int
+        target : :class:`~discord.TextChannel` | :class:`~discord.Thread` | int
             Target channel or ID of same.
 
         Returns
         -------
-        dict[int, `~bridge.Bridge`] | None
+        dict[int, :class:`~bridge.Bridge`] | None
         """
         logger.debug("Fetching inbound bridges to %s.", target)
         return self._inbound_bridges.get(globals.get_id_from_channel(target))
@@ -892,7 +892,7 @@ class Bridges:
 
         Parameters
         ----------
-        starting_channel : `~discord.TextChannel` | `~discord.Thread` | int
+        starting_channel : :class:`~discord.TextChannel` | :class:`~discord.Thread` | int
             The channel other channels must be reachable from, or ID of same.
         direction : Literal["outbound", "inbound"]
             Whether to look down an outbound chain or up an inbound chain.
@@ -901,7 +901,7 @@ class Bridges:
 
         Returns
         -------
-        dict[int, `~discord.Webhook`]
+        dict[int, :class:`~discord.Webhook`]
         """
         ...
 
@@ -918,7 +918,7 @@ class Bridges:
 
         Parameters
         ----------
-        starting_channel : `~discord.TextChannel` | `~discord.Thread` | int
+        starting_channel : :class:`~discord.TextChannel` | :class:`~discord.Thread` | int
             The channel other channels must be reachable from, or ID of same.
         direction : Literal["outbound", "inbound"]
             Whether to look down an outbound chain or up an inbound chain.
@@ -943,7 +943,7 @@ class Bridges:
 
         Parameters
         ----------
-        starting_channel : `~discord.TextChannel` | `~discord.Thread` | int
+        starting_channel : :class:`~discord.TextChannel` | :class:`~discord.Thread` | int
             The channel other channels must be reachable from, or ID of same.
         direction : Literal["outbound", "inbound"]
             Whether to look down an outbound chain or up an inbound chain.
@@ -969,7 +969,7 @@ class Bridges:
 
         Parameters
         ----------
-        starting_channel : `~discord.TextChannel` | `~discord.Thread` | int
+        starting_channel : :class:`~discord.TextChannel` | :class:`~discord.Thread` | int
             The channel other channels must be reachable from, or ID of same.
         direction : Literal["outbound", "inbound"]
             Whether to look down an outbound chain or up an inbound chain.
@@ -980,7 +980,7 @@ class Bridges:
 
         Returns
         -------
-        set[int] | dict[int, `~discord.Webhook`]
+        set[int] | dict[int, :class:`~discord.Webhook`]
         """
         logger.debug(
             "Fetching all channels reachable from %s through chains of %s bridges.",
@@ -1072,14 +1072,14 @@ class Webhooks:
 
         Parameters
         ----------
-        channel_or_id : `~discord.TextChannel` | `~discord.Thread` | int
+        channel_or_id : :class:`~discord.TextChannel` | :class:`~discord.Thread` | int
             The channel or ID of a channel to add a webhook to.
-        webhook : `~discord.Webhook` | None, optional
+        webhook : :class:`~discord.Webhook` | None, optional
             The webhook to add, or None to try to find one or create one. Defaults to None.
 
         Returns
         -------
-        `~discord.Webhook`
+        :class:`~discord.Webhook`
         """
         channel_id = globals.get_id_from_channel(channel_or_id)
 
@@ -1144,12 +1144,12 @@ class Webhooks:
 
         Parameters
         ----------
-        channel_or_id : `~discord.TextChannel` | `~discord.Thread` | int
+        channel_or_id : :class:`~discord.TextChannel` | :class:`~discord.Thread` | int
             The channel or ID to find a webhook for.
 
         Returns
         -------
-        `~discord.Webhook` | None
+        :class:`~discord.Webhook` | None
         """
         logger.debug("Fetching webhook associated with channel %s.", channel_or_id)
 
@@ -1190,7 +1190,7 @@ class Webhooks:
 
         Parameters
         ----------
-        channel_or_id : `~discord.TextChannel` | `~discord.Thread` | int
+        channel_or_id : :class:`~discord.TextChannel` | :class:`~discord.Thread` | int
             The channel or ID to delete.
 
         Returns

@@ -59,9 +59,9 @@ async def on_ready():
         The source or target channels of some existing Bridge are not text channels nor threads off a text channel.
     WebhookChannelError
         Webhook of some existing Bridge is not attached to Bridge's target channel.
-    `~discord.HTTPException`
+    :class:`~discord.HTTPException`
         Deleting an existing webhook or creating a new one failed.
-    `~discord.Forbidden`
+    :class:`~discord.Forbidden`
         You do not have permissions to create or delete webhooks for some of the channels in existing Bridges.
     """
     if globals.is_ready:
@@ -231,9 +231,9 @@ async def on_typing(
 
     Parameters
     ----------
-    channel : `~discord.abc.Messageable`
+    channel : :class:`~discord.abc.Messageable`
         The a user is typing in.
-    user : `~discord.User` | `~discord.Member`
+    user : :class:`~discord.User` | :class:`~discord.Member`
         The user that is typing in the channel.
     """
     if not (
@@ -269,20 +269,20 @@ async def on_typing(
 async def on_message(message: discord.Message):
     """Mirror a message across bridges, if possible.
 
-    This function is called when a Message is created and sent. Requires `~discord.Intents.messages` to be enabled.
+    This function is called when a Message is created and sent. Requires :class:`~discord.Intents.messages` to be enabled.
 
     Parameters
     ----------
-    message : `~discord.Message`
+    message : :class:`~discord.Message`
         The message to bridge.
 
     Raises
     ------
-    `~discord.HTTPException`
+    :class:`~discord.HTTPException`
         Sending a message failed.
-    `~discord.NotFound`
+    :class:`~discord.NotFound`
         One of the webhooks was not found.
-    `~discord.Forbidden`
+    :class:`~discord.Forbidden`
         The authorization token for one of the webhooks is incorrect.
     ValueError
         The length of embeds was invalid, there was no token associated with one of the webhooks or ephemeral was passed with the improper webhook type or there was no state attached with one of the webhooks when giving it a view.
@@ -334,20 +334,20 @@ async def on_message(message: discord.Message):
 async def bridge_message_helper(message: discord.Message):
     """Mirror a message to all of its outbound bridge targets.
 
-    This function is called when a Message is created and sent. Requires `~discord.Intents.messages` to be enabled.
+    This function is called when a Message is created and sent. Requires :class:`~discord.Intents.messages` to be enabled.
 
     Parameters
     ----------
-    message : `~discord.Message`
+    message : :class:`~discord.Message`
         The message to bridge.
 
     Raises
     ------
-    `~discord.HTTPException`
+    :class:`~discord.HTTPException`
         Sending a message failed.
-    `~discord.NotFound`
+    :class:`~discord.NotFound`
         One of the webhooks was not found.
-    `~discord.Forbidden`
+    :class:`~discord.Forbidden`
         The authorization token for one of the webhooks is incorrect.
     ValueError
         The length of embeds was invalid, there was no token associated with one of the webhooks or ephemeral was passed with the improper webhook type or there was no state attached with one of the webhooks when giving it a view.
@@ -698,25 +698,25 @@ async def bridge_message_to_target_channel(
 
     Parameters
     ----------
-    sent_message : `~discord.Message`
+    sent_message : :class:`~discord.Message`
         The message being bridged.
     message_content : str
         Its contents.
-    message_attachments : list[`~discord.Attachment`]
+    message_attachments : list[:class:`~discord.Attachment`]
         Its attachments.
-    message_embeds : list[`~discord.Embed`]
+    message_embeds : list[:class:`~discord.Embed`]
         Its embeds.
     people_to_ping : set[int]
         A set of IDs of people that were @-mentioned in the original message and who haven't already been pinged.
-    target_channel : `~discord.TextChannel` | `~discord.Thread`
+    target_channel : :class:`~discord.TextChannel` | :class:`~discord.Thread`
         The channel or thread the message is being bridged to.
-    webhook : `~discord.Webhook`
+    webhook : :class:`~discord.Webhook`
         The webhook that will send the message.
-    webhook_channel : `~discord.TextChannel`
+    webhook_channel : :class:`~discord.TextChannel`
         The channel the webhook is attached to.
     message_is_reply : bool
         Whether the message being bridged is replying to another message.
-    replied_to_author : `~discord.User` | `~discord.Member` | None
+    replied_to_author : :class:`~discord.User` | :class:`~discord.Member` | None
         The author of the message the message being bridged is replying to, if it is a reply.
     replied_to_content : str | None
         The content of the message the message being bridged is replying to. Defaults to None, in which case it will be fetched from the matching message in the target channel if it can.
@@ -724,13 +724,13 @@ async def bridge_message_to_target_channel(
         The ID of a message the message being bridged is replying to in the target channel.
     reply_has_ping : bool
         Whether the reply is pinging the author of the original message
-    forwarded_message : `~discord.Message` | None
+    forwarded_message : :class:`~discord.Message` | None
         A message being forwarded, in case it is a forward.
     forwarded_message_channel_is_nsfw : bool
         Whether the origin channel of the message being forwarded from is NSFW.
     thread_splat : ThreadSplat
         A splat with the thread this message is being bridged to, if any.
-    session : `~sqlalchemy.orm.Session`
+    session : :class:`~sqlalchemy.orm.Session`
         An SQLAlchemy ORM Session connecting to the database.
 
     Returns
@@ -1043,14 +1043,14 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
 
     Parameters
     ----------
-    payload : `~discord.RawMessageUpdateEvent`
+    payload : :class:`~discord.RawMessageUpdateEvent`
         The raw event payload data.
 
     Raises
     ------
-    `~discord.HTTPException`
+    :class:`~discord.HTTPException`
         Editing a message failed.
-    `~discord.Forbidden`
+    :class:`~discord.Forbidden`
         Tried to edit a message that is not yours.
     ValueError
         The length of embeds was invalid, there was no token associated with a webhook or a webhook had no state.
@@ -1097,7 +1097,7 @@ async def edit_message_helper(
     ----------
     message_content : str
         The updated contents of the message.
-    embeds : list[`~discord.Embed`]
+    embeds : list[:class:`~discord.Embed`]
         The updated embeds of the message.
     message_id : int
         The message ID.
@@ -1108,9 +1108,9 @@ async def edit_message_helper(
 
     Raises
     ------
-    `~discord.HTTPException`
+    :class:`~discord.HTTPException`
         Editing a message failed.
-    `~discord.Forbidden`
+    :class:`~discord.Forbidden`
         Tried to edit a message that is not the Bridge's.
     ValueError
         The length of embeds was invalid, there was no token associated with a webhook or a webhook had no state.
@@ -1300,7 +1300,7 @@ async def replace_missing_emoji(
     ----------
     message_content : str
         The content of the message to process.
-    session : `~sqlalchemy.orm.Session` | None, optional
+    session : :class:`~sqlalchemy.orm.Session` | None, optional
         An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
 
     Returns
@@ -1309,13 +1309,13 @@ async def replace_missing_emoji(
 
     Raises
     ------
-    `~discord.HTTPResponseError`
+    :class:`~discord.HTTPResponseError`
         HTTP request to fetch image returned a status other than 200.
-    `~discord.InvalidURL`
+    :class:`~discord.InvalidURL`
         URL generated from emoji was not valid.
-    `~discord.RuntimeError`
+    :class:`~discord.RuntimeError`
         Session connection failed.
-    `~discord.ServerTimeoutError`
+    :class:`~discord.ServerTimeoutError`
         Connection to server timed out.
     """
     if not globals.emoji_server:
@@ -1408,9 +1408,9 @@ async def replace_discord_links(
     ----------
     content : str | None
         The string to process. If set to None, this function returns None.
-    channel : `~discord.TextChannel` | `~discord.Thread`
+    channel : :class:`~discord.TextChannel` | :class:`~discord.Thread`
         The channel this message is being processed for.
-    session : `~sqlalchemy.orm.Session`
+    session : :class:`~sqlalchemy.orm.Session`
         An SQLAlchemy ORM Session connecting to the database.
 
     Returns
@@ -1419,9 +1419,9 @@ async def replace_discord_links(
 
     Raises
     ------
-    `~discord.RuntimeError`
+    :class:`~discord.RuntimeError`
         Session connection failed.
-    `~discord.ServerTimeoutError`
+    :class:`~discord.ServerTimeoutError`
         Connection to server timed out.
     """
     if content is None:
@@ -1518,14 +1518,14 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
 
     Parameters
     ----------
-    payload : `~discord.RawMessageDeleteEvent`
+    payload : :class:`~discord.RawMessageDeleteEvent`
         The raw event payload data.
 
     Raises
     ------
-    `~discord.HTTPException`
+    :class:`~discord.HTTPException`
         Deleting a message failed.
-    `~discord.Forbidden`
+    :class:`~discord.Forbidden`
         Tried to delete a message that is not yours.
     ValueError
         A webhook does not have a token associated with it.
@@ -1559,9 +1559,9 @@ async def delete_message_helper(message_id: int, channel_id: int):
 
     Raises
     ------
-    `~discord.HTTPException`
+    :class:`~discord.HTTPException`
         Deleting a message failed.
-    `~discord.Forbidden`
+    :class:`~discord.Forbidden`
         Tried to delete a message that is not yours.
     ValueError
         A webhook does not have a token associated with it.
@@ -1726,18 +1726,18 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
 
     Parameters
     ----------
-    payload : `~discord.RawReactionActionEvent`
+    payload : :class:`~discord.RawReactionActionEvent`
         The raw event payload data.
 
     Raises
     ------
-    `~discord.HTTPResponseError`
+    :class:`~discord.HTTPResponseError`
         HTTP request to fetch image returned a status other than 200.
-    `~discord.InvalidURL`
+    :class:`~discord.InvalidURL`
         URL generated from emoji was not valid.
-    `~discord.RuntimeError`
+    :class:`~discord.RuntimeError`
         Session connection failed.
-    `~discord.ServerTimeoutError`
+    :class:`~discord.ServerTimeoutError`
         Connection to server timed out.
     """
     if not await globals.wait_until_ready():
@@ -2046,7 +2046,7 @@ async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
 
     Parameters
     ----------
-    payload : `~discord.RawReactionActionEvent`
+    payload : :class:`~discord.RawReactionActionEvent`
         The raw event payload data.
     """
     if not await globals.wait_until_ready():
@@ -2104,7 +2104,7 @@ async def on_raw_reaction_clear_emoji(payload: discord.RawReactionClearEmojiEven
 
     Parameters
     ----------
-    payload : `~discord.RawReactionClearEmojiEvent`
+    payload : :class:`~discord.RawReactionClearEmojiEvent`
         The raw event payload data.
     """
     if not await globals.wait_until_ready():
@@ -2135,7 +2135,7 @@ async def on_raw_reaction_clear(payload: discord.RawReactionClearEvent):
 
     Parameters
     ----------
-    payload : `~discord.RawReactionClearEvent`
+    payload : :class:`~discord.RawReactionClearEvent`
         The raw event payload data.
     """
     if not await globals.wait_until_ready():
@@ -2165,7 +2165,7 @@ async def unreact(
 
     Parameters
     ----------
-    payload : `~discord.RawReactionActionEvent` | `~discord.RawReactionClearEmojiEvent` | `~discord.RawReactionClearEvent`
+    payload : :class:`~discord.RawReactionActionEvent` | :class:`~discord.RawReactionClearEmojiEvent` | :class:`~discord.RawReactionClearEvent`
         The argument of the call to `on_raw_reaction_remove()`, `on_raw_reaction_clear_emoji()`, or `on_raw_reaction_clear()`.
     """
     if isinstance(payload, discord.RawReactionClearEvent):
@@ -2348,7 +2348,7 @@ async def on_thread_create(thread: discord.Thread):
 
     Parameters
     ----------
-    thread : `~discord.Thread`
+    thread : :class:`~discord.Thread`
         The thread that was created.
     """
     # Bridge a thread from a channel that has auto_bridge_threads enabled

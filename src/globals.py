@@ -146,17 +146,17 @@ async def get_channel_from_id(channel_or_id: int) -> DiscordChannel | None:
 
     Returns
     -------
-    `~discord.abc.GuildChannel` | `~discord.abc.PrivateChannel` | `~discord.Thread` | `~discord.PartialMessageable` | None
+    :class:`~discord.abc.GuildChannel` | :class:`~discord.abc.PrivateChannel` | :class:`~discord.Thread` | :class:`~discord.PartialMessageable` | None
 
     Raises
     ------
-    `~discord.InvalidData`
+    :class:`~discord.InvalidData`
         An unknown channel type was received from Discord when trying to find a channel from the ID.
-    `~discord.HTTPException`
+    :class:`~discord.HTTPException`
         Retrieving a channel from the ID failed.
-    `~discord.NotFound`
+    :class:`~discord.NotFound`
         Invalid channel ID.
-    `~discord.Forbidden`
+    :class:`~discord.Forbidden`
         The client does not not have permission to fetch the channel with that ID.
     """
     ...
@@ -179,17 +179,17 @@ async def get_channel_from_id(
 
     Returns
     -------
-    `~discord.abc.GuildChannel` | `~discord.abc.PrivateChannel` | `~discord.Thread` | `~discord.PartialMessageable` | None
+    :class:`~discord.abc.GuildChannel` | :class:`~discord.abc.PrivateChannel` | :class:`~discord.Thread` | :class:`~discord.PartialMessageable` | None
 
     Raises
     ------
-    `~discord.InvalidData`
+    :class:`~discord.InvalidData`
         An unknown channel type was received from Discord when trying to find a channel from the ID.
-    `~discord.HTTPException`
+    :class:`~discord.HTTPException`
         Retrieving a channel from the ID failed.
-    `~discord.NotFound`
+    :class:`~discord.NotFound`
         Invalid channel ID.
-    `~discord.Forbidden`
+    :class:`~discord.Forbidden`
         The client does not not have permission to fetch the channel with that ID.
     """
     ...
@@ -212,19 +212,19 @@ async def get_channel_from_id(
 
     Returns
     -------
-    `~discord.TextChannel` | `~discord.Thread`
+    :class:`~discord.TextChannel` | :class:`~discord.Thread`
 
     Raises
     ------
     ChannelTypeError
         The channel with the ID passed as argument is not a Discord text channel or a Thread.
-    `~discord.InvalidData`
+    :class:`~discord.InvalidData`
         An unknown channel type was received from Discord when trying to find a channel from the ID.
-    `~discord.HTTPException`
+    :class:`~discord.HTTPException`
         Retrieving a channel from the ID failed.
-    `~discord.NotFound`
+    :class:`~discord.NotFound`
         Invalid channel ID.
-    `~discord.Forbidden`
+    :class:`~discord.Forbidden`
         The client does not not have permission to fetch the channel with that ID.
     """
     ...
@@ -236,12 +236,12 @@ async def get_channel_from_id(channel_or_id: CH) -> CH:
 
     Parameters
     ----------
-    channel_or_id : `~discord.abc.GuildChannel` | `~discord.abc.PrivateChannel` | `~discord.Thread` | `~discord.PartialMessageable`
+    channel_or_id : :class:`~discord.abc.GuildChannel` | :class:`~discord.abc.PrivateChannel` | :class:`~discord.Thread` | :class:`~discord.PartialMessageable`
         A Discord channel.
 
     Returns
     -------
-    `~discord.abc.GuildChannel` | `~discord.abc.PrivateChannel` | `~discord.Thread` | `~discord.PartialMessageable`
+    :class:`~discord.abc.GuildChannel` | :class:`~discord.abc.PrivateChannel` | :class:`~discord.Thread` | :class:`~discord.PartialMessageable`
     """
     ...
 
@@ -256,14 +256,14 @@ async def get_channel_from_id(
 
     Parameters
     ----------
-    channel_or_id : `~discord.abc.GuildChannel` | `~discord.abc.PrivateChannel` | `~discord.Thread` | `~discord.PartialMessageable`
+    channel_or_id : :class:`~discord.abc.GuildChannel` | :class:`~discord.abc.PrivateChannel` | :class:`~discord.Thread` | :class:`~discord.PartialMessageable`
         A Discord channel.
     ensure_text_or_thread : bool, optional
         Whether to assert that the channel is either a Discord text channel or a Thread before returning. Defaults to False.
 
     Returns
     -------
-    `~discord.abc.GuildChannel` | `~discord.abc.PrivateChannel` | `~discord.Thread` | `~discord.PartialMessageable`
+    :class:`~discord.abc.GuildChannel` | :class:`~discord.abc.PrivateChannel` | :class:`~discord.Thread` | :class:`~discord.PartialMessageable`
     """
     ...
 
@@ -278,14 +278,14 @@ async def get_channel_from_id(
 
     Parameters
     ----------
-    channel_or_id : `~discord.TextChannel` | `~discord.Thread`
+    channel_or_id : :class:`~discord.TextChannel` | :class:`~discord.Thread`
         A Discord channel.
     ensure_text_or_thread : bool, optional
         Whether to assert that the channel is either a Discord text channel or a Thread before returning. Defaults to False.
 
     Returns
     -------
-    `~discord.TextChannel` | `~discord.Thread`
+    :class:`~discord.TextChannel` | :class:`~discord.Thread`
 
     Raises
     ------
@@ -305,26 +305,26 @@ async def get_channel_from_id(
 
     Parameters
     ----------
-    channel_or_id : `~discord.abc.GuildChannel` | `~discord.abc.PrivateChannel` | `~discord.Thread` | `~discord.PartialMessageable` | int
+    channel_or_id : :class:`~discord.abc.GuildChannel` | :class:`~discord.abc.PrivateChannel` | :class:`~discord.Thread` | :class:`~discord.PartialMessageable` | int
         Either a Discord channel or an ID of same.
     ensure_text_or_thread : bool, optional
         Whether to assert that the channel is either a Discord text channel or a Thread before returning. Defaults to False.
 
     Returns
     -------
-    `~discord.abc.GuildChannel` | `~discord.abc.PrivateChannel` | `~discord.Thread` | `~discord.PartialMessageable` | None
+    :class:`~discord.abc.GuildChannel` | :class:`~discord.abc.PrivateChannel` | :class:`~discord.Thread` | :class:`~discord.PartialMessageable` | None
 
     Raises
     ------
     ChannelTypeError
         `ensure_text_or_thread` was set to True but the channel or ID passed as argument does not refer to a Discord text channel or a Thread.
-    `~discord.InvalidData`
+    :class:`~discord.InvalidData`
         An unknown channel type was received from Discord when trying to find a channel from the ID.
-    `~discord.HTTPException`
+    :class:`~discord.HTTPException`
         Retrieving a channel from the ID failed.
-    `~discord.NotFound`
+    :class:`~discord.NotFound`
         Invalid channel ID.
-    `~discord.Forbidden`
+    :class:`~discord.Forbidden`
         The client does not not have permission to fetch the channel with that ID.
     """
     if isinstance(channel_or_id, int):
@@ -370,7 +370,7 @@ def get_id_from_channel(channel_or_id: DiscordChannel) -> int:
 
     Parameters
     ----------
-    channel_or_id : `~discord.abc.GuildChannel` | `~discord.abc.PrivateChannel` | `~discord.Thread` | `~discord.PartialMessageable`
+    channel_or_id : :class:`~discord.abc.GuildChannel` | :class:`~discord.abc.PrivateChannel` | :class:`~discord.Thread` | :class:`~discord.PartialMessageable`
         A Discord channel.
 
     Returns
@@ -386,7 +386,7 @@ def get_id_from_channel(channel_or_id: DiscordChannel | int) -> int:
 
     Parameters
     ----------
-    channel_or_id : `~discord.abc.GuildChannel` | `~discord.abc.PrivateChannel` | `~discord.Thread` | `~discord.PartialMessageable` | int
+    channel_or_id : :class:`~discord.abc.GuildChannel` | :class:`~discord.abc.PrivateChannel` | :class:`~discord.Thread` | :class:`~discord.PartialMessageable` | int
         A Discord channel.
 
     Returns
@@ -410,7 +410,7 @@ async def get_channel_parent(channel_or_id: int) -> discord.TextChannel:
 
     Returns
     -------
-    `~discord.TextChannel`
+    :class:`~discord.TextChannel`
 
     Raises
     ------
@@ -426,12 +426,12 @@ async def get_channel_parent(channel_or_id: DiscordChannel) -> discord.TextChann
 
     Parameters
     ----------
-    channel_or_id : `~discord.abc.GuildChannel` | `~discord.abc.PrivateChannel` | `~discord.Thread` | `~discord.PartialMessageable`
+    channel_or_id : :class:`~discord.abc.GuildChannel` | :class:`~discord.abc.PrivateChannel` | :class:`~discord.Thread` | :class:`~discord.PartialMessageable`
         A Discord channel.
 
     Returns
     -------
-    `~discord.TextChannel`
+    :class:`~discord.TextChannel`
 
     Raises
     ------
@@ -449,12 +449,12 @@ async def get_channel_parent(
 
     Parameters
     ----------
-    channel_or_id : `~discord.abc.GuildChannel` | `~discord.abc.PrivateChannel` | `~discord.Thread` | `~discord.PartialMessageable` | int
+    channel_or_id : :class:`~discord.abc.GuildChannel` | :class:`~discord.abc.PrivateChannel` | :class:`~discord.Thread` | :class:`~discord.PartialMessageable` | int
         Either a Discord channel or an ID of same.
 
     Returns
     -------
-    `~discord.TextChannel`
+    :class:`~discord.TextChannel`
 
     Raises
     ------
@@ -483,22 +483,22 @@ async def get_channel_member(
 
     Parameters
     ----------
-    channel : `~discord.abc.GuildChannel` | `~discord.Thread`
+    channel : :class:`~discord.abc.GuildChannel` | :class:`~discord.Thread`
         A Discord channel in a server.
     member_id : int
         The ID of the channel member.
 
     Returns
     -------
-    `~discord.Member` | None
+    :class:`~discord.Member` | None
 
     Raises
     ------
-    `~discord.HTTPException`
+    :class:`~discord.HTTPException`
         Fetching the member failed.
-    `~discord.NotFound`
+    :class:`~discord.NotFound`
         The member could not be found.
-    `~discord.Forbidden`
+    :class:`~discord.Forbidden`
         The client does not not have access to the server the channel is in.
     """
     channel_member = channel.guild.get_member(member_id)
@@ -570,7 +570,7 @@ async def get_emoji_information(
 
     Parameters
     ----------
-    emoji : `~discord.PartialEmoji` | `~discord.Emoji`
+    emoji : :class:`~discord.PartialEmoji` | :class:`~discord.Emoji`
         A custom Discord emoji.
 
     Returns
@@ -580,7 +580,7 @@ async def get_emoji_information(
     Raises
     ------
     ValueError
-        `emoji` had type `~discord.PartialEmoji` but it was not a custom emoji.
+        `emoji` had type :class:`~discord.PartialEmoji` but it was not a custom emoji.
     """
     ...
 
