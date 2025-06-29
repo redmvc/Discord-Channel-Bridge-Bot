@@ -211,6 +211,7 @@ async def on_ready():
         print("Bot is not connected to any servers.")
         logger.info("Bot is not connected to any servers.")
 
+    globals.is_connected = True
     globals.is_ready = True
     logger.info("Bot is ready.")
 
@@ -229,6 +230,7 @@ async def on_typing(
     """
     if not (
         globals.is_ready
+        and globals.is_connected
         and globals.rate_limiter.has_capacity()
         and isinstance(channel, (discord.TextChannel, discord.Thread))
         and globals.client.user
@@ -904,7 +906,7 @@ async def _bridge_message_to_target_channel(
                         attachments
                         if len(message_content) == 0
                         else []  # Only attach files on the last message
-                    ),  # TODO might throw HHTPException if too large?
+                    ),  # TODO: might throw HHTPException if too large?
                     wait=True,
                     **thread_splat,
                 )
@@ -2294,6 +2296,111 @@ async def on_guild_remove(server: discord.Guild):
     left_server_msg = f"Just left server '{server.name}'."
     logger.info(left_server_msg)
     print(left_server_msg)
+
+
+@globals.client.event
+async def on_disconnect():
+    """
+    Mark the bot as disconnected.
+    """
+    globals.is_connected = False
+
+
+@globals.client.event
+async def on_connect():
+    await reconnect()
+
+
+@globals.client.event
+async def on_resumed():
+    await reconnect()
+
+
+async def reconnect():
+    """
+    Mark the bot as connected and try to check for new messages that haven't been bridged.
+    """
+    if (not globals.is_ready) or globals.is_connected:
+        return
+
+    globals.is_connected = True
+
+    # Find all channels that have outbound bridges.
+    bridged_channel_ids = bridges.get_channels_with_outbound_bridges()
+    if len(bridged_channel_ids) == 0:
+        return
+
+    with SQLSession(engine) as session:
+        # Find the latest bridged messages from each channel
+        try:
+            subquery = (
+                session.query(
+                    DBMessageMap.source_channel,
+                    func.max(DBMessageMap.id).label("max_id"),
+                )
+                .group_by(DBMessageMap.source_channel)
+                .subquery()
+            )
+            select_latest_bridged_messages: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
+                DBMessageMap
+            ).join(
+                subquery,
+                (DBMessageMap.source_channel == subquery.c.source_channel)
+                & (DBMessageMap.id == subquery.c.max_id),
+            )
+
+            bridged_messages_query_result: ScalarResult[DBMessageMap] = session.scalars(
+                select_latest_bridged_messages
+            )
+        except Exception:
+            session.rollback()
+            session.close()
+            raise
+
+        for bridged_message_row in bridged_messages_query_result:
+            # Check whether the ID of the latest bridged message for a channel is also the ID of that channel's latest message
+            channel_id = int(bridged_message_row.source_channel)
+            message_id = int(bridged_message_row.source_message)
+
+            try:
+                channel = await globals.get_channel_from_id(
+                    channel_id,
+                    assert_text_or_thread=True,
+                )
+            except AssertionError:
+                continue
+
+            if channel.last_message_id and channel.last_message_id == message_id:
+                # Most recent message in the channel has been bridged
+                continue
+
+            # There might be unbridged messages, try to find them
+            try:
+                latest_bridged_message = channel.get_partial_message(message_id)
+
+                messages_after_latest_bridged = [
+                    message
+                    async for message in channel.history(
+                        after=latest_bridged_message.created_at,
+                        oldest_first=True,
+                    )
+                ]
+            except discord.Forbidden as e:
+                logger.warning(
+                    "An error occurred when attempting to fetch unbridged messages after a disconnection:\n%s",
+                    e,
+                )
+                continue
+
+            # Try to bridge them
+            for message_to_bridge in messages_after_latest_bridged:
+                if message_to_bridge.id == message_id:
+                    continue
+
+                try:
+                    await on_message(message_to_bridge)
+                except Exception:
+                    break
 
 
 app_token = globals.settings.get("app_token")
