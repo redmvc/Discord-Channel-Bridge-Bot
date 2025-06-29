@@ -477,14 +477,14 @@ async def wait_until_ready(
 
     #### Args:
         - `time_to_wait`: The amount of time in seconds to wait for the bot to get ready. Values less than 0 will be treated as 0. Defaults to 100.
-        - `polling_rate`: The amount of time in seconds to wait between checks for the variable. Values less than 0 will be treated as 0. Defaults to 1.
+        - `polling_rate`: The amount of time in seconds to wait between checks for the variable. Values less than 1 will be treated as 1. Defaults to 1.
     """
     global is_ready
     if is_ready:
         return True
 
     time_to_wait = max(time_to_wait, 0.0)
-    polling_rate = max(polling_rate, 0.0)
+    polling_rate = max(polling_rate, 1.0)
     time_waited = 0.0
     while not is_ready and time_waited < time_to_wait:
         await asyncio.sleep(polling_rate)
