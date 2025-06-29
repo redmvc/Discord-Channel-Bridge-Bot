@@ -5,7 +5,16 @@ import inspect
 import io
 import json
 from hashlib import md5
-from typing import Any, Callable, Literal, SupportsInt, TypedDict, TypeVar, cast
+from typing import (
+    Any,
+    Callable,
+    Literal,
+    SupportsInt,
+    TypedDict,
+    TypeVar,
+    cast,
+    overload,
+)
 
 import aiohttp
 import discord
@@ -103,6 +112,9 @@ command_tree = discord.app_commands.CommandTree(client)
 # This one is set to True once the bot has been initialised in main.py
 is_ready: bool = False
 
+# Set to True when the bot is connected and false when it's disconnected
+is_connected: bool = False
+
 # Channels which will automatically create threads in bridged channels
 auto_bridge_thread_channels: set[int] = set()
 
@@ -118,11 +130,14 @@ rate_limiter = AsyncLimiter(1, 10)
 # Variable to keep track of messages that are still being bridged/edited before they can be edited/deleted
 message_lock: dict[int, asyncio.Lock] = {}
 
+# Variable to keep track of channels that are being sent messages to to try to preserve ordering
+channel_lock: dict[int, asyncio.Lock] = {}
+
 # Type wildcard
 T = TypeVar("T", bound=Any)
 
 
-@beartype
+@overload
 async def get_channel_from_id(
     channel_or_id: (
         GuildChannel
@@ -139,11 +154,71 @@ async def get_channel_from_id(
     | discord.PartialMessageable
     | discord.DMChannel
     | None
+): ...
+
+
+@overload
+async def get_channel_from_id(
+    channel_or_id: (
+        GuildChannel
+        | discord.Thread
+        | discord.DMChannel
+        | discord.PartialMessageable
+        | discord.abc.PrivateChannel
+        | int
+    ),
+    *,
+    assert_text_or_thread: Literal[False],
+) -> (
+    GuildChannel
+    | discord.Thread
+    | discord.abc.PrivateChannel
+    | discord.PartialMessageable
+    | discord.DMChannel
+    | None
+): ...
+
+
+@overload
+async def get_channel_from_id(
+    channel_or_id: (
+        GuildChannel
+        | discord.Thread
+        | discord.DMChannel
+        | discord.PartialMessageable
+        | discord.abc.PrivateChannel
+        | int
+    ),
+    *,
+    assert_text_or_thread: Literal[True],
+) -> discord.TextChannel | discord.Thread: ...
+
+
+@beartype
+async def get_channel_from_id(
+    channel_or_id: (
+        GuildChannel
+        | discord.Thread
+        | discord.DMChannel
+        | discord.PartialMessageable
+        | discord.abc.PrivateChannel
+        | int
+    ),
+    *,
+    assert_text_or_thread: bool = False,
+) -> (
+    GuildChannel
+    | discord.Thread
+    | discord.abc.PrivateChannel
+    | discord.PartialMessageable
+    | discord.DMChannel
+    | None
 ):
     """Ensure that this function's argument is a valid Discord channel, when it may instead be a channel ID.
 
     #### Args:
         - `channel_or_id`: Either a Discord channel or an ID of same.
+        - `assert_text_or_thread`: Whether to assert that the channel is either a TextChannel or a Thread before returning. Defaults to False.
 
     #### Returns:
         - If the argument is a channel, returns it unchanged; otherwise, returns a channel with the ID passed, or None if it couldn't be found.
@@ -157,6 +232,9 @@ async def get_channel_from_id(
                 channel = None
     else:
         channel = channel_or_id
+
+    if assert_text_or_thread:
+        assert isinstance(channel, discord.TextChannel | discord.Thread)
 
     return channel
 
@@ -220,7 +298,8 @@ async def get_channel_parent(
 
 @beartype
 async def get_channel_member(
-    channel: GuildChannel | discord.Thread, member_id: int
+    channel: GuildChannel | discord.Thread,
+    member_id: int,
 ) -> discord.Member | None:
     """Return a channel's member by their ID, or None if they can't be found.
 
@@ -291,21 +370,6 @@ def get_emoji_information(
         - `ArgumentError`: Neither `emoji` nor `emoji_id` were passed, or `emoji_id` was passed but not `emoji_name`.
         - `ValueError`: `emoji` argument was passed and had type `PartialEmoji` but it was not a custom emoji, or `emoji_id` argument was passed and had type `str` but it was not a valid numerical ID.
     """
-    if not emoji:
-        if emoji_id:
-            if not emoji_name:
-                err = ArgumentError(
-                    f"Error in function {inspect.stack()[1][3]}(): if emoji_id is passed as argument to get_emoji_information(), emoji_name must also be."
-                )
-                logger.error(err)
-                raise err
-        else:
-            err = ArgumentError(
-                f"Error in function {inspect.stack()[1][3]}(): at least one of emoji or emoji_id must be passed as argument to get_emoji_information()."
-            )
-            logger.error(err)
-            raise err
-
     if emoji:
         if not emoji.id:
             err = ValueError(
@@ -319,10 +383,20 @@ def get_emoji_information(
         emoji_animated = emoji.animated
         emoji_url = emoji.url
     else:
-        assert emoji_id and isinstance(emoji_name, str)
+        if not emoji_id:
+            err = ArgumentError(
+                f"Error in function {inspect.stack()[1][3]}(): either emoji or both emoji_id and emoji_name must be passed as argument to get_emoji_information()."
+            )
+            logger.error(err)
+            raise err
+        elif not emoji_name:
+            err = ArgumentError(
+                f"Error in function {inspect.stack()[1][3]}(): if emoji_id is passed as argument to get_emoji_information(), emoji_name must also be."
+            )
+            logger.error(err)
+            raise err
 
-        emoji_animated = emoji_name.startswith("a:")
-        if emoji_animated:
+        if emoji_animated := emoji_name.startswith("a:"):
             emoji_name = emoji_name[2:]
         elif emoji_name.startswith(":"):
             emoji_name = emoji_name[1:]
@@ -371,7 +445,9 @@ def truncate(msg: str, length: int) -> str:
 
 @beartype
 async def wait_until_ready(
-    *, time_to_wait: float | int = 100, polling_rate: float | int = 1
+    *,
+    time_to_wait: float | int = 100,
+    polling_rate: float | int = 1,
 ) -> bool:
     """Return True when the bot is ready or False if it times out.
 

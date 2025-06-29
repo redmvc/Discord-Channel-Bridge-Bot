@@ -1,7 +1,7 @@
 import asyncio
 import inspect
 from copy import deepcopy
-from typing import Any, Callable, Coroutine, Literal, cast, overload
+from typing import Any, Callable, Coroutine, Literal, overload
 
 import discord
 from beartype import beartype
@@ -105,9 +105,9 @@ class Bridge:
 
     @property
     async def source_channel(self) -> discord.TextChannel | discord.Thread:
-        return cast(
-            discord.TextChannel | discord.Thread,
-            await globals.get_channel_from_id(self.source_id),
+        return await globals.get_channel_from_id(
+            self.source_id,
+            assert_text_or_thread=True,
         )
 
     @property
@@ -117,9 +117,9 @@ class Bridge:
 
     @property
     async def target_channel(self) -> discord.TextChannel | discord.Thread:
-        return cast(
-            discord.TextChannel | discord.Thread,
-            await globals.get_channel_from_id(self.target_id),
+        return await globals.get_channel_from_id(
+            self.target_id,
+            assert_text_or_thread=True,
         )
 
     @property
@@ -842,7 +842,8 @@ class Bridges:
 
     @beartype
     def get_outbound_bridges(
-        self, source: discord.TextChannel | discord.Thread | int
+        self,
+        source: discord.TextChannel | discord.Thread | int,
     ) -> dict[int, Bridge] | None:
         """
         Return a dict with all Bridges from source channel, identified by the target channel id.
@@ -859,9 +860,20 @@ class Bridges:
         logger.debug("Fetching outbound bridges from %s.", source)
         return self._outbound_bridges.get(globals.get_id_from_channel(source))
 
+    def get_channels_with_outbound_bridges(self) -> set[int]:
+        """
+        Return a set with the IDs of all channels that have outbound bridges coming from them.
+
+        Returns
+        -------
+        set[int]
+        """
+        return set(self._outbound_bridges.keys())
+
     @beartype
     def get_inbound_bridges(
-        self, target: discord.TextChannel | discord.Thread | int
+        self,
+        target: discord.TextChannel | discord.Thread | int,
     ) -> dict[int, Bridge] | None:
         """
         Return a dict with all Bridges to target channel, identified by the source channel id.
@@ -1141,7 +1153,8 @@ class Webhooks:
 
     @beartype
     async def get_webhook(
-        self, channel_or_id: discord.TextChannel | discord.Thread | int
+        self,
+        channel_or_id: discord.TextChannel | discord.Thread | int,
     ) -> discord.Webhook | None:
         """
         Return a webhook associated with a channel (or a thread's parent) or None if there isn't one.
@@ -1187,7 +1200,8 @@ class Webhooks:
 
     @beartype
     async def delete_channel(
-        self, channel_or_id: discord.TextChannel | discord.Thread | int
+        self,
+        channel_or_id: discord.TextChannel | discord.Thread | int,
     ) -> int | None:
         """
         Delete a channel from the list of webhooks and, if there are no longer any channels associated with its webhook, delete it and return its ID.
