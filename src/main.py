@@ -1026,9 +1026,7 @@ async def _bridge_message_to_target_channel(
 
 @globals.client.event
 async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
-    """Edit bridged versions of a message, if possible.
-
-    This function is called when a message is edited. Unlike `on_message_edit()`, this is called regardless of the state of the internal message cache.
+    """This function is called when a message is edited. Unlike `on_message_edit()`, this is called regardless of the state of the internal message cache.
 
     Parameters
     ----------
@@ -1044,36 +1042,38 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
     ValueError
         The length of embeds was invalid, there was no token associated with a webhook or a webhook had no state.
     """
+    if not (updated_message_content := payload.data.get("content")):
+        # Not a content edit
+        return
+
+    if not await globals.wait_until_ready():
+        return
+
+    if not bridges.get_outbound_bridges(payload.channel_id):
+        return
+
     lock = globals.message_lock.get(payload.message_id)
     if not lock:
-        lock = globals.message_lock[payload.message_id] = asyncio.Lock()
+        lock = asyncio.Lock()
+        globals.message_lock[payload.message_id] = lock
 
     async with lock:
-        updated_message_content = payload.data.get("content")
-        if not updated_message_content or updated_message_content == "":
-            # Not a content edit
-            return
-
-        if not await globals.wait_until_ready():
-            return
-
-        if not bridges.get_outbound_bridges(payload.channel_id):
-            return
-
-        embeds = [
-            discord.Embed.from_dict(embed) for embed in payload.data.get("embeds")
-        ]
         await edit_message_helper(
-            updated_message_content,
-            embeds,
-            payload.message_id,
-            payload.channel_id,
-            int(payload.data.get("type")) == discord.MessageType.reply.value,
+            message_content=updated_message_content,
+            embeds=[
+                discord.Embed.from_dict(embed) for embed in payload.data.get("embeds")
+            ],
+            message_id=payload.message_id,
+            channel_id=payload.channel_id,
+            message_is_reply=(
+                int(payload.data.get("type")) == discord.MessageType.reply.value
+            ),
         )
 
 
 @beartype
 async def edit_message_helper(
+    *,
     message_content: str,
     embeds: list[discord.Embed],
     message_id: int,
@@ -1501,9 +1501,7 @@ async def replace_discord_links(
 
 @globals.client.event
 async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
-    """Delete bridged versions of a message.
-
-    This function is called when a message is deleted. Unlike `on_message_delete()`, this is called regardless of the message being in the internal message cache or not.
+    """This function is called when a message is deleted. Unlike `on_message_delete()`, this is called regardless of the message being in the internal message cache or not.
 
     Parameters
     ----------
@@ -1519,17 +1517,18 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
     ValueError
         A webhook does not have a token associated with it.
     """
+    if not await globals.wait_until_ready():
+        return
+
+    if not bridges.get_outbound_bridges(payload.channel_id):
+        return
+
     lock = globals.message_lock.get(payload.message_id)
     if not lock:
-        lock = globals.message_lock[payload.message_id] = asyncio.Lock()
+        lock = asyncio.Lock()
+        globals.message_lock[payload.message_id] = lock
 
     async with lock:
-        if not await globals.wait_until_ready():
-            return
-
-        if not bridges.get_outbound_bridges(payload.channel_id):
-            return
-
         await delete_message_helper(payload.message_id, payload.channel_id)
 
     del globals.message_lock[payload.message_id]
@@ -1709,9 +1708,7 @@ async def delete_message_helper(message_id: int, channel_id: int):
 
 @globals.client.event
 async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
-    """Bridge reactions added to a message, if possible.
-
-    This function is called when a message has a reaction added. Unlike `on_reaction_add()`, this is called regardless of the state of the internal message cache.
+    """This function is called when a message has a reaction added. Unlike `on_reaction_add()`, this is called regardless of the state of the internal message cache.
 
     Parameters
     ----------
@@ -1740,20 +1737,55 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         # Only bridge reactions across outbound bridges
         return
 
+    await bridge_reaction_add(
+        message_id=payload.message_id,
+        channel_id=payload.channel_id,
+        emoji=payload.emoji,
+    )
+
+
+async def bridge_reaction_add(
+    *,
+    message_id: int,
+    channel_id: int,
+    emoji: discord.PartialEmoji,
+):
+    """Bridge reactions added to a message, if possible.
+
+    Parameters
+    ----------
+    message_id : int
+        The ID of the message being reacted to.
+    channel_id : int
+        The ID of the channel the message is in.
+    emoji : :class:`~discord.PartialEmoji`
+        The emoji being added to the message.
+
+    Raises
+    ------
+    :class:`~discord.HTTPResponseError`
+        HTTP request to fetch image returned a status other than 200.
+    :class:`~discord.InvalidURL`
+        URL generated from emoji was not valid.
+    :class:`~discord.RuntimeError`
+        Session connection failed.
+    :class:`~discord.ServerTimeoutError`
+        Connection to server timed out.
+    """
     logger.debug(
         "Bridging reaction add of %s to message with ID %s.",
-        payload.emoji,
-        payload.message_id,
+        emoji,
+        message_id,
     )
 
     # Choose a "fallback emoji" to use in case I don't have access to the one being reacted and the message across the bridge doesn't already have it
     fallback_emoji: discord.Emoji | str | None
-    if payload.emoji.is_custom_emoji() and (emoji_id := payload.emoji.id):
+    if emoji.is_custom_emoji() and (emoji_id := emoji.id):
         # is_custom_emoji() guarantees that emoji.id is not None
         # Custom emoji, I need to check whether it exists and is available to me
         # I'll add this to my hash map if it's not there already
         try:
-            await emoji_hash_map.map.ensure_hash_map(emoji=payload.emoji)
+            await emoji_hash_map.map.ensure_hash_map(emoji=emoji)
         except Exception as e:
             logger.error(
                 "An error occurred when calling ensure_hash_map() from on_raw_reaction_add(): %s",
@@ -1774,33 +1806,32 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
             # I don't have the emoji mapped locally, I'll add it to my server and update my map
             try:
                 fallback_emoji = await emoji_hash_map.map.copy_emoji_into_server(
-                    emoji_to_copy=payload.emoji
+                    emoji_to_copy=emoji
                 )
             except Exception:
                 fallback_emoji = None
     else:
         # It's a standard emoji, it's fine
-        fallback_emoji = payload.emoji.name
+        fallback_emoji = emoji.name
         emoji_id_str = fallback_emoji
 
     # Get the IDs of all emoji that match the current one
-    equivalent_emoji_ids = emoji_hash_map.map.get_matches(
-        payload.emoji, return_str=True
-    )
+    equivalent_emoji_ids = emoji_hash_map.map.get_matches(emoji, return_str=True)
     if not equivalent_emoji_ids:
-        equivalent_emoji_ids = frozenset(str(payload.emoji.id))
+        equivalent_emoji_ids = frozenset(str(emoji.id))
 
     # Now find the list of channels that can validly be reached via outbound chains from this channel
     reachable_channel_ids = await bridges.get_reachable_channels(
-        payload.channel_id, "outbound"
+        channel_id,
+        "outbound",
     )
 
     # Find and react to all messages matching this one
     session = None
     try:
         # Create a function to add reactions to messages asynchronously and gather them all at the end
-        source_message_id_str = str(payload.message_id)
-        source_channel_id_str = str(payload.channel_id)
+        source_message_id_str = str(message_id)
+        source_channel_id_str = str(channel_id)
         async_add_reactions: list[Coroutine[Any, Any, DBReactionMap | None]] = []
 
         async def add_reaction_helper(
@@ -1933,8 +1964,8 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                         raise
             else:
                 # This message is (or might be) the source
-                source_message_id = payload.message_id
-                source_channel_id = payload.channel_id
+                source_message_id = message_id
+                source_channel_id = channel_id
 
             if not bridges.get_outbound_bridges(source_channel_id):
                 if len(async_add_reactions) > 0:
@@ -2028,9 +2059,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
 
 @globals.client.event
 async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
-    """Bridge reaction removal, if necessary.
-
-    This function is called when a message has a reaction removed. Unlike `on_reaction_remove()`, this is called regardless of the state of the internal message cache.
+    """This function is called when a message has a reaction removed. Unlike `on_reaction_remove()`, this is called regardless of the state of the internal message cache.
 
     Parameters
     ----------
@@ -2042,31 +2071,37 @@ async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
 
     if not globals.client.user:
         return
-    client_user_id = globals.client.user.id
-    if payload.user_id == client_user_id:
+
+    if (client_user_id := globals.client.user.id) == payload.user_id:
+        # Don't bridge my own reactions
         return
 
-    if not bridges.get_outbound_bridges(payload.channel_id):
+    if not bridges.get_outbound_bridges(channel_id := payload.channel_id):
         # Only remove reactions across outbound bridges
         return
 
-    channel = await globals.get_channel_from_id(payload.channel_id)
-    if not isinstance(channel, (discord.TextChannel, discord.Thread)):
+    try:
+        channel = await globals.get_channel_from_id(
+            channel_id,
+            ensure_text_or_thread=True,
+        )
+    except ChannelTypeError:
         # This really shouldn't happen
+        logger.error(
+            "Channel with ID %s is registered to bot's bridged channels but isn't a text channel nor a thread off one.",
+            channel_id,
+        )
         return
 
-    logger.debug(
-        "Bridging reaction removal of %s from message with ID %s.",
-        payload.emoji,
-        payload.message_id,
-    )
-
     # I will try to see if this emoji still has other reactions in it and, if so, stop doing this as I don't care anymore
-    message = await channel.fetch_message(payload.message_id)
+    message_id = payload.message_id
+    message = await channel.fetch_message(message_id)
+
+    emoji = payload.emoji
     reactions_with_emoji = {
         reaction
         for reaction in message.reactions
-        if reaction.emoji == payload.emoji.name or reaction.emoji == payload.emoji
+        if reaction.emoji == emoji.name or reaction.emoji == emoji
     }
     for reaction in reactions_with_emoji:
         async for user in reaction.users():
@@ -2074,21 +2109,45 @@ async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
                 # There is at least one user who reacted to this message other than me, so I don't need to do anything
                 return
 
+    await bridge_reaction_remove(
+        message_id=message_id,
+        emoji=emoji,
+    )
+
+
+async def bridge_reaction_remove(
+    *,
+    message_id: int,
+    emoji: discord.PartialEmoji,
+):
+    """Bridge reaction removal.
+
+    Parameters
+    ----------
+    message_id : int
+        The ID of the message a reaction is being removed from.
+    emoji : :class:`~discord.PartialEmoji`
+        The emoji being removed.
+    """
+    logger.debug(
+        "Bridging reaction removal of %s from message with ID %s.",
+        emoji,
+        message_id,
+    )
+
     # If I'm here, there are no remaining reactions of this kind on this message except perhaps for my own
-    await unreact(payload)
+    await unreact(message_id=message_id, emoji_to_remove=emoji)
 
     logger.debug(
         "Successfully bridged reaction removal of %s from message with ID %s.",
-        payload.emoji,
-        payload.message_id,
+        emoji,
+        message_id,
     )
 
 
 @globals.client.event
 async def on_raw_reaction_clear_emoji(payload: discord.RawReactionClearEmojiEvent):
-    """Bridge reaction removal, if necessary.
-
-    This function is called when a message has a specific reaction removed it. Unlike `on_reaction_clear_emoji()`, this is called regardless of the state of the internal message cache.
+    """This function is called when a message has a specific reaction removed it. Unlike `on_reaction_clear_emoji()`, this is called regardless of the state of the internal message cache.
 
     Parameters
     ----------
@@ -2102,16 +2161,37 @@ async def on_raw_reaction_clear_emoji(payload: discord.RawReactionClearEmojiEven
         # Only remove reactions across outbound bridges
         return
 
+    await bridge_reaction_clear_emoji(
+        message_id=payload.message_id, emoji=payload.emoji
+    )
+
+
+async def bridge_reaction_clear_emoji(
+    *,
+    message_id: int,
+    emoji: discord.PartialEmoji,
+):
+    """Bridge reaction removal.
+
+    Parameters
+    ----------
+    message_id : int
+        The ID of the message a reaction is being removed from.
+    emoji : :class:`~discord.PartialEmoji`
+        The emoji being removed.
+    """
     logger.debug(
         "Bridging reaction clear of %s from message with ID %s.",
-        payload.emoji,
-        payload.message_id,
+        emoji,
+        message_id,
     )
-    await unreact(payload)
+
+    await unreact(message_id=message_id, emoji_to_remove=emoji)
+
     logger.debug(
         "Successfully bridged clear removal of %s from message with ID %s.",
-        payload.emoji,
-        payload.message_id,
+        emoji,
+        message_id,
     )
 
 
@@ -2133,49 +2213,76 @@ async def on_raw_reaction_clear(payload: discord.RawReactionClearEvent):
         # Only remove reactions across outbound bridges
         return
 
-    logger.debug("Bridging reaction clear from message with ID %s.", payload.message_id)
-    await unreact(payload)
+    message_id = payload.message_id
+
+    logger.debug("Bridging reaction clear from message with ID %s.", message_id)
+
+    await unreact(message_id=message_id)
+
     logger.debug(
         "Successfully bridged clear removal from message with ID %s.",
-        payload.message_id,
+        message_id,
     )
+
+
+@overload
+async def unreact(*, message_id: int):
+    """Remove all reactions by the bot from messages bridged from a given message (but not from the message itself).
+
+    Parameters
+    ----------
+    message_id : int
+        The ID of the message a reaction is being removed from.
+    """
+    ...
+
+
+@overload
+async def unreact(*, message_id: int, emoji_to_remove: discord.PartialEmoji):
+    """Remove all reactions by the bot using a given emoji from messages bridged from a given message (but not from the message itself).
+
+    Parameters
+    ----------
+    message_id : int
+        The ID of the message a reaction is being removed from.
+    emoji : :class:`~discord.PartialEmoji`
+        The emoji being removed.
+    """
+    ...
 
 
 @beartype
 async def unreact(
-    payload: (
-        discord.RawReactionActionEvent
-        | discord.RawReactionClearEmojiEvent
-        | discord.RawReactionClearEvent
-    ),
+    *,
+    message_id: int,
+    emoji_to_remove: discord.PartialEmoji | None = None,
 ):
-    """Remove all reactions by the bot using a given emoji (or all emoji) on messages bridged from the current one (but not the current one itself).
+    """Remove all reactions by the bot using a given emoji (or all emoji) from messages bridged from a given message (but not from the message itself).
 
     Parameters
     ----------
-    payload : :class:`~discord.RawReactionActionEvent` | :class:`~discord.RawReactionClearEmojiEvent` | :class:`~discord.RawReactionClearEvent`
-        The argument of the call to `on_raw_reaction_remove()`, `on_raw_reaction_clear_emoji()`, or `on_raw_reaction_clear()`.
+    message_id : int
+        The ID of the message a reaction is being removed from.
+    emoji : :class:`~discord.PartialEmoji` | None, optional
+        The emoji being removed. Defaults to None, in which case all of them will be.
     """
-    if isinstance(payload, discord.RawReactionClearEvent):
-        # Clear all reactions
-        emoji_to_remove = None
-        removed_emoji_id = None
-        equivalent_emoji_ids = None
-    else:
-        # Remove just one emoji
-        emoji_to_remove = payload.emoji
+    if emoji_to_remove:
         removed_emoji_id = (
             str(emoji_to_remove.id) if emoji_to_remove.id else emoji_to_remove.name
         )
         equivalent_emoji_ids = emoji_hash_map.map.get_matches(
-            emoji_to_remove, return_str=True
+            emoji_to_remove,
+            return_str=True,
         )
+    else:
+        removed_emoji_id = None
+        equivalent_emoji_ids = None
 
     session = None
     try:
         with SQLSession(engine) as session:
             # First I find all of the messages that got this reaction bridged to them
-            conditions = [DBReactionMap.source_message == str(payload.message_id)]
+            conditions = [DBReactionMap.source_message == str(message_id)]
             if removed_emoji_id:
                 conditions.append(DBReactionMap.source_emoji == removed_emoji_id)
 
@@ -2191,9 +2298,12 @@ async def unreact(
                     map.target_channel,
                     map.target_emoji_id,
                     map.target_emoji_name,
-                    equivalent_emoji_ids
-                    or emoji_hash_map.map.get_matches(
-                        map.source_emoji, return_str=True
+                    (
+                        equivalent_emoji_ids
+                        or emoji_hash_map.map.get_matches(
+                            map.source_emoji,
+                            return_str=True,
+                        )
                     ),
                 )
                 for map in bridged_reactions
@@ -2229,9 +2339,11 @@ async def unreact(
                     map.target_channel,
                     map.target_emoji_id,
                     map.target_emoji_name,
-                    equivalent_emoji_ids
-                    or emoji_hash_map.map.get_matches(
-                        map.source_emoji, return_str=True
+                    (
+                        equivalent_emoji_ids
+                        or emoji_hash_map.map.get_matches(
+                            map.source_emoji, return_str=True
+                        )
                     ),
                 )
                 for map in remaining_reactions
@@ -2330,9 +2442,7 @@ async def unreact(
 
 @globals.client.event
 async def on_thread_create(thread: discord.Thread):
-    """Create matching threads across a bridge if the created thread's parent channel has auto-bridge-threads enabled.
-
-    This function is called whenever a thread is created.
+    """This function is called whenever a thread is created.
 
     Parameters
     ----------
@@ -2363,6 +2473,17 @@ async def on_thread_create(thread: discord.Thread):
     if not thread.permissions_for(thread.guild.me).manage_webhooks:
         return
 
+    await auto_bridge_thread(thread)
+
+
+async def auto_bridge_thread(thread: discord.Thread):
+    """Create matching threads across a bridge if the created thread's parent channel has auto-bridge-threads enabled.
+
+    Parameters
+    ----------
+    thread : :class:`~discord.Thread`
+        The thread that was created.
+    """
     logger.debug("Automatically bridging thread with ID %s.", thread.id)
 
     try:
@@ -2430,10 +2551,13 @@ async def reconnect():
     globals.is_connected = True
 
     # Find all channels that have outbound bridges.
-    bridged_channel_ids = bridges.get_channels_with_outbound_bridges()
-    if len(bridged_channel_ids) == 0:
+    if len(bridges.get_channels_with_outbound_bridges()) == 0:
         return
 
+    await bridge_unbridged_messages()
+
+
+async def bridge_unbridged_messages():
     with SQLSession(engine) as session:
         # Find the latest bridged messages from each channel
         try:
