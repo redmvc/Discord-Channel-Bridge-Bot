@@ -600,37 +600,27 @@ class EmojiHashMap:
                 accessible=True,
             )
 
-        session = None
-        try:
-            with Session() as session:
-                for server in servers:
-                    logger.debug("Loading server %s...", server.name)
+        with Session.begin() as session:
+            for server in servers:
+                logger.debug("Loading server %s...", server.name)
 
-                    update_emoji_async: list[Coroutine[Any, Any, UpdateBase]] = []
+                update_emoji_async: list[Coroutine[Any, Any, UpdateBase]] = []
 
-                    is_internal = (
-                        globals.emoji_server is not None
-                        and server.id == globals.emoji_server.id
+                is_internal = (
+                    globals.emoji_server is not None
+                    and server.id == globals.emoji_server.id
+                )
+                for emoji in server.emojis:
+                    update_emoji_async.append(
+                        update_emoji(server.id, is_internal, emoji)
                     )
-                    for emoji in server.emojis:
-                        update_emoji_async.append(
-                            update_emoji(server.id, is_internal, emoji)
-                        )
 
-                    # I'll gather the requests one server at a time
-                    upserts = await asyncio.gather(*update_emoji_async)
-                    for upsert in upserts:
-                        session.execute(upsert)
+                # I'll gather the requests one server at a time
+                upserts = await asyncio.gather(*update_emoji_async)
+                for upsert in upserts:
+                    session.execute(upsert)
 
-                    logger.debug("Server %s loaded.", server.name)
-
-                session.commit()
-        except Exception:
-            if session:
-                session.rollback()
-                session.close()
-
-            raise
+                logger.debug("Server %s loaded.", server.name)
 
         logger.info(ending_info_message)
 
