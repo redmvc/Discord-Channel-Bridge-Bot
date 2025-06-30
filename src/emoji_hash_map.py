@@ -502,7 +502,29 @@ class EmojiHashMap:
         logger.debug("Emoji with ID %s deleted from database.", emoji_id)
 
     @overload
-    async def load_server_emoji(self, server_id: int):
+    async def load_server_emoji(self, *, session: SQLSession | None = None):
+        """Load all emoji in all servers the bot is connected to into the hash map.
+
+        Raises
+        ------
+        HTTPResponseError
+            HTTP request to fetch image returned a status other than 200.
+        InvalidURL
+            URL generated from emoji was not valid.
+        RuntimeError
+            Session connection failed.
+        ServerTimeoutError
+            Connection to server timed out.
+        """
+        ...
+
+    @overload
+    async def load_server_emoji(
+        self,
+        server_id: int,
+        *,
+        session: SQLSession | None = None,
+    ):
         """Load all emoji in a server into the hash map.
 
         Parameters
@@ -526,33 +548,29 @@ class EmojiHashMap:
         ...
 
     @overload
-    async def load_server_emoji(self):
-        """Load all emoji in all servers the bot is connected to into the hash map.
+    async def load_server_emoji(
+        self,
+        server_id: int | None = None,
+        *,
+        session: SQLSession | None = None,
+    ): ...
 
-        Raises
-        ------
-        HTTPResponseError
-            HTTP request to fetch image returned a status other than 200.
-        InvalidURL
-            URL generated from emoji was not valid.
-        RuntimeError
-            Session connection failed.
-        ServerTimeoutError
-            Connection to server timed out.
-        """
-        ...
-
-    @overload
-    async def load_server_emoji(self, server_id: int | None = None): ...
-
+    @sql_command(commit_results=True)
     @beartype
-    async def load_server_emoji(self, server_id: int | None = None):
+    async def load_server_emoji(
+        self,
+        server_id: int | None = None,
+        *,
+        session: SQLSession,
+    ):
         """Load all emoji in a server or in all servers the bot is connected to into the hash map.
 
         Parameters
         ----------
         server_id : int | None, optional
             The ID of the server to load. Defaults to None, in which case will load the emoji from all servers the bot is connected to.
+        session : :class:`~sqlalchemy.orm.Session` | None, optional
+            An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
 
         Raises
         ------
@@ -581,7 +599,9 @@ class EmojiHashMap:
             ending_info_message = "Emoji from all available servers loaded."
 
         async def update_emoji(
-            server_id: int | str, is_internal: bool, emoji: discord.Emoji
+            server_id: int | str,
+            is_internal: bool,
+            emoji: discord.Emoji,
         ):
             await self.delete_emoji(emoji.id)
 
@@ -600,27 +620,24 @@ class EmojiHashMap:
                 accessible=True,
             )
 
-        with Session.begin() as session:
-            for server in servers:
-                logger.debug("Loading server %s...", server.name)
+        for server in servers:
+            logger.debug("Loading server %s...", server.name)
 
-                update_emoji_async: list[Coroutine[Any, Any, UpdateBase]] = []
+            update_emoji_async: list[Coroutine[Any, Any, UpdateBase]] = []
 
-                is_internal = (
-                    globals.emoji_server is not None
-                    and server.id == globals.emoji_server.id
-                )
-                for emoji in server.emojis:
-                    update_emoji_async.append(
-                        update_emoji(server.id, is_internal, emoji)
-                    )
+            is_internal = (
+                globals.emoji_server is not None
+                and server.id == globals.emoji_server.id
+            )
+            for emoji in server.emojis:
+                update_emoji_async.append(update_emoji(server.id, is_internal, emoji))
 
-                # I'll gather the requests one server at a time
-                upserts = await asyncio.gather(*update_emoji_async)
-                for upsert in upserts:
-                    session.execute(upsert)
+            # I'll gather the requests one server at a time
+            upserts = await asyncio.gather(*update_emoji_async)
+            for upsert in upserts:
+                session.execute(upsert)
 
-                logger.debug("Server %s loaded.", server.name)
+            logger.debug("Server %s loaded.", server.name)
 
         logger.info(ending_info_message)
 
