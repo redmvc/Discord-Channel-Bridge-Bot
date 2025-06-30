@@ -269,34 +269,25 @@ async def sql_upsert(
         )
     else:
         # I'll do a manual update in this case
-        session = None
-        try:
-            with Session() as session:
-                index_values = [
-                    getattr(table, idx) == insert_values[idx] for idx in indices
-                ]
-                upsert: UpdateBase
+        with Session() as session:
+            index_values = [
+                getattr(table, idx) == insert_values[idx] for idx in indices
+            ]
+            upsert: UpdateBase
 
-                def select_existing(session: SQLSession):
-                    select_table: SQLSelect[tuple[Any]] = SQLSelect(table).where(
-                        *index_values
-                    )
-                    return session.execute(select_table).first()
+            def select_existing(session: SQLSession):
+                select_table: SQLSelect[tuple[Any]] = SQLSelect(table).where(
+                    *index_values
+                )
+                return session.execute(select_table).first()
 
-                if await sql_retry(lambda: select_existing(session)):
-                    # Values with those keys do exist, so I update
-                    upsert = (
-                        SQLUpdate(table).where(*index_values).values(**update_values)
-                    )
-                else:
-                    upsert = other_db_insert(table).values(**insert_values)
+            if await sql_retry(lambda: select_existing(session)):
+                # Values with those keys do exist, so I update
+                upsert = SQLUpdate(table).where(*index_values).values(**update_values)
+            else:
+                upsert = other_db_insert(table).values(**insert_values)
 
-            return upsert
-        except Exception:
-            if session:
-                session.rollback()
-                session.close()
-            raise
+        return upsert
 
 
 @beartype
@@ -347,35 +338,28 @@ async def sql_insert_ignore_duplicate(
         return insert.values(**insert_values).on_conflict_do_nothing()
     else:
         # I'll do a manual update in this case
-        session = None
-        try:
-            with Session() as session:
-                index_values = [
-                    getattr(table, idx) == insert_values[idx] for idx in indices
-                ]
-                insert_unknown: UpdateBase
+        with Session() as session:
+            index_values = [
+                getattr(table, idx) == insert_values[idx] for idx in indices
+            ]
+            insert_unknown: UpdateBase
 
-                def select_existing(session: SQLSession):
-                    select_table: SQLSelect[tuple[Any]] = SQLSelect(table).where(
-                        *index_values
-                    )
-                    return session.execute(select_table).first()
+            def select_existing(session: SQLSession):
+                select_table: SQLSelect[tuple[Any]] = SQLSelect(table).where(
+                    *index_values
+                )
+                return session.execute(select_table).first()
 
-                if await sql_retry(lambda: select_existing(session)):
-                    # Values with those keys do exist, so I do nothing
-                    random_index = indices.pop()
-                    insert_unknown = SQLUpdate(table).values(
-                        **{random_index: getattr(table, random_index)}
-                    )
-                else:
-                    insert_unknown = other_db_insert(table).values(**insert_values)
+            if await sql_retry(lambda: select_existing(session)):
+                # Values with those keys do exist, so I do nothing
+                random_index = indices.pop()
+                insert_unknown = SQLUpdate(table).values(
+                    **{random_index: getattr(table, random_index)}
+                )
+            else:
+                insert_unknown = other_db_insert(table).values(**insert_values)
 
-            return insert_unknown
-        except Exception:
-            if session:
-                session.rollback()
-                session.close()
-            raise
+        return insert_unknown
 
 
 @beartype
