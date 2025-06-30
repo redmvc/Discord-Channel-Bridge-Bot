@@ -13,7 +13,7 @@ from sqlalchemy import not_ as sql_not
 from sqlalchemy.orm import Session as SQLSession
 
 import globals
-from database import DBEmoji, Session, sql_command, sql_retry, sql_upsert
+from database import DBEmoji, sql_command, sql_retry, sql_upsert
 from validations import ArgumentError, logger
 
 
