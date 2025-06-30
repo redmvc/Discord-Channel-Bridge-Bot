@@ -36,6 +36,7 @@ from database import (
     DBMessageMap,
     DBReactionMap,
     Session,
+    sql_command,
     sql_retry,
 )
 from validations import ChannelTypeError, logger
@@ -69,14 +70,16 @@ async def on_ready():
 
     logger.info("Client successfully connected. Running initial loading procedures...")
 
-    session = None
     try:
-        with Session() as session:
-            await bridges.load_from_database(session)
+        logger.info("Loading bridges from database...")
+        await bridges.load_from_database()
+        logger.info("Bridges loaded.")
 
-            # Try to identify hashed emoji
-            emoji_hash_map.map = emoji_hash_map.EmojiHashMap(session)
+        logger.info("Loading emoji hash map from database...")
+        emoji_hash_map.map = emoji_hash_map.EmojiHashMap()
+        logger.info("Emoji hash map loaded.")
 
+        with Session.begin() as session:
             # Try to find all apps whitelisted per channel
             logger.info("Loading whitelisted apps...")
             select_whitelisted_apps: SQLSelect[tuple[DBAppWhitelist]] = SQLSelect(
@@ -125,7 +128,6 @@ async def on_ready():
                 session.execute(delete_inaccessible_channels)
 
             logger.info("Whitelists loaded.")
-            session.commit()
 
             # Identify all automatically-thread-bridging channels
             logger.info("Loading automatically-thread-bridging channels...")
@@ -145,10 +147,6 @@ async def on_ready():
             )
             logger.info("Auto-thread-bridging channels loaded.")
     except Exception as e:
-        if session:
-            session.rollback()
-            session.close()
-
         await globals.client.close()
         logger.error("An error occurred when performing bot startup procedures: %s", e)
         raise
@@ -377,9 +375,8 @@ async def bridge_message_helper(message: discord.Message):
         )
         return
 
-    session = None
     try:
-        with Session() as session:
+        with Session.begin() as session:
             # Check whether this message is a reference to another message, i.e. if it's a reply or a forward
             message_reference = message.reference
             original_message = message
@@ -633,12 +630,7 @@ async def bridge_message_helper(message: discord.Message):
                     ]
                 )
             )
-            session.commit()
     except Exception as e:
-        if session:
-            session.rollback()
-            session.close()
-
         if isinstance(e, SQLError):
             logger.warning(
                 "Ran into an SQL error while trying to bridge a message: %s", e
@@ -1024,7 +1016,8 @@ async def _bridge_message_to_target_channel(
 
         try:
             await bridges.demolish_bridges(
-                target_channel=target_channel, session=session
+                target_channel=target_channel,
+                session=session,
             )
         except Exception as e:
             logger.error(
@@ -1289,10 +1282,25 @@ async def edit_message_helper(
     logger.debug("Successfully bridged edit to message with ID %s.", message_id)
 
 
-@beartype
+@overload
+async def replace_missing_emoji(
+    message_content: str,
+    session: SQLSession,
+) -> str: ...
+
+
+@overload
 async def replace_missing_emoji(
     message_content: str,
     session: SQLSession | None = None,
+) -> str: ...
+
+
+@sql_command(commit_results=True)
+@beartype
+async def replace_missing_emoji(
+    message_content: str,
+    session: SQLSession,
 ) -> str:
     """Return a version of the contents of a message that replaces any instances of an emoji that the bot can't find with matching ones, if possible.
 
@@ -1328,12 +1336,6 @@ async def replace_missing_emoji(
     if len(message_emoji) == 0:
         # Message has no emoji
         return message_content
-
-    if not session:
-        session = Session()
-        close_after = True
-    else:
-        close_after = False
 
     emoji_to_replace: dict[str, str] = {}
     for emoji_name, emoji_id_str in message_emoji:
@@ -1371,9 +1373,6 @@ async def replace_missing_emoji(
                 emoji_to_replace[f"<{emoji_name}:{emoji_id_str}>"] = str(emoji)
         except Exception:
             pass
-
-    if close_after:
-        session.close()
 
     for missing_emoji_str, new_emoji_str in emoji_to_replace.items():
         message_content = message_content.replace(missing_emoji_str, new_emoji_str)
@@ -1576,10 +1575,9 @@ async def delete_message_helper(message_id: int, channel_id: int):
     )
 
     # Find all messages matching this one
-    session = None
     try:
         async_message_deletes: list[Coroutine[Any, Any, None]] = []
-        with Session() as session:
+        with Session.begin() as session:
             select_message_map: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
                 DBMessageMap
             ).where(DBMessageMap.source_message == message_id)
@@ -1696,12 +1694,7 @@ async def delete_message_helper(message_id: int, channel_id: int):
                     )
                 )
             )
-            session.commit()
     except Exception as e:
-        if session:
-            session.rollback()
-            session.close()
-
         if isinstance(e, SQLError):
             logger.warning(
                 "Ran into an SQL error while trying to delete a message: %s", e
@@ -1797,18 +1790,19 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
 
     # Get the IDs of all emoji that match the current one
     equivalent_emoji_ids = emoji_hash_map.map.get_matches(
-        payload.emoji, return_str=True
+        payload.emoji,
+        return_str=True,
     )
     if not equivalent_emoji_ids:
         equivalent_emoji_ids = frozenset(str(payload.emoji.id))
 
     # Now find the list of channels that can validly be reached via outbound chains from this channel
     reachable_channel_ids = await bridges.get_reachable_channels(
-        payload.channel_id, "outbound"
+        payload.channel_id,
+        "outbound",
     )
 
     # Find and react to all messages matching this one
-    session = None
     try:
         # Create a function to add reactions to messages asynchronously and gather them all at the end
         source_message_id_str = str(payload.message_id)
@@ -1883,7 +1877,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                 target_emoji_name=bridged_emoji_name,
             )
 
-        with Session() as session:
+        with Session.begin() as session:
             # Let me check whether I've already reacted to bridged messages in some of these channels
             select_reaction_map: SQLSelect[tuple[DBReactionMap]] = SQLSelect(
                 DBReactionMap
@@ -1952,7 +1946,6 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                 if len(async_add_reactions) > 0:
                     reaction_added = await async_add_reactions[0]
                     await sql_retry(lambda: session.add(reaction_added))
-                    session.commit()
                 return
 
             # Bridge reactions to the last bridged message of a group of split bridged messages
@@ -2014,14 +2007,9 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                     )
                     return
 
-        reactions_added = await asyncio.gather(*async_add_reactions)
-        await sql_retry(lambda: session.add_all([r for r in reactions_added if r]))
-        session.commit()
+            reactions_added = await asyncio.gather(*async_add_reactions)
+            await sql_retry(lambda: session.add_all([r for r in reactions_added if r]))
     except Exception as e:
-        if session:
-            session.rollback()
-            session.close()
-
         if isinstance(e, SQLError):
             logger.warning(
                 "Ran into an SQL error while trying to add a reaction to a message: %s",
@@ -2153,6 +2141,29 @@ async def on_raw_reaction_clear(payload: discord.RawReactionClearEvent):
     )
 
 
+@overload
+async def unreact(
+    payload: (
+        discord.RawReactionActionEvent
+        | discord.RawReactionClearEmojiEvent
+        | discord.RawReactionClearEvent
+    ),
+    session: SQLSession,
+): ...
+
+
+@overload
+async def unreact(
+    payload: (
+        discord.RawReactionActionEvent
+        | discord.RawReactionClearEmojiEvent
+        | discord.RawReactionClearEvent
+    ),
+    session: SQLSession | None = None,
+): ...
+
+
+@sql_command(commit_results=True)
 @beartype
 async def unreact(
     payload: (
@@ -2160,6 +2171,7 @@ async def unreact(
         | discord.RawReactionClearEmojiEvent
         | discord.RawReactionClearEvent
     ),
+    session: SQLSession,
 ):
     """Remove all reactions by the bot using a given emoji (or all emoji) on messages bridged from the current one (but not the current one itself).
 
@@ -2167,6 +2179,8 @@ async def unreact(
     ----------
     payload : :class:`~discord.RawReactionActionEvent` | :class:`~discord.RawReactionClearEmojiEvent` | :class:`~discord.RawReactionClearEvent`
         The argument of the call to `on_raw_reaction_remove()`, `on_raw_reaction_clear_emoji()`, or `on_raw_reaction_clear()`.
+    session : :class:`~sqlalchemy.orm.Session` | None, optional
+        An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
     """
     if isinstance(payload, discord.RawReactionClearEvent):
         # Clear all reactions
@@ -2180,152 +2194,143 @@ async def unreact(
             str(emoji_to_remove.id) if emoji_to_remove.id else emoji_to_remove.name
         )
         equivalent_emoji_ids = emoji_hash_map.map.get_matches(
-            emoji_to_remove, return_str=True
+            emoji_to_remove,
+            return_str=True,
         )
 
-    session = None
     try:
-        with Session() as session:
-            # First I find all of the messages that got this reaction bridged to them
-            conditions = [DBReactionMap.source_message == str(payload.message_id)]
-            if removed_emoji_id:
-                conditions.append(DBReactionMap.source_emoji == removed_emoji_id)
+        # First I find all of the messages that got this reaction bridged to them
+        conditions = [DBReactionMap.source_message == str(payload.message_id)]
+        if removed_emoji_id:
+            conditions.append(DBReactionMap.source_emoji == removed_emoji_id)
 
-            select_bridged_reactions: SQLSelect[tuple[DBReactionMap]] = SQLSelect(
-                DBReactionMap
-            ).where(*conditions)
-            bridged_reactions: ScalarResult[DBReactionMap] = await sql_retry(
-                lambda: session.scalars(select_bridged_reactions)
+        select_bridged_reactions: SQLSelect[tuple[DBReactionMap]] = SQLSelect(
+            DBReactionMap
+        ).where(*conditions)
+        bridged_reactions: ScalarResult[DBReactionMap] = await sql_retry(
+            lambda: session.scalars(select_bridged_reactions)
+        )
+        bridged_messages = {
+            (
+                map.target_message,
+                map.target_channel,
+                map.target_emoji_id,
+                map.target_emoji_name,
+                equivalent_emoji_ids
+                or emoji_hash_map.map.get_matches(
+                    map.source_emoji,
+                    return_str=True,
+                ),
             )
-            bridged_messages = {
-                (
-                    map.target_message,
-                    map.target_channel,
-                    map.target_emoji_id,
-                    map.target_emoji_name,
-                    equivalent_emoji_ids
-                    or emoji_hash_map.map.get_matches(
-                        map.source_emoji, return_str=True
-                    ),
-                )
-                for map in bridged_reactions
-            }
+            for map in bridged_reactions
+        }
 
-            if len(bridged_messages) == 0:
-                return
+        if len(bridged_messages) == 0:
+            return
 
-            # Then I remove them from the database
-            await sql_retry(
-                lambda: session.execute(SQLDelete(DBReactionMap).where(*conditions))
+        # Then I remove them from the database
+        await sql_retry(
+            lambda: session.execute(SQLDelete(DBReactionMap).where(*conditions))
+        )
+
+        # Next I find the messages that still have reactions of this type in them even after I removed the ones above
+        conditions = [
+            DBReactionMap.target_message.in_(
+                [message_id for message_id, _, _, _, _ in bridged_messages]
             )
+        ]
+        if equivalent_emoji_ids:
+            conditions.append(DBReactionMap.source_emoji.in_(equivalent_emoji_ids))
+        select_bridged_reactions: SQLSelect[tuple[DBReactionMap]] = SQLSelect(
+            DBReactionMap
+        ).where(*conditions)
+        remaining_reactions: ScalarResult[DBReactionMap] = await sql_retry(
+            lambda: session.scalars(select_bridged_reactions)
+        )
 
-            # Next I find the messages that still have reactions of this type in them even after I removed the ones above
-            conditions = [
-                DBReactionMap.target_message.in_(
-                    [message_id for message_id, _, _, _, _ in bridged_messages]
-                )
-            ]
-            if equivalent_emoji_ids:
-                conditions.append(DBReactionMap.source_emoji.in_(equivalent_emoji_ids))
-            select_bridged_reactions: SQLSelect[tuple[DBReactionMap]] = SQLSelect(
-                DBReactionMap
-            ).where(*conditions)
-            remaining_reactions: ScalarResult[DBReactionMap] = await sql_retry(
-                lambda: session.scalars(select_bridged_reactions)
+        # And I get rid of my reactions from the messages that aren't on that list
+        messages_to_remove_reaction_from = bridged_messages - {
+            (
+                map.target_message,
+                map.target_channel,
+                map.target_emoji_id,
+                map.target_emoji_name,
+                equivalent_emoji_ids
+                or emoji_hash_map.map.get_matches(
+                    map.source_emoji,
+                    return_str=True,
+                ),
             )
+            for map in remaining_reactions
+        }
 
-            # And I get rid of my reactions from the messages that aren't on that list
-            messages_to_remove_reaction_from = bridged_messages - {
-                (
-                    map.target_message,
-                    map.target_channel,
-                    map.target_emoji_id,
-                    map.target_emoji_name,
-                    equivalent_emoji_ids
-                    or emoji_hash_map.map.get_matches(
-                        map.source_emoji, return_str=True
-                    ),
-                )
-                for map in remaining_reactions
-            }
+        if len(messages_to_remove_reaction_from) == 0:
+            # I don't have to remove my reaction from any bridged messages
+            return
 
-            session.commit()
-
-            if len(messages_to_remove_reaction_from) == 0:
-                # I don't have to remove my reaction from any bridged messages
-                return
-
-            # There is at least one reaction in one target message that should no longer be there
-            def get_emoji_or_name(
-                target_emoji_id: str | None,
-                target_emoji_name: str | None,
-            ):
-                if target_emoji_name:
-                    if target_emoji_id:
-                        return f"{target_emoji_name}:{target_emoji_id}"
-                    else:
-                        return target_emoji_name
-                elif target_emoji_id:
-                    try:
-                        return globals.client.get_emoji(int(target_emoji_id))
-                    except ValueError:
-                        return None
+        # There is at least one reaction in one target message that should no longer be there
+        def get_emoji_or_name(
+            target_emoji_id: str | None,
+            target_emoji_name: str | None,
+        ):
+            if target_emoji_name:
+                if target_emoji_id:
+                    return f"{target_emoji_name}:{target_emoji_id}"
                 else:
+                    return target_emoji_name
+            elif target_emoji_id:
+                try:
+                    return globals.client.get_emoji(int(target_emoji_id))
+                except ValueError:
                     return None
+            else:
+                return None
 
-            async def remove_reactions_with_emoji(
-                target_channel_id: str,
-                target_message_id: str,
-                target_emoji_id: str | None,
-                target_emoji_name: str | None,
+        async def remove_reactions_with_emoji(
+            target_channel_id: str,
+            target_message_id: str,
+            target_emoji_id: str | None,
+            target_emoji_name: str | None,
+        ):
+            target_channel = await globals.get_channel_from_id(int(target_channel_id))
+            if not isinstance(
+                target_channel,
+                (discord.TextChannel, discord.Thread),
             ):
-                target_channel = await globals.get_channel_from_id(
-                    int(target_channel_id)
-                )
-                if not isinstance(
-                    target_channel,
-                    (discord.TextChannel, discord.Thread),
-                ):
-                    return
+                return
 
-                target_message = await target_channel.fetch_message(
-                    int(target_message_id)
-                )
+            target_message = await target_channel.fetch_message(int(target_message_id))
 
-                emoji_to_remove = get_emoji_or_name(target_emoji_id, target_emoji_name)
-                if emoji_to_remove:
-                    try:
-                        await target_message.remove_reaction(
-                            emoji_to_remove, target_channel.guild.me
-                        )
-                    except Exception:
-                        pass
+            emoji_to_remove = get_emoji_or_name(target_emoji_id, target_emoji_name)
+            if emoji_to_remove:
+                try:
+                    await target_message.remove_reaction(
+                        emoji_to_remove, target_channel.guild.me
+                    )
+                except Exception:
+                    pass
 
-            compacted_messages_to_remove_reaction_from = {
-                (
-                    target_message_id,
+        compacted_messages_to_remove_reaction_from = {
+            (
+                target_message_id,
+                target_channel_id,
+                target_emoji_id,
+                target_emoji_name,
+            )
+            for target_message_id, target_channel_id, target_emoji_id, target_emoji_name, _ in messages_to_remove_reaction_from
+        }
+        await asyncio.gather(
+            *[
+                remove_reactions_with_emoji(
                     target_channel_id,
+                    target_message_id,
                     target_emoji_id,
                     target_emoji_name,
                 )
-                for target_message_id, target_channel_id, target_emoji_id, target_emoji_name, _ in messages_to_remove_reaction_from
-            }
-            await asyncio.gather(
-                *[
-                    remove_reactions_with_emoji(
-                        target_channel_id,
-                        target_message_id,
-                        target_emoji_id,
-                        target_emoji_name,
-                    )
-                    for target_message_id, target_channel_id, target_emoji_id, target_emoji_name in compacted_messages_to_remove_reaction_from
-                ]
-            )
+                for target_message_id, target_channel_id, target_emoji_id, target_emoji_name in compacted_messages_to_remove_reaction_from
+            ]
+        )
     except Exception as e:
-        if session:
-            session.rollback()
-            session.close()
-
         if isinstance(e, SQLError):
             logger.warning(
                 "Ran into an SQL error while running %s(): %s", inspect.stack()[1][3], e
@@ -2446,30 +2451,25 @@ async def reconnect():
 
     with Session() as session:
         # Find the latest bridged messages from each channel
-        try:
-            subquery = (
-                session.query(
-                    DBMessageMap.source_channel,
-                    func.max(DBMessageMap.id).label("max_id"),
-                )
-                .group_by(DBMessageMap.source_channel)
-                .subquery()
+        subquery = (
+            session.query(
+                DBMessageMap.source_channel,
+                func.max(DBMessageMap.id).label("max_id"),
             )
-            select_latest_bridged_messages: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
-                DBMessageMap
-            ).join(
-                subquery,
-                (DBMessageMap.source_channel == subquery.c.source_channel)
-                & (DBMessageMap.id == subquery.c.max_id),
-            )
+            .group_by(DBMessageMap.source_channel)
+            .subquery()
+        )
+        select_latest_bridged_messages: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
+            DBMessageMap
+        ).join(
+            subquery,
+            (DBMessageMap.source_channel == subquery.c.source_channel)
+            & (DBMessageMap.id == subquery.c.max_id),
+        )
 
-            bridged_messages_query_result: ScalarResult[DBMessageMap] = session.scalars(
-                select_latest_bridged_messages
-            )
-        except Exception:
-            session.rollback()
-            session.close()
-            raise
+        bridged_messages_query_result: ScalarResult[DBMessageMap] = session.scalars(
+            select_latest_bridged_messages
+        )
 
         for bridged_message_row in bridged_messages_query_result:
             # Check whether the ID of the latest bridged message for a channel is also the ID of that channel's latest message
