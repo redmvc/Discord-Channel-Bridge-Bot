@@ -1754,13 +1754,14 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         # Don't bridge my own reaction
         return
 
-    if not bridges.get_outbound_bridges(payload.channel_id):
+    channel_id = payload.channel_id
+    if not bridges.get_outbound_bridges(channel_id):
         # Only bridge reactions across outbound bridges
         return
 
     await bridge_reaction_add(
         message_id=payload.message_id,
-        channel_id=payload.channel_id,
+        channel_id=channel_id,
         emoji=payload.emoji,
     )
 
