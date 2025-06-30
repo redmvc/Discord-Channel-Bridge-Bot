@@ -267,9 +267,7 @@ async def on_typing(
 
 @globals.client.event
 async def on_message(message: discord.Message):
-    """Mirror a message across bridges, if possible.
-
-    This function is called when a Message is created and sent. Requires :class:`~discord.Intents.messages` to be enabled.
+    """This function is called when a Message is created and sent. Requires :class:`~discord.Intents.messages` to be enabled.
 
     Parameters
     ----------
@@ -287,45 +285,37 @@ async def on_message(message: discord.Message):
     ValueError
         The length of embeds was invalid, there was no token associated with one of the webhooks or ephemeral was passed with the improper webhook type or there was no state attached with one of the webhooks when giving it a view.
     """
+    if not isinstance(message.channel, (discord.TextChannel, discord.Thread)):
+        return
+
+    if message.type not in {discord.MessageType.default, discord.MessageType.reply}:
+        # Only bridge contentful messages
+        return
+
+    if (
+        (application_id := (message.application_id or message.author.id))
+        == globals.client.application_id
+    ) or (
+        (
+            not (
+                local_whitelist := globals.per_channel_whitelist.get(message.channel.id)
+            )
+            or (application_id not in local_whitelist)
+        )
+        and (
+            not (global_whitelist := globals.settings.get("whitelisted_apps"))
+            or (application_id not in [int(app_id) for app_id in global_whitelist])
+        )
+    ):
+        # Don't bridge messages from non-whitelisted applications or from self
+        return
+
+    if not await globals.wait_until_ready():
+        return
+
     lock = asyncio.Lock()
     async with lock:
         globals.message_lock[message.id] = lock
-
-        if not isinstance(message.channel, (discord.TextChannel, discord.Thread)):
-            return
-
-        if message.type not in {discord.MessageType.default, discord.MessageType.reply}:
-            # Only bridge contentful messages
-            return
-
-        if message.author.id == globals.client.application_id or (
-            message.application_id
-            and (
-                message.application_id == globals.client.application_id
-                or (
-                    (
-                        not (
-                            local_whitelist := globals.per_channel_whitelist.get(
-                                message.channel.id
-                            )
-                        )
-                        or message.application_id not in local_whitelist
-                    )
-                    and (
-                        not (
-                            global_whitelist := globals.settings.get("whitelisted_apps")
-                        )
-                        or message.application_id
-                        not in [int(app_id) for app_id in global_whitelist]
-                    )
-                )
-            )
-        ):
-            # Don't bridge messages from non-whitelisted applications or from self
-            return
-
-        if not await globals.wait_until_ready():
-            return
 
         await bridge_message_helper(message)
 
