@@ -1197,11 +1197,32 @@ class ConfirmHashServer(discord.ui.Button[Any]):
         )
 
 
+@overload
+async def bridge_thread_helper(
+    thread_to_bridge: discord.Thread,
+    user_id: int,
+    interaction: discord.Interaction | None = None,
+): ...
+
+
+@overload
+async def bridge_thread_helper(
+    thread_to_bridge: discord.Thread,
+    user_id: int,
+    interaction: discord.Interaction | None = None,
+    *,
+    session: SQLSession | None,
+): ...
+
+
+@sql_command
 @beartype
 async def bridge_thread_helper(
     thread_to_bridge: discord.Thread,
     user_id: int,
     interaction: discord.Interaction | None = None,
+    *,
+    session: SQLSession,
 ):
     """Create threads matching the current one across bridges.
 
@@ -1213,6 +1234,8 @@ async def bridge_thread_helper(
         The ID of the user that created the thread.
     interaction : :class:`~discord.Interaction` | None, optional
         The interaction that called this function, if any. Defaults to None.
+    session : :class:`~sqlalchemy.orm.Session` | None, optional
+        An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
     """
     thread_parent = await globals.get_channel_parent(thread_to_bridge)
 
@@ -1246,126 +1269,125 @@ async def bridge_thread_helper(
         await interaction.response.defer(thinking=True, ephemeral=True)
 
     # The IDs of threads are the same as that of their originating messages so we should try to create threads from the same messages
-    with Session.begin() as session:
-        matching_starting_messages: dict[int, int] = {}
-        try:
-            # I don't need to store it I just need to know whether it exists
-            await thread_parent.fetch_message(thread_to_bridge.id)
-            select_message_map: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
-                DBMessageMap
-            ).where(DBMessageMap.target_message == str(thread_to_bridge.id))
-            source_starting_message: DBMessageMap | None = await sql_retry(
-                lambda: session.scalars(select_message_map).first()
+    matching_starting_messages: dict[int, int] = {}
+    try:
+        # I don't need to store it I just need to know whether it exists
+        await thread_parent.fetch_message(thread_to_bridge.id)
+        select_message_map: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
+            DBMessageMap
+        ).where(DBMessageMap.target_message == str(thread_to_bridge.id))
+        source_starting_message: DBMessageMap | None = await sql_retry(
+            lambda: session.scalars(select_message_map).first()
+        )
+        if isinstance(source_starting_message, DBMessageMap):
+            # The message that's starting this thread is bridged
+            source_channel_id = int(source_starting_message.source_channel)
+            source_message_id = int(source_starting_message.source_message)
+            matching_starting_messages[source_channel_id] = source_message_id
+        else:
+            source_channel_id = thread_parent.id
+            source_message_id = thread_to_bridge.id
+
+        select_message_map: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
+            DBMessageMap
+        ).where(DBMessageMap.source_message == str(source_message_id))
+        target_starting_messages: ScalarResult[DBMessageMap] = await sql_retry(
+            lambda: session.scalars(select_message_map)
+        )
+        for target_starting_message in target_starting_messages:
+            matching_starting_messages[int(target_starting_message.target_channel)] = (
+                int(target_starting_message.target_message)
             )
-            if isinstance(source_starting_message, DBMessageMap):
-                # The message that's starting this thread is bridged
-                source_channel_id = int(source_starting_message.source_channel)
-                source_message_id = int(source_starting_message.source_message)
-                matching_starting_messages[source_channel_id] = source_message_id
-            else:
-                source_channel_id = thread_parent.id
-                source_message_id = thread_to_bridge.id
+    except discord.NotFound:
+        pass
 
-            select_message_map: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
-                DBMessageMap
-            ).where(DBMessageMap.source_message == str(source_message_id))
-            target_starting_messages: ScalarResult[DBMessageMap] = await sql_retry(
-                lambda: session.scalars(select_message_map)
+    # Now find all channels that are bridged to the channel this thread's parent is bridged to and create threads there
+    threads_created: dict[int, discord.Thread] = {}
+    succeeded_at_least_once = False
+    bridged_threads: list[int] = []
+    failed_channels: list[int] = []
+
+    create_bridges: list[Coroutine[Any, Any, Bridge]] = []
+    add_user_to_threads: list[Coroutine[Any, Any, None]] = []
+    try:
+        add_user_to_threads.append(thread_to_bridge.join())
+    except Exception:
+        pass
+
+    for channel_id in outbound_bridges.keys():
+        channel = await globals.get_channel_from_id(channel_id)
+        if not isinstance(channel, discord.TextChannel):
+            # I can't create a thread inside a thread
+            if channel:
+                bridged_threads.append(channel.id)
+            continue
+
+        channel_member = await globals.get_channel_member(channel, user_id)
+        if (
+            not channel_member
+            or not channel.permissions_for(channel_member).manage_webhooks
+            or not channel.permissions_for(channel_member).create_public_threads
+            or not channel.permissions_for(channel.guild.me).manage_webhooks
+            or not channel.permissions_for(channel.guild.me).create_public_threads
+        ):
+            # User doesn't have permission to act there
+            failed_channels.append(channel.id)
+            continue
+
+        new_thread = threads_created.get(channel_id)
+        thread_already_existed = new_thread is not None
+        if not new_thread and matching_starting_messages.get(channel_id):
+            # I found a matching starting message, so I'll try to create the thread starting there
+            matching_starting_message = await channel.fetch_message(
+                matching_starting_messages[channel_id]
             )
-            for target_starting_message in target_starting_messages:
-                matching_starting_messages[
-                    int(target_starting_message.target_channel)
-                ] = int(target_starting_message.target_message)
-        except discord.NotFound:
-            pass
 
-        # Now find all channels that are bridged to the channel this thread's parent is bridged to and create threads there
-        threads_created: dict[int, discord.Thread] = {}
-        succeeded_at_least_once = False
-        bridged_threads: list[int] = []
-        failed_channels: list[int] = []
-
-        create_bridges: list[Coroutine[Any, Any, Bridge]] = []
-        add_user_to_threads: list[Coroutine[Any, Any, None]] = []
-        try:
-            add_user_to_threads.append(thread_to_bridge.join())
-        except Exception:
-            pass
-
-        for channel_id in outbound_bridges.keys():
-            channel = await globals.get_channel_from_id(channel_id)
-            if not isinstance(channel, discord.TextChannel):
-                # I can't create a thread inside a thread
-                if channel:
-                    bridged_threads.append(channel.id)
-                continue
-
-            channel_member = await globals.get_channel_member(channel, user_id)
-            if (
-                not channel_member
-                or not channel.permissions_for(channel_member).manage_webhooks
-                or not channel.permissions_for(channel_member).create_public_threads
-                or not channel.permissions_for(channel.guild.me).manage_webhooks
-                or not channel.permissions_for(channel.guild.me).create_public_threads
-            ):
-                # User doesn't have permission to act there
-                failed_channels.append(channel.id)
-                continue
-
-            new_thread = threads_created.get(channel_id)
-            thread_already_existed = new_thread is not None
-            if not new_thread and matching_starting_messages.get(channel_id):
-                # I found a matching starting message, so I'll try to create the thread starting there
-                matching_starting_message = await channel.fetch_message(
-                    matching_starting_messages[channel_id]
-                )
-
-                if not matching_starting_message.thread:
-                    # That message doesn't already have a thread, so I can create it
-                    new_thread = await matching_starting_message.create_thread(
-                        name=thread_to_bridge.name,
-                        reason=f"Bridged from {thread_to_bridge.guild.name}#{thread_parent.name}#{thread_to_bridge.name}",
-                    )
-
-            if not new_thread:
-                # Haven't created a thread yet, try to create it from the channel
-                new_thread = await channel.create_thread(
+            if not matching_starting_message.thread:
+                # That message doesn't already have a thread, so I can create it
+                new_thread = await matching_starting_message.create_thread(
                     name=thread_to_bridge.name,
                     reason=f"Bridged from {thread_to_bridge.guild.name}#{thread_parent.name}#{thread_to_bridge.name}",
-                    type=discord.ChannelType.public_thread,
                 )
 
-            if not new_thread:
-                # Failed to create a thread somehow
-                failed_channels.append(channel.id)
-                continue
+        if not new_thread:
+            # Haven't created a thread yet, try to create it from the channel
+            new_thread = await channel.create_thread(
+                name=thread_to_bridge.name,
+                reason=f"Bridged from {thread_to_bridge.guild.name}#{thread_parent.name}#{thread_to_bridge.name}",
+                type=discord.ChannelType.public_thread,
+            )
 
-            if not thread_already_existed:
+        if not new_thread:
+            # Failed to create a thread somehow
+            failed_channels.append(channel.id)
+            continue
+
+        if not thread_already_existed:
+            try:
+                add_user_to_threads.append(new_thread.join())
+            except Exception:
+                pass
+
+            if channel_member:
                 try:
-                    add_user_to_threads.append(new_thread.join())
+                    add_user_to_threads.append(new_thread.add_user(channel_member))
                 except Exception:
                     pass
 
-                if channel_member:
-                    try:
-                        add_user_to_threads.append(new_thread.add_user(channel_member))
-                    except Exception:
-                        pass
-
-            threads_created[channel_id] = new_thread
+        threads_created[channel_id] = new_thread
+        create_bridges.append(
+            bridges.create_bridge(
+                source=thread_to_bridge, target=new_thread, session=session
+            )
+        )
+        if inbound_bridges and inbound_bridges[channel_id]:
             create_bridges.append(
                 bridges.create_bridge(
-                    source=thread_to_bridge, target=new_thread, session=session
+                    source=new_thread, target=thread_to_bridge, session=session
                 )
             )
-            if inbound_bridges and inbound_bridges[channel_id]:
-                create_bridges.append(
-                    bridges.create_bridge(
-                        source=new_thread, target=thread_to_bridge, session=session
-                    )
-                )
-            succeeded_at_least_once = True
-        await asyncio.gather(*(create_bridges + add_user_to_threads))
+        succeeded_at_least_once = True
+    await asyncio.gather(*(create_bridges + add_user_to_threads))
 
     if interaction:
         if succeeded_at_least_once:
