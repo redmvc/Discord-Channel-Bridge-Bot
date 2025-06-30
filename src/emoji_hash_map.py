@@ -10,19 +10,28 @@ from sqlalchemy import Select as SQLSelect
 from sqlalchemy import Update as SQLUpdate
 from sqlalchemy import UpdateBase
 from sqlalchemy import not_ as sql_not
-from sqlalchemy.exc import StatementError as SQLError
 from sqlalchemy.orm import Session as SQLSession
 
 import globals
-from database import DBEmoji, Session, sql_retry, sql_upsert
+from database import DBEmoji, Session, sql_command, sql_retry, sql_upsert
 from validations import ArgumentError, logger
 
 
 class EmojiHashMap:
     """A mapping between emoji IDs and hashes of their images."""
 
+    @overload
+    def __init__(self, session: SQLSession): ...
+
+    @overload
+    def __init__(self, session: SQLSession | None): ...
+
+    @overload
+    def __init__(self): ...
+
+    @sql_command(commit_results=True)
     @beartype
-    def __init__(self, session: SQLSession | None = None):
+    def __init__(self, session: SQLSession):
         """Initialise the emoji hash map from the emoji table.
 
         Parameters
@@ -37,12 +46,7 @@ class EmojiHashMap:
         self._hash_to_available_emoji: dict[str, set[int]] = {}
         self._hash_to_internal_emoji: dict[str, int] = {}
 
-        close_after = False
         try:
-            if not session:
-                session = Session()
-                close_after = True
-
             select_hashed_emoji: SQLSelect[tuple[DBEmoji]] = SQLSelect(DBEmoji)
             hashed_emoji_query_result: ScalarResult[DBEmoji] = session.scalars(
                 select_hashed_emoji
@@ -90,16 +94,8 @@ class EmojiHashMap:
                     .values(accessible=sql_not(DBEmoji.accessible))
                 )
         except Exception as e:
-            if close_after and session:
-                session.rollback()
-                session.close()
-
             logger.error("An error occurred while creating an EmojiHashMap: %s", e)
             raise
-
-        if close_after:
-            session.commit()
-            session.close()
 
         logger.info("Emoji hash map initialised.")
 
@@ -165,7 +161,22 @@ class EmojiHashMap:
 
         logger.debug("Emoji with ID %s added to map.", emoji_id)
 
-    @beartype
+    @overload
+    async def _add_emoji_to_database(
+        self,
+        *,
+        emoji: discord.PartialEmoji | discord.Emoji | None = None,
+        emoji_id: int | str | None = None,
+        emoji_name: str | None = None,
+        emoji_server_id: int | str | None = None,
+        emoji_animated: bool | None = None,
+        image: bytes | None = None,
+        image_hash: str | None = None,
+        accessible: bool = False,
+        session: SQLSession,
+    ): ...
+
+    @overload
     async def _add_emoji_to_database(
         self,
         *,
@@ -178,6 +189,22 @@ class EmojiHashMap:
         image_hash: str | None = None,
         accessible: bool = False,
         session: SQLSession | None = None,
+    ): ...
+
+    @sql_command(commit_results=True)
+    @beartype
+    async def _add_emoji_to_database(
+        self,
+        *,
+        emoji: discord.PartialEmoji | discord.Emoji | None = None,
+        emoji_id: int | str | None = None,
+        emoji_name: str | None = None,
+        emoji_server_id: int | str | None = None,
+        emoji_animated: bool | None = None,
+        image: bytes | None = None,
+        image_hash: str | None = None,
+        accessible: bool = False,
+        session: SQLSession,
     ):
         """Inserts an emoji into the `emoji` database table.
 
@@ -239,31 +266,15 @@ class EmojiHashMap:
                 )
             image_hash = globals.hash_image(image)
 
-        close_after = False
-        try:
-            if not session:
-                session = Session()
-                close_after = True
-
-            upsert_emoji = await self.upsert_emoji(
-                emoji_id=emoji_id,
-                emoji_name=emoji_name,
-                emoji_server_id=emoji_server_id,
-                emoji_animated=emoji_animated,
-                image_hash=image_hash,
-                accessible=accessible,
-            )
-            await sql_retry(lambda: session.execute(upsert_emoji))
-        except Exception:
-            if close_after and session:
-                session.rollback()
-                session.close()
-
-            raise
-
-        if close_after:
-            session.commit()
-            session.close()
+        upsert_emoji = await self.upsert_emoji(
+            emoji_id=emoji_id,
+            emoji_name=emoji_name,
+            emoji_server_id=emoji_server_id,
+            emoji_animated=emoji_animated,
+            image_hash=image_hash,
+            accessible=accessible,
+        )
+        await sql_retry(lambda: session.execute(upsert_emoji))
 
         logger.debug("Emoji with ID %s added to database.", emoji_id)
 
@@ -308,7 +319,7 @@ class EmojiHashMap:
         update_db : bool, optional
             Whether the emoji should be inserted into the database. Defaults to False. Including `session` is equivalent to setting this variable to True.
         session : :class:`~sqlalchemy.orm.Session` | None, optional
-            An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
+            An SQLAlchemy ORM Session connecting to the database. Defaults to None, but if `update_db` is set to True a new one will be created.
 
         Returns
         -------
@@ -348,32 +359,16 @@ class EmojiHashMap:
         )
 
         if update_db or session:
-            close_after = False
-            try:
-                if not session:
-                    session = Session()
-                    close_after = True
-
-                await self._add_emoji_to_database(
-                    emoji_id=emoji_id,
-                    emoji_name=emoji_name,
-                    emoji_server_id=emoji_server_id,
-                    emoji_animated=emoji_animated,
-                    image=image,
-                    image_hash=image_hash,
-                    accessible=accessible,
-                    session=session,
-                )
-            except Exception:
-                if close_after and session:
-                    session.rollback()
-                    session.close()
-
-                raise
-
-            if close_after:
-                session.commit()
-                session.close()
+            await self._add_emoji_to_database(
+                emoji_id=emoji_id,
+                emoji_name=emoji_name,
+                emoji_server_id=emoji_server_id,
+                emoji_animated=emoji_animated,
+                image=image,
+                image_hash=image_hash,
+                accessible=accessible,
+                session=session,
+            )
 
         return (emoji_id, image_hash)
 
@@ -474,30 +469,37 @@ class EmojiHashMap:
         logger.debug("Emoji with ID %s deleted from map.", emoji_id)
 
         if update_db or session:
-            logger.debug("Deleting emoji with ID %s from database...", emoji_id)
-            close_after = False
-            try:
-                if not session:
-                    session = Session()
-                    close_after = True
+            await self._delete_emoji_from_db(emoji_id, session)
 
-                await sql_retry(
-                    lambda: session.execute(
-                        SQLDelete(DBEmoji).where(DBEmoji.id == str(emoji_id))
-                    )
-                )
-            except Exception:
-                if close_after and session:
-                    session.rollback()
-                    session.close()
+    @overload
+    async def _delete_emoji_from_db(
+        self,
+        emoji_id: int,
+        session: SQLSession,
+    ): ...
 
-                raise
+    @overload
+    async def _delete_emoji_from_db(
+        self,
+        emoji_id: int,
+        session: SQLSession | None = None,
+    ): ...
 
-            if close_after:
-                session.commit()
-                session.close()
+    @sql_command(commit_results=True)
+    async def _delete_emoji_from_db(
+        self,
+        emoji_id: int,
+        session: SQLSession,
+    ):
+        logger.debug("Deleting emoji with ID %s from database...", emoji_id)
 
-            logger.debug("Emoji with ID %s deleted from database.", emoji_id)
+        await sql_retry(
+            lambda: session.execute(
+                SQLDelete(DBEmoji).where(DBEmoji.id == str(emoji_id))
+            )
+        )
+
+        logger.debug("Emoji with ID %s deleted from database.", emoji_id)
 
     @overload
     async def load_server_emoji(self, server_id: int):
@@ -748,29 +750,67 @@ class EmojiHashMap:
                 logger.warning("Emoji server permissions not set correctly.")
                 raise
 
+        return await self._copy_emoji_into_db(
+            emoji_to_copy,
+            emoji_to_copy_id,
+            emoji_image_hash,
+            emoji_to_copy_name,
+            emoji_to_delete_id,
+            emoji,
+            emoji_server_id,
+            session,
+        )
+
+    @overload
+    async def _copy_emoji_into_db(
+        self,
+        emoji_to_copy: discord.PartialEmoji | None,
+        emoji_to_copy_id: str | int | None,
+        emoji_image_hash: str,
+        emoji_to_copy_name: str,
+        emoji_to_delete_id: int | None,
+        emoji: discord.Emoji,
+        emoji_server_id: int,
+        session: SQLSession,
+    ) -> discord.Emoji | None: ...
+
+    @overload
+    async def _copy_emoji_into_db(
+        self,
+        emoji_to_copy: discord.PartialEmoji | None,
+        emoji_to_copy_id: str | int | None,
+        emoji_image_hash: str,
+        emoji_to_copy_name: str,
+        emoji_to_delete_id: int | None,
+        emoji: discord.Emoji,
+        emoji_server_id: int,
+        session: SQLSession | None,
+    ) -> discord.Emoji | None: ...
+
+    @sql_command(commit_results=True)
+    async def _copy_emoji_into_db(
+        self,
+        emoji_to_copy: discord.PartialEmoji | None,
+        emoji_to_copy_id: str | int | None,
+        emoji_image_hash: str,
+        emoji_to_copy_name: str,
+        emoji_to_delete_id: int | None,
+        emoji: discord.Emoji,
+        emoji_server_id: int,
+        session: SQLSession,
+    ) -> discord.Emoji | None:
         # Copied the emoji, going to update my table
-        if not session:
-            session = Session()
-            close_after = True
-        else:
-            close_after = False
+        if emoji_to_delete_id is not None:
+            try:
+                await self.delete_emoji(emoji_to_delete_id, session=session)
+            except Exception as e:
+                logger.error(
+                    "An error occurred when trying to delete an emoji from the hash map while running copy_emoji_into_server(): %s",
+                    e,
+                )
+                raise
 
         try:
-            if emoji_to_delete_id is not None:
-                try:
-                    await self.delete_emoji(emoji_to_delete_id, session=session)
-                except Exception as e:
-                    logger.error(
-                        "An error occurred when trying to delete an emoji from the hash map while running copy_emoji_into_server(): %s",
-                        e,
-                    )
-                    if session:
-                        session.rollback()
-                        if close_after:
-                            session.close()
-
-                    raise
-
             await self.add_emoji(
                 emoji=emoji,
                 emoji_server_id=emoji_server_id,
@@ -794,25 +834,12 @@ class EmojiHashMap:
                     image_hash=emoji_image_hash,
                     session=session,
                 )
-
-            session.commit()
         except Exception as e:
-            if session:
-                session.rollback()
-                if close_after:
-                    session.close()
-
-            if isinstance(e, SQLError):
-                logger.warning(
-                    "An SQL error occurred while trying to copy an emoji into the emoji server: %s",
-                    e,
-                )
-            else:
-                logger.error(
-                    "An SQL error occurred while trying to copy an emoji into the emoji server: %s",
-                    e,
-                )
-                raise
+            logger.error(
+                "An SQL error occurred while trying to copy an emoji into the emoji server: %s",
+                e,
+            )
+            raise
 
         logger.debug("%s added to emoji server.", emoji)
         return emoji
@@ -881,11 +908,7 @@ class EmojiHashMap:
         else:
             external_emoji_server_id = None
 
-        close_after = False
         try:
-            if not session:
-                session = Session()
-                close_after = True
             if not image_hash:
                 if partial_or_full_emoji := (external_emoji or full_emoji):
                     # Get the hash of the external emoji's image if we have access to it
@@ -906,16 +929,8 @@ class EmojiHashMap:
                 session=session,
             )
         except Exception as e:
-            if close_after and session:
-                session.rollback()
-                session.close()
-
             logger.error(e)
             return False
-
-        if close_after:
-            session.commit()
-            session.close()
 
         return True
 
