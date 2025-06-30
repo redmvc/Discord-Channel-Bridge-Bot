@@ -29,7 +29,7 @@ class EmojiHashMap:
     @overload
     def __init__(self): ...
 
-    @sql_command(commit_results=True)
+    @sql_command
     @beartype
     def __init__(self, session: SQLSession):
         """Initialise the emoji hash map from the emoji table.
@@ -191,7 +191,7 @@ class EmojiHashMap:
         session: SQLSession | None = None,
     ): ...
 
-    @sql_command(commit_results=True)
+    @sql_command
     @beartype
     async def _add_emoji_to_database(
         self,
@@ -485,7 +485,7 @@ class EmojiHashMap:
         session: SQLSession | None = None,
     ): ...
 
-    @sql_command(commit_results=True)
+    @sql_command
     async def _delete_emoji_from_db(
         self,
         emoji_id: int,
@@ -555,7 +555,7 @@ class EmojiHashMap:
         session: SQLSession | None = None,
     ): ...
 
-    @sql_command(commit_results=True)
+    @sql_command
     @beartype
     async def load_server_emoji(
         self,
@@ -794,7 +794,7 @@ class EmojiHashMap:
         session: SQLSession | None,
     ) -> discord.Emoji | None: ...
 
-    @sql_command(commit_results=True)
+    @sql_command
     async def _copy_emoji_into_db(
         self,
         emoji_to_copy: discord.PartialEmoji | None,

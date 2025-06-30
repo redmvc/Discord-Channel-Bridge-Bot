@@ -1296,7 +1296,7 @@ async def replace_missing_emoji(
 ) -> str: ...
 
 
-@sql_command(commit_results=True)
+@sql_command
 @beartype
 async def replace_missing_emoji(
     message_content: str,
@@ -2163,7 +2163,7 @@ async def unreact(
 ): ...
 
 
-@sql_command(commit_results=True)
+@sql_command
 @beartype
 async def unreact(
     payload: (

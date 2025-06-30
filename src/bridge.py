@@ -150,7 +150,7 @@ class Bridges:
     @overload
     async def load_from_database(self): ...
 
-    @sql_command(commit_results=True)
+    @sql_command
     @beartype
     async def load_from_database(self, session: SQLSession):
         """Load all bridges saved in the bot's connected database.
@@ -545,7 +545,7 @@ class Bridges:
         session: SQLSession | None,
     ) -> Bridge: ...
 
-    @sql_command(commit_results=True)
+    @sql_command
     async def _add_bridge_to_db(
         self,
         *,
@@ -782,7 +782,7 @@ class Bridges:
         session: SQLSession | None,
     ): ...
 
-    @sql_command(commit_results=True)
+    @sql_command
     async def _remove_bridges_from_db(
         self,
         *,

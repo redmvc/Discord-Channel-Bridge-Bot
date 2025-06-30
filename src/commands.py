@@ -1406,7 +1406,7 @@ async def stop_auto_bridging_threads_helper(
 ): ...
 
 
-@sql_command(commit_results=True)
+@sql_command
 @beartype
 async def stop_auto_bridging_threads_helper(
     channel_ids_to_remove: int | Iterable[int],
