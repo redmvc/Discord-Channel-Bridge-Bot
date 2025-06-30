@@ -282,37 +282,44 @@ async def on_message(message: discord.Message):
     ValueError
         The length of embeds was invalid, there was no token associated with one of the webhooks or ephemeral was passed with the improper webhook type or there was no state attached with one of the webhooks when giving it a view.
     """
-    if not isinstance(message.channel, (discord.TextChannel, discord.Thread)):
-        return
-
-    if message.type not in {discord.MessageType.default, discord.MessageType.reply}:
-        # Only bridge contentful messages
-        return
-
-    if (
-        (application_id := (message.application_id or message.author.id))
-        == globals.client.application_id
-    ) or (
-        (
-            not (
-                local_whitelist := globals.per_channel_whitelist.get(message.channel.id)
-            )
-            or (application_id not in local_whitelist)
-        )
-        and (
-            not (global_whitelist := globals.settings.get("whitelisted_apps"))
-            or (application_id not in [int(app_id) for app_id in global_whitelist])
-        )
-    ):
-        # Don't bridge messages from non-whitelisted applications or from self
-        return
-
-    if not await globals.wait_until_ready():
-        return
+    message_id = message.id
 
     lock = asyncio.Lock()
+    globals.message_lock[message_id] = lock
     async with lock:
-        globals.message_lock[message.id] = lock
+        if not isinstance(message.channel, (discord.TextChannel, discord.Thread)):
+            del globals.message_lock[message_id]
+            return
+
+        if message.type not in {discord.MessageType.default, discord.MessageType.reply}:
+            # Only bridge contentful messages
+            del globals.message_lock[message_id]
+            return
+
+        if (
+            (application_id := (message.application_id or message.author.id))
+            == globals.client.application_id
+        ) or (
+            (
+                not (
+                    local_whitelist := globals.per_channel_whitelist.get(
+                        message.channel.id
+                    )
+                )
+                or (application_id not in local_whitelist)
+            )
+            and (
+                not (global_whitelist := globals.settings.get("whitelisted_apps"))
+                or (application_id not in [int(app_id) for app_id in global_whitelist])
+            )
+        ):
+            # Don't bridge messages from non-whitelisted applications or from self
+            del globals.message_lock[message_id]
+            return
+
+        if not await globals.wait_until_ready():
+            del globals.message_lock[message_id]
+            return
 
         await bridge_message_helper(message)
 
@@ -1035,29 +1042,36 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
     ValueError
         The length of embeds was invalid, there was no token associated with a webhook or a webhook had no state.
     """
-    if not (updated_message_content := payload.data.get("content")):
-        # Not a content edit
-        return
+    message_id = payload.message_id
 
-    if not await globals.wait_until_ready():
-        return
-
-    if not bridges.get_outbound_bridges(payload.channel_id):
-        return
-
-    lock = globals.message_lock.get(payload.message_id)
+    lock = globals.message_lock.get(message_id)
     if not lock:
         lock = asyncio.Lock()
-        globals.message_lock[payload.message_id] = lock
+        globals.message_lock[message_id] = lock
 
     async with lock:
+        if not globals.message_lock.get(message_id):
+            # Message has been deleted before the edit receipt somehow
+            return
+
+        if not (updated_message_content := payload.data.get("content")):
+            # Not a content edit
+            return
+
+        if not await globals.wait_until_ready():
+            return
+
+        channel_id = payload.channel_id
+        if not bridges.get_outbound_bridges(channel_id):
+            return
+
         await edit_message_helper(
             message_content=updated_message_content,
             embeds=[
                 discord.Embed.from_dict(embed) for embed in payload.data.get("embeds")
             ],
-            message_id=payload.message_id,
-            channel_id=payload.channel_id,
+            message_id=message_id,
+            channel_id=channel_id,
             message_is_reply=(
                 int(payload.data.get("type")) == discord.MessageType.reply.value
             ),
@@ -1516,21 +1530,28 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
     ValueError
         A webhook does not have a token associated with it.
     """
-    if not await globals.wait_until_ready():
-        return
+    message_id = payload.message_id
 
-    if not bridges.get_outbound_bridges(payload.channel_id):
-        return
-
-    lock = globals.message_lock.get(payload.message_id)
+    lock = globals.message_lock.get(message_id)
     if not lock:
         lock = asyncio.Lock()
-        globals.message_lock[payload.message_id] = lock
+        globals.message_lock[message_id] = lock
 
     async with lock:
-        await delete_message_helper(payload.message_id, payload.channel_id)
+        if not globals.message_lock.get(message_id):
+            # Message has been deleted already (two deletion receipts?)
+            return
 
-    del globals.message_lock[payload.message_id]
+        if not await globals.wait_until_ready():
+            return
+
+        channel_id = payload.channel_id
+        if not bridges.get_outbound_bridges(channel_id):
+            return
+
+        await delete_message_helper(message_id, channel_id)
+
+        del globals.message_lock[message_id]
 
 
 @beartype
@@ -1726,13 +1747,14 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         # Don't bridge my own reaction
         return
 
-    if not bridges.get_outbound_bridges(payload.channel_id):
+    channel_id = payload.channel_id
+    if not bridges.get_outbound_bridges(channel_id):
         # Only bridge reactions across outbound bridges
         return
 
     await bridge_reaction_add(
         message_id=payload.message_id,
-        channel_id=payload.channel_id,
+        channel_id=channel_id,
         emoji=payload.emoji,
     )
 
