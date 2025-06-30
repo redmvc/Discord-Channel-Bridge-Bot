@@ -502,7 +502,7 @@ class EmojiHashMap:
         logger.debug("Emoji with ID %s deleted from database.", emoji_id)
 
     @overload
-    async def load_server_emoji(self, *, session: SQLSession | None = None):
+    async def load_server_emoji(self):
         """Load all emoji in all servers the bot is connected to into the hash map.
 
         Raises
@@ -519,12 +519,7 @@ class EmojiHashMap:
         ...
 
     @overload
-    async def load_server_emoji(
-        self,
-        server_id: int,
-        *,
-        session: SQLSession | None = None,
-    ):
+    async def load_server_emoji(self, server_id: int):
         """Load all emoji in a server into the hash map.
 
         Parameters
