@@ -1,4 +1,5 @@
-from typing import Any, Callable, Iterable
+from functools import wraps
+from typing import Any, Callable, Iterable, ParamSpec, overload
 
 from beartype import beartype
 from sqlalchemy import Boolean, Integer
@@ -15,6 +16,8 @@ from sqlalchemy.orm import mapped_column, sessionmaker
 
 from globals import T, run_retries, settings
 from validations import logger
+
+P = ParamSpec("P")
 
 
 class DBBase(DeclarativeBase):
@@ -397,6 +400,66 @@ async def sql_retry(
     T
     """
     return await run_retries(fun, num_retries, time_to_wait, SQLError)
+
+
+@overload
+def sql_command(commit_results: "Callable[P, T]") -> "Callable[P, T]":
+    """Decorator that checks whether the :class:`~sqlalchemy.orm.Session`-typed argument of a function exists and is valid, and runs the function with it if so. Otherwise, it create a Python context manager with the session and calls the function within it.
+
+    Using the decorator with no arguments will not commit the results of running the function to the database and will assume that the name of the argument to the function that should contain the session is "session".
+    """
+    pass
+
+
+@overload
+def sql_command(
+    commit_results: bool = False,
+    session_keyword: str = "session",
+) -> "Callable[[Callable[P, T]], Callable[P, T]]":
+    """Decorator that checks whether the :class:`~sqlalchemy.orm.Session`-typed argument of a function exists and is valid, and runs the function with it if so. Otherwise, it create a Python context manager with the session and calls the function within it.
+
+    Parameters
+    ----------
+    commit_results : bool, optional
+        Whether to commit the results of the session to the database, or roll them back in case of an error. Defaults to False.
+    session_keyword : str, optional
+        The name of the argument that is meant to store the session in the function. Defaults to "session".
+    """
+    pass
+
+
+def sql_command(
+    commit_results: "Callable[P, T] | bool" = False,
+    session_keyword: str = "session",
+) -> "Callable[[Callable[P, T]], Callable[P, T]] | Callable[P, T]":
+    if callable(commit_results):
+        calling_function = commit_results
+        commit_results = False
+    else:
+        calling_function = None
+
+    def decorator(func: "Callable[P, T]") -> "Callable[P, T]":
+        @wraps(func)
+        def wrapper_func(*args, **kwargs) -> T:
+            if (kwargs.get(session_keyword) is not None) or any(
+                isinstance(arg, SQLSession) for arg in args
+            ):
+                return func(*args, **kwargs)
+
+            with Session() as session:
+                kwargs[session_keyword] = session
+                if commit_results:
+                    with session.begin():
+                        return func(*args, **kwargs)
+
+                return func(*args, **kwargs)
+
+        return wrapper_func
+
+    if calling_function is not None:
+        return decorator(calling_function)
+    else:
+        return decorator
 
 
 # Create the engine connecting to the database
