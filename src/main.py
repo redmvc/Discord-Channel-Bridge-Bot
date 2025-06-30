@@ -11,7 +11,6 @@ from typing import (
     NamedTuple,
     NotRequired,
     TypedDict,
-    cast,
     overload,
 )
 
@@ -1749,7 +1748,8 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
 
     # Choose a "fallback emoji" to use in case I don't have access to the one being reacted and the message across the bridge doesn't already have it
     fallback_emoji: discord.Emoji | str | None
-    if payload.emoji.is_custom_emoji():
+    if payload.emoji.is_custom_emoji() and (emoji_id := payload.emoji.id):
+        # is_custom_emoji() guarantees that emoji.id is not None
         # Custom emoji, I need to check whether it exists and is available to me
         # I'll add this to my hash map if it's not there already
         try:
@@ -1761,8 +1761,6 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
             )
             raise
 
-        # is_custom_emoji() guarantees that payload.emoji.id is not None
-        emoji_id = cast(int, payload.emoji.id)
         emoji_id_str = str(emoji_id)
 
         fallback_emoji = globals.client.get_emoji(emoji_id)
@@ -2377,7 +2375,8 @@ async def on_thread_create(thread: discord.Thread):
     last_message = thread.last_message
     if not last_message or last_message.content == "":
         refreshed_thread = await globals.get_channel_from_id(thread.id)
-        last_message = cast(discord.Thread, refreshed_thread).last_message
+        if isinstance(refreshed_thread, discord.Thread):
+            last_message = refreshed_thread.last_message
     if last_message and last_message.content != "":
         await bridge_message_helper(last_message)
 
