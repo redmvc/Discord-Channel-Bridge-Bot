@@ -4,15 +4,7 @@ import asyncio
 import inspect
 import re
 from copy import deepcopy
-from typing import (
-    Any,
-    Coroutine,
-    Literal,
-    NamedTuple,
-    NotRequired,
-    TypedDict,
-    overload,
-)
+from typing import Any, Coroutine, Literal, NamedTuple, NotRequired, TypedDict, overload
 
 import discord
 from beartype import beartype
@@ -48,9 +40,7 @@ class ThreadSplat(TypedDict, total=False):
 
 @globals.client.event
 async def on_ready():
-    """Load the data registered in the database into memory.
-
-    This function is called when the client is done preparing the data received from Discord. Usually after login is successful and the Client.guilds and co. are filled up.
+    """This function is called when the client is done preparing the data received from Discord. Usually after login is successful and the Client.guilds and co. are filled up.
 
     Raises
     ------
@@ -68,6 +58,25 @@ async def on_ready():
 
     logger.info("Client successfully connected. Running initial loading procedures...")
 
+    await setup_bot()
+
+    logger.info("Bot is ready.")
+
+
+async def setup_bot():
+    """Load the data registered in the database into memory.
+
+    Raises
+    ------
+    ChannelTypeError
+        The source or target channels of some existing Bridge are not text channels nor threads off a text channel.
+    WebhookChannelError
+        Webhook of some existing Bridge is not attached to Bridge's target channel.
+    :class:`~discord.HTTPException`
+        Deleting an existing webhook or creating a new one failed.
+    :class:`~discord.Forbidden`
+        You do not have permissions to create or delete webhooks for some of the channels in existing Bridges.
+    """
     session = None
     try:
         with SQLSession(engine) as session:
@@ -217,7 +226,6 @@ async def on_ready():
 
     globals.is_connected = True
     globals.is_ready = True
-    logger.info("Bot is ready.")
 
 
 @globals.client.event
