@@ -125,7 +125,7 @@ async def help(
             await interaction.response.send_message(
                 "`/whitelist @bot [@bot_2 [@bot_3 ...]]`"
                 + "\nNecessary permissions to run command: Manage Webhooks."
-                + "\n\nAllows or disallows bridging messages sent by one or more bots to the current channel. Only works through outbound bridges: you can whitelist a bot so that messages sent by it in the current channel are bridged to other channels, but that will not make messages by that bot be bridged to the current channel if the bot is not whitelisted in the source channel."
+                + "\n\nAllows or disallows bridging messages sent by one or more bots from the current channel. Only works through outbound bridges: you can whitelist a bot so that messages sent by it in the current channel are bridged to other channels, but that will not make messages by that bot be bridged to the current channel if the bot is not whitelisted in the source channel."
                 + "\n\nNote that this command is a toggle, so running it again will remove a bot from the blacklist. It also goes on a per-bot basis, so if you run `/whitelist @bot` then `/whitelist @bot @bot_2` then `@bot` will not be whitelisted but `@bot_2` will.",
                 ephemeral=True,
             )
@@ -1973,23 +1973,24 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
 
         async def get_list_of_reacting_users(
             list_of_reacters: list[Coroutine[Any, Any, set[int]]],
-        ):
+        ) -> set[int]:
             gathered_users = await asyncio.gather(*list_of_reacters)
             set_of_users: set[int] = set().union(*gathered_users)
             set_of_users.discard(bot_user_id)
             return set_of_users
 
-        list_of_reacting_users_async = [
-            get_list_of_reacting_users(list_of_reacters)
-            for _, list_of_reacters in all_reactions_async.items()
-        ]
+        ordered_reaction_ids = []
+        list_of_reacting_users_async = []
+        for reaction_id, list_of_reacters in all_reactions_async.items():
+            ordered_reaction_ids.append(reaction_id)
+            list_of_reacting_users_async.append(
+                get_list_of_reacting_users(list_of_reacters)
+            )
         list_of_reacting_users = await asyncio.gather(*list_of_reacting_users_async)
 
         all_reactions = {
             reaction_id: users
-            for reaction_id, users in zip(
-                all_reactions_async.keys(), list_of_reacting_users
-            )
+            for reaction_id, users in zip(ordered_reaction_ids, list_of_reacting_users)
             if len(users) > 0
         }
     except Exception as e:
