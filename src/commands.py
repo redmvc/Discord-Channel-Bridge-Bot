@@ -1566,31 +1566,44 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
     # Now find the list of channels that can validly reach this one via inbound chains
     reachable_channel_ids = await bridges.get_reachable_channels(channel.id, "inbound")
 
-    # This variable is where I'll gather the list of users per reaction
-    # The key of each entry is a reaction emoji ID
-    # The entry is a list of coroutines to get the users that reacted with that emoji
-    all_reactions_async: dict[str, list[Coroutine[Any, Any, set[int]]]] = {}
-
-    # First get the reactions on this message itself
-    async def append_users_to_reactions_list(
+    # I'll define a helper function to create an async list of all users who reacted with a given reaction
+    async def get_reacting_users_coro(
         message: discord.Message,
+        reacting_users_coro: dict[str, list[Coroutine[Any, Any, set[int]]]] = {},
         session: SQLSession | None = None,
-    ):
+    ) -> dict[str, list[Coroutine[Any, Any, set[int]]]]:
+        """Return a dictionary whose keys are emoji IDs used as reactions to a message and whose values are a list of Coroutines that return a set of user IDs that reacted to a message with that reaction.
+
+        Parameters
+        ----------
+        message : :class:`~discord.Message`
+            The message to get reactions for.
+        reacting_users_coro : dict[str, list[Coroutine[Any, Any, set[int]]]], optional
+            A dictionary of already-mapped reaction coroutines to append any new ones to. Defaults to {}.
+        session : :class:`~sqlalchemy.orm.Session` | None, optional
+            An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
+
+        Returns
+        -------
+        dict[str, list[Coroutine[Any, Any, set[int]]]]
+        """
         for reaction in message.reactions:
             reaction_emoji_id = await emoji_hash_map.map.get_mapped_emoji_id(
                 reaction.emoji,
                 session,
             )
 
-            if not all_reactions_async.get(reaction_emoji_id):
-                all_reactions_async[reaction_emoji_id] = []
+            if reaction_emoji_id not in reacting_users_coro:
+                reacting_users_coro[reaction_emoji_id] = []
 
-            all_reactions_async[reaction_emoji_id].append(
+            reacting_users_coro[reaction_emoji_id].append(
                 globals.get_users_from_iterator(reaction.users())
             )
 
+        return reacting_users_coro
+
     try:
-        await append_users_to_reactions_list(message)
+        all_reactions_async = await get_reacting_users_coro(message)
     except discord.Forbidden:
         await interaction.followup.send(
             "❌ The bot does not have access to this message.",
@@ -1629,8 +1642,10 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
                             source_message = await source_channel.fetch_message(
                                 source_message_id
                             )
-                            await append_users_to_reactions_list(
-                                source_message, session
+                            all_reactions_async = await get_reacting_users_coro(
+                                source_message,
+                                all_reactions_async,
+                                session,
                             )
                         except discord.Forbidden:
                             at_least_one_inaccessible_bridge = True
@@ -1670,7 +1685,11 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
                         target_message_id
                     )
                     try:
-                        await append_users_to_reactions_list(bridged_message, session)
+                        all_reactions_async = await get_reacting_users_coro(
+                            bridged_message,
+                            all_reactions_async,
+                            session,
+                        )
                     except discord.Forbidden:
                         at_least_one_inaccessible_bridge = True
     except Exception as e:
