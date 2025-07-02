@@ -1170,12 +1170,12 @@ class EmojiHashMap:
         ):
             return emoji
 
-        if (
-            (matching_emoji_ids := self.get_matches(emoji_id))
-            and (matching_emoji_id := set(matching_emoji_ids).pop())
-            and (emoji := globals.client.get_emoji(matching_emoji_id))
-        ):
-            return emoji
+        if matching_emoji_ids := self.get_matches(emoji_id):
+            for matching_emoji_id in matching_emoji_ids:
+                if (
+                    emoji := globals.client.get_emoji(matching_emoji_id)
+                ) and emoji.is_usable():
+                    return emoji
 
         return None
 
