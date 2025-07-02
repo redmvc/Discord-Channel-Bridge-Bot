@@ -1869,9 +1869,19 @@ async def bridge_reaction_add(
             if fallback_emoji:
                 existing_matching_emoji = next(
                     (
-                        reaction.emoji
+                        emoji
                         for reaction in bridged_message.reactions
-                        if reaction.emoji == fallback_emoji
+                        if (
+                            (emoji := reaction.emoji)
+                            and (
+                                (
+                                    not (is_str := isinstance(emoji, str))
+                                    and not isinstance(fallback_emoji, str)
+                                    and (emoji.id == fallback_emoji.id)
+                                )
+                                or (is_str and (emoji == fallback_emoji))
+                            )
+                        )
                     ),
                     None,
                 )
