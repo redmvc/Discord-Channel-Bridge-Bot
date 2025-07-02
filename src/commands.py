@@ -1581,51 +1581,16 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
                 reactions.add(user.id)
         return reactions
 
-    # This function gets the equivalent ID of an emoji, matching it to an internal one if possible
-    async def get_mapped_emoji_id(
-        emoji: discord.PartialEmoji | discord.Emoji | str,
-        session: SQLSession | None = None,
-    ):
-        if isinstance(emoji, str):
-            return emoji
-
-        if not emoji.id:
-            # Non-custom emoji
-            return str(emoji)
-
-        # Custom emoji
-        if mapped_emoji := emoji_hash_map.map.get_accessible_emoji(emoji.id):
-            # If there is an emoji I have access to that matches this one, return it
-            return str(mapped_emoji)
-        elif not globals.emoji_server:
-            # I don't have an emoji server to copy the emoji into so I'll just return its string
-            return str(emoji)
-
-        # Try to copy this emoji into my emoji server
-        if isinstance(emoji, discord.PartialEmoji):
-            copied_emoji = await emoji_hash_map.map.copy_emoji_into_server(
-                emoji_to_copy=emoji,
-                session=session,
-            )
-        else:
-            copied_emoji = await emoji_hash_map.map.copy_emoji_into_server(
-                emoji_to_copy_id=emoji.id,
-                emoji_to_copy_name=emoji.name,
-                session=session,
-            )
-        if copied_emoji:
-            return str(copied_emoji)
-
-        # Failed to copy the emoji
-        return str(emoji)
-
     # First get the reactions on this message itself
     async def append_users_to_reactions_list(
         message: discord.Message,
         session: SQLSession | None = None,
     ):
         for reaction in message.reactions:
-            reaction_emoji_id = await get_mapped_emoji_id(reaction.emoji, session)
+            reaction_emoji_id = await emoji_hash_map.map.get_mapped_emoji_id(
+                reaction.emoji,
+                session,
+            )
 
             if not all_reactions_async.get(reaction_emoji_id):
                 all_reactions_async[reaction_emoji_id] = []

@@ -1450,5 +1450,61 @@ class EmojiHashMap:
 
         return image_hash
 
+    @beartype
+    async def get_mapped_emoji_id(
+        self,
+        emoji: discord.PartialEmoji | discord.Emoji | str,
+        session: SQLSession | None = None,
+    ) -> str:
+        """Return a string containing the ID of the accessible version of an emoji, if one exists:
+        - non-custom/default emoji will have their names returned;
+        - if the emoji is, itself, accessible, its ID is returned;
+        - if the bot has a registered emoji server and an emoji matching this one is in the server, its ID is returned;
+        - if there exists some other emoji in a server the bot is in that matches that emoji, its ID is returned;
+        - if the bot has a registered emoji server, it will try to copy this emoji into it and then return the ID of the copy;
+        - otherwise, just the name of the emoji is returned.
+
+        Parameters
+        ----------
+        emoji : :class:`~discord.PartialEmoji` | :class:`~discord.Emoji` | str
+            The emoji to get the ID of.
+        session : :class:`~sqlalchemy.orm.Session` | None, optional
+            An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
+
+        Returns
+        -------
+        str
+        """
+        if isinstance(emoji, str):
+            return emoji
+
+        if not emoji.id:
+            # Non-custom emoji
+            return str(emoji)
+
+        # Custom emoji
+        if mapped_emoji := self.get_accessible_emoji(emoji.id):
+            # If there is an emoji I have access to that matches this one, return it
+            return str(mapped_emoji)
+        elif globals.emoji_server:
+            # Try to copy this emoji into my emoji server
+            if isinstance(emoji, discord.PartialEmoji):
+                copied_emoji = await self.copy_emoji_into_server(
+                    emoji_to_copy=emoji,
+                    session=session,
+                )
+            else:
+                copied_emoji = await self.copy_emoji_into_server(
+                    emoji_to_copy_id=emoji.id,
+                    emoji_to_copy_name=emoji.name,
+                    session=session,
+                )
+
+            if copied_emoji:
+                return str(copied_emoji)
+
+        # Failed to copy the emoji
+        return str(emoji)
+
 
 map: EmojiHashMap
