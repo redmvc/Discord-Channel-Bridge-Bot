@@ -124,7 +124,7 @@ async def help(
             await interaction.response.send_message(
                 "`/whitelist @bot [@bot_2 [@bot_3 ...]]`"
                 + "\nNecessary permissions to run command: Manage Webhooks."
-                + "\n\nAllows or disallows bridging messages sent by one or more bots to the current channel. Only works through outbound bridges: you can whitelist a bot so that messages sent by it in the current channel are bridged to other channels, but that will not make messages by that bot be bridged to the current channel if the bot is not whitelisted in the source channel."
+                + "\n\nAllows or disallows bridging messages sent by one or more bots from the current channel. Only works through outbound bridges: you can whitelist a bot so that messages sent by it in the current channel are bridged to other channels, but that will not make messages by that bot be bridged to the current channel if the bot is not whitelisted in the source channel."
                 + "\n\nNote that this command is a toggle, so running it again will remove a bot from the blacklist. It also goes on a per-bot basis, so if you run `/whitelist @bot` then `/whitelist @bot @bot_2` then `@bot` will not be whitelisted but `@bot_2` will.",
                 ephemeral=True,
             )
