@@ -1825,13 +1825,7 @@ async def bridge_reaction_add(
 
         emoji_id_str = str(emoji_id)
 
-        fallback_emoji = globals.client.get_emoji(emoji_id)
-        if not fallback_emoji or not fallback_emoji.is_usable():
-            # Couldn't find the reactji, will try to see if I've got it mapped locally
-            fallback_emoji = emoji_hash_map.map.get_accessible_emoji(
-                emoji_id, skip_self=True
-            )
-
+        fallback_emoji = emoji_hash_map.map.get_accessible_emoji(emoji_id)
         if not fallback_emoji:
             # I don't have the emoji mapped locally, I'll add it to my server and update my map
             try:
