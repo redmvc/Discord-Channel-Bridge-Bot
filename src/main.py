@@ -1842,7 +1842,7 @@ async def bridge_reaction_add(
     # Get the IDs of all emoji that match the current one
     equivalent_emoji_ids = emoji_hash_map.map.get_matches(emoji, return_str=True)
     if not equivalent_emoji_ids:
-        equivalent_emoji_ids = frozenset(str(emoji.id))
+        equivalent_emoji_ids = frozenset([emoji_id_str])
 
     # Now find the list of channels that can validly be reached via outbound chains from this channel
     reachable_channel_ids = await bridges.get_reachable_channels(
