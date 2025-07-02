@@ -1,6 +1,6 @@
 import asyncio
 import re
-from typing import Any, AsyncIterator, Coroutine, Iterable, Literal, overload
+from typing import Any, Coroutine, Iterable, Literal, overload
 
 import discord
 from beartype import beartype
@@ -1571,16 +1571,6 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
     # The entry is a list of coroutines to get the users that reacted with that emoji
     all_reactions_async: dict[str, list[Coroutine[Any, Any, set[int]]]] = {}
 
-    # This function gets a list of user IDs from an async iterator associated with each reaction
-    async def get_users_from_iterator(
-        user_iterator: AsyncIterator[discord.Member | discord.User],
-    ):
-        reactions: set[int] = set()
-        async for user in user_iterator:
-            if user.id != bot_user_id:
-                reactions.add(user.id)
-        return reactions
-
     # First get the reactions on this message itself
     async def append_users_to_reactions_list(
         message: discord.Message,
@@ -1596,7 +1586,7 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
                 all_reactions_async[reaction_emoji_id] = []
 
             all_reactions_async[reaction_emoji_id].append(
-                get_users_from_iterator(reaction.users())
+                globals.get_users_from_iterator(reaction.users())
             )
 
     try:
