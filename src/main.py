@@ -1975,12 +1975,14 @@ async def bridge_reaction_add(
                 except ChannelTypeError:
                     return
 
+                source_channel_id = source_channel.id
                 source_message_id = int(source_message_map.source_message)
-                if source_channel.id in reachable_channel_ids:
+                if source_channel_id in reachable_channel_ids:
                     try:
                         async_add_reactions.append(
                             add_reaction_helper(source_channel, source_message_id)
                         )
+                        reachable_channel_ids.discard(source_channel_id)
                     except discord.HTTPException as e:
                         logger.warning(
                             "Ran into a Discord exception while trying to add a reaction across a bridge: %s",
@@ -2013,12 +2015,18 @@ async def bridge_reaction_add(
                 .join(
                     max_message_subq,
                     sql_and(
-                        DBMessageMap.target_channel
-                        == max_message_subq.c.target_channel,
-                        DBMessageMap.target_message_order
-                        == max_message_subq.c.max_order,
-                        DBMessageMap.source_message
-                        == max_message_subq.c.source_message,
+                        (
+                            DBMessageMap.target_channel
+                            == max_message_subq.c.target_channel
+                        ),
+                        (
+                            DBMessageMap.target_message_order
+                            == max_message_subq.c.max_order
+                        ),
+                        (
+                            DBMessageMap.source_message
+                            == max_message_subq.c.source_message
+                        ),
                     ),
                 )
             )
