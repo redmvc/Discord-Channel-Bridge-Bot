@@ -783,22 +783,6 @@ class EmojiHashMap:
                 session=session,
             )
 
-            if emoji_to_copy:
-                await self.map_emoji(
-                    external_emoji=emoji_to_copy,
-                    internal_emoji=emoji,
-                    image_hash=emoji_image_hash,
-                    session=session,
-                )
-            elif emoji_to_copy_id:
-                await self.map_emoji(
-                    external_emoji_id=emoji_to_copy_id,
-                    external_emoji_name=emoji_to_copy_name,
-                    internal_emoji=emoji,
-                    image_hash=emoji_image_hash,
-                    session=session,
-                )
-
             session.commit()
         except Exception as e:
             if session:

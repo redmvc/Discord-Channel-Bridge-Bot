@@ -2022,11 +2022,8 @@ async def bridge_reaction_add(
             select_message_map: SQLSelect[tuple[DBMessageMap]] = (
                 SQLSelect(DBMessageMap)
                 .where(
-                    DBMessageMap.source_message == str(source_message_id),
-                    (
-                        DBMessageMap.target_channel.in_(
-                            [str(id) for id in reachable_channel_ids]
-                        )
+                    DBMessageMap.target_channel.in_(
+                        [str(id) for id in reachable_channel_ids]
                     ),
                 )
                 .join(
