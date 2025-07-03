@@ -1,11 +1,10 @@
 import asyncio
 import re
-from typing import Any, Coroutine, Iterable, Literal, overload
+from typing import TYPE_CHECKING, Any, Iterable, Literal, overload
 
 import discord
 from beartype import beartype
 from sqlalchemy import Delete as SQLDelete
-from sqlalchemy import ScalarResult
 from sqlalchemy import Select as SQLSelect
 from sqlalchemy.exc import StatementError as SQLError
 from sqlalchemy.orm import Session as SQLSession
@@ -22,6 +21,11 @@ from database import (
     sql_retry,
 )
 from validations import ChannelTypeError, logger, validate_channels
+
+if TYPE_CHECKING:
+    from typing import Coroutine
+
+    from sqlalchemy import ScalarResult
 
 
 @globals.command_tree.command(
@@ -217,7 +221,7 @@ async def bridge(
 
     await interaction.response.defer(thinking=True, ephemeral=True)
 
-    join_threads: list[Coroutine[Any, Any, None]] = []
+    join_threads: list["Coroutine[Any, Any, None]"] = []
     if isinstance(message_channel, discord.Thread) and not message_channel.me:
         try:
             join_threads.append(message_channel.join())
@@ -317,7 +321,7 @@ async def create_bridges(
     session : :class:`~sqlalchemy.orm.Session` | None, optional
         An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
     """
-    create_bridges: list[Coroutine[Any, Any, Bridge]] = []
+    create_bridges: list["Coroutine[Any, Any, Bridge]"] = []
     if direction != "inbound":
         create_bridges.append(
             bridges.create_bridge(
@@ -681,7 +685,7 @@ async def bridge_thread_helper(
         select_message_map: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
             DBMessageMap
         ).where(DBMessageMap.source_message == str(source_message_id))
-        target_starting_messages: ScalarResult[DBMessageMap] = await sql_retry(
+        target_starting_messages: "ScalarResult[DBMessageMap]" = await sql_retry(
             lambda: session.scalars(select_message_map)
         )
         for target_starting_message in target_starting_messages:
@@ -697,8 +701,8 @@ async def bridge_thread_helper(
     bridged_threads: list[int] = []
     failed_channels: list[int] = []
 
-    create_bridges: list[Coroutine[Any, Any, Bridge]] = []
-    add_user_to_threads: list[Coroutine[Any, Any, None]] = []
+    create_bridges: list["Coroutine[Any, Any, Bridge]"] = []
+    add_user_to_threads: list["Coroutine[Any, Any, None]"] = []
     try:
         add_user_to_threads.append(thread_to_bridge.join())
     except Exception:
@@ -1291,7 +1295,7 @@ async def demolish_all_bridges(
     -------
     bool
     """
-    bridges_being_demolished: list[Coroutine[Any, Any, None]] = []
+    bridges_being_demolished: list["Coroutine[Any, Any, None]"] = []
     demolished_all = True
 
     for channel_to_demolish_id, (
@@ -1446,7 +1450,7 @@ async def whitelist(interaction: discord.Interaction, apps: str):
     try:
         channel_id_str = str(channel.id)
         with Session.begin() as session:
-            run_queries: list[Coroutine[Any, Any, Any]] = []
+            run_queries: list["Coroutine[Any, Any, Any]"] = []
             if len(apps_to_add) > 0:
                 run_queries.append(
                     sql_retry(
@@ -1835,9 +1839,9 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
     # I'll define a helper function to create an async list of all users who reacted with a given reaction
     async def get_reacting_users_coro(
         message: discord.Message,
-        reacting_users_coro: dict[str, list[Coroutine[Any, Any, set[int]]]] = {},
+        reacting_users_coro: dict[str, list["Coroutine[Any, Any, set[int]]"]] = {},
         session: SQLSession | None = None,
-    ) -> dict[str, list[Coroutine[Any, Any, set[int]]]]:
+    ) -> dict[str, list["Coroutine[Any, Any, set[int]]"]]:
         """Return a dictionary whose keys are emoji IDs used as reactions to a message and whose values are a list of Coroutines that return a set of user IDs that reacted to a message with that reaction.
 
         Parameters
@@ -1926,7 +1930,7 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
                 select_message_map: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
                     DBMessageMap
                 ).where(DBMessageMap.source_message == str(source_message_id))
-                bridged_messages: ScalarResult[DBMessageMap] = await sql_retry(
+                bridged_messages: "ScalarResult[DBMessageMap]" = await sql_retry(
                     lambda: session.scalars(select_message_map)
                 )
                 for message_row in bridged_messages:
@@ -1982,7 +1986,7 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
     try:
 
         async def get_list_of_reacting_users(
-            list_of_reacters: list[Coroutine[Any, Any, set[int]]],
+            list_of_reacters: list["Coroutine[Any, Any, set[int]]"],
         ) -> set[int]:
             gathered_users = await asyncio.gather(*list_of_reacters)
             set_of_users: set[int] = set().union(*gathered_users)
