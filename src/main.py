@@ -1845,10 +1845,7 @@ async def bridge_reaction_add(
         equivalent_emoji_ids = frozenset([emoji_id_str])
 
     # Now find the list of channels that can validly be reached via outbound chains from this channel
-    reachable_channel_ids = await bridges.get_reachable_channels(
-        channel_id,
-        "outbound",
-    )
+    reachable_channel_ids = await bridges.get_reachable_channels(channel_id, "outbound")
 
     # Find and react to all messages matching this one
     session = None
@@ -1978,9 +1975,8 @@ async def bridge_reaction_add(
                 except ChannelTypeError:
                     return
 
-                source_channel_id = source_channel.id
                 source_message_id = int(source_message_map.source_message)
-                if source_channel_id in reachable_channel_ids:
+                if source_channel.id in reachable_channel_ids:
                     try:
                         async_add_reactions.append(
                             add_reaction_helper(source_channel, source_message_id)
@@ -1999,14 +1995,6 @@ async def bridge_reaction_add(
             else:
                 # This message is (or might be) the source
                 source_message_id = message_id
-                source_channel_id = channel_id
-
-            if not bridges.get_outbound_bridges(source_channel_id):
-                if len(async_add_reactions) > 0:
-                    reaction_added = await async_add_reactions[0]
-                    await sql_retry(lambda: session.add(reaction_added))
-                    session.commit()
-                return
 
             # Bridge reactions to the last bridged message of a group of split bridged messages
             max_message_subq = (
