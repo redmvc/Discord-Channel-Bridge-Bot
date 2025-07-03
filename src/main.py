@@ -2021,14 +2021,7 @@ async def bridge_reaction_add(
 
         emoji_id_str = str(emoji_id)
 
-        fallback_emoji = globals.client.get_emoji(emoji_id)
-        if not fallback_emoji or not fallback_emoji.is_usable():
-            # Couldn't find the reactji, will try to see if I've got it mapped locally
-            fallback_emoji = emoji_hash_map.map.get_accessible_emoji(
-                emoji_id,
-                skip_self=True,
-            )
-
+        fallback_emoji = emoji_hash_map.map.get_accessible_emoji(emoji_id)
         if not fallback_emoji:
             # I don't have the emoji mapped locally, I'll add it to my server and update my map
             try:
@@ -2045,13 +2038,10 @@ async def bridge_reaction_add(
     # Get the IDs of all emoji that match the current one
     equivalent_emoji_ids = emoji_hash_map.map.get_matches(emoji, return_str=True)
     if not equivalent_emoji_ids:
-        equivalent_emoji_ids = frozenset(str(emoji.id))
+        equivalent_emoji_ids = frozenset([emoji_id_str])
 
     # Now find the list of channels that can validly be reached via outbound chains from this channel
-    reachable_channel_ids = await bridges.get_reachable_channels(
-        channel_id,
-        "outbound",
-    )
+    reachable_channel_ids = await bridges.get_reachable_channels(channel_id, "outbound")
 
     # Find and react to all messages matching this one
     try:
@@ -2071,9 +2061,19 @@ async def bridge_reaction_add(
             if fallback_emoji:
                 existing_matching_emoji = next(
                     (
-                        reaction.emoji
+                        emoji
                         for reaction in bridged_message.reactions
-                        if reaction.emoji == fallback_emoji
+                        if (
+                            (emoji := reaction.emoji)
+                            and (
+                                (
+                                    not (is_str := isinstance(emoji, str))
+                                    and not isinstance(fallback_emoji, str)
+                                    and (emoji.id == fallback_emoji.id)
+                                )
+                                or (is_str and (emoji == fallback_emoji))
+                            )
+                        )
                     ),
                     None,
                 )
@@ -2176,6 +2176,7 @@ async def bridge_reaction_add(
                     async_add_reactions.append(
                         add_reaction_helper(source_channel, source_message_id)
                     )
+                    reachable_channel_ids.discard(source_channel_id)
                 except discord.HTTPException as e:
                     logger.warning(
                         "Ran into a Discord exception while trying to add a reaction across a bridge: %s",
@@ -2190,13 +2191,6 @@ async def bridge_reaction_add(
         else:
             # This message is (or might be) the source
             source_message_id = message_id
-            source_channel_id = channel_id
-
-        if not bridges.get_outbound_bridges(source_channel_id):
-            if len(async_add_reactions) > 0:
-                reaction_added = await async_add_reactions[0]
-                await sql_retry(lambda: session.add(reaction_added))
-            return
 
         # Bridge reactions to the last bridged message of a group of split bridged messages
         max_message_subq = (
@@ -2211,7 +2205,14 @@ async def bridge_reaction_add(
         )
         select_message_map: SQLSelect[tuple[DBMessageMap]] = (
             SQLSelect(DBMessageMap)
-            .where(DBMessageMap.source_message == str(source_message_id))
+            .where(
+                DBMessageMap.source_message == str(source_message_id),
+                (
+                    DBMessageMap.target_channel.in_(
+                        [str(id) for id in reachable_channel_ids]
+                    )
+                ),
+            )
             .join(
                 max_message_subq,
                 sql_and(
@@ -2225,11 +2226,9 @@ async def bridge_reaction_add(
             lambda: session.scalars(select_message_map)
         )
         for message_row in bridged_messages_query_result:
-            target_channel_id = int(message_row.target_channel)
-            if target_channel_id not in reachable_channel_ids:
-                continue
-
-            bridged_channel = await globals.get_channel_from_id(target_channel_id)
+            bridged_channel = await globals.get_channel_from_id(
+                int(message_row.target_channel)
+            )
             if not isinstance(
                 bridged_channel,
                 (discord.TextChannel, discord.Thread),
@@ -2239,7 +2238,8 @@ async def bridge_reaction_add(
             try:
                 async_add_reactions.append(
                     add_reaction_helper(
-                        bridged_channel, int(message_row.target_message)
+                        bridged_channel,
+                        int(message_row.target_message),
                     )
                 )
             except discord.HTTPException as e:
