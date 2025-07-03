@@ -21,32 +21,16 @@ class EmojiHashMap:
     """A mapping between emoji IDs and hashes of their images."""
 
     @overload
-    @classmethod
-    async def create_hash_map(cls) -> "EmojiHashMap":
+    def __init__(self):
         """Initialise the emoji hash map from the emoji table."""
         ...
 
     @overload
-    @classmethod
-    async def create_hash_map(cls, *, session: SQLSession | None) -> "EmojiHashMap": ...
+    def __init__(self, *, session: SQLSession | None): ...
 
-    @classmethod
     @sql_command
     @beartype
-    async def create_hash_map(cls, *, session: SQLSession) -> "EmojiHashMap":
-        """Initialise the emoji hash map from the emoji table.
-
-        Parameters
-        ----------
-        session : :class:`~sqlalchemy.orm.Session` | None, optional
-            An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
-        """
-        new_map = cls()
-        await new_map.initialise(session=session)
-        return new_map
-
-    @beartype
-    async def initialise(self, *, session: SQLSession):
+    def __init__(self, *, session: SQLSession):
         """Initialise the emoji hash map from the emoji table.
 
         Parameters

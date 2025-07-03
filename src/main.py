@@ -115,7 +115,7 @@ async def setup_bot(*, session: SQLSession):
 
         # -----
         logger.info("Loading emoji hash map from database...")
-        emoji_hash_map.map = await emoji_hash_map.EmojiHashMap.create_hash_map()
+        emoji_hash_map.map = emoji_hash_map.EmojiHashMap()
         logger.info("Emoji hash map loaded.")
 
         # -----

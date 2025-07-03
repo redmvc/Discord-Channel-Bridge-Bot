@@ -1,5 +1,15 @@
+import inspect
 from functools import wraps
-from typing import Any, Callable, Coroutine, Iterable, ParamSpec, overload
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Coroutine,
+    Iterable,
+    ParamSpec,
+    TypeVar,
+    overload,
+)
 
 from beartype import beartype
 from sqlalchemy import Boolean, Integer
@@ -14,9 +24,13 @@ from sqlalchemy.orm import DeclarativeBase, Mapped
 from sqlalchemy.orm import Session as SQLSession
 from sqlalchemy.orm import mapped_column, sessionmaker
 
-from globals import T, run_retries, settings
+from globals import run_retries, settings
 from validations import logger
 
+if TYPE_CHECKING:
+    from typing import cast
+
+T = TypeVar("T", bound=Any)
 P = ParamSpec("P")
 
 
@@ -388,8 +402,17 @@ async def sql_retry(
 
 @overload
 def sql_command(
-    commit_results: "Callable[P, Coroutine[Any, Any, T]]",
-) -> "Callable[P, Coroutine[Any, Any, T]]":
+    commit_results: Callable[P, Coroutine[Any, Any, T]],
+) -> Callable[P, Coroutine[Any, Any, T]]:
+    """Decorator that checks whether the :class:`~sqlalchemy.orm.Session`-typed argument of a function exists and is valid, and runs the function with it if so. Otherwise, it create a Python context manager with the session and calls the function within it.
+
+    Using the decorator with no arguments will commit the results of running the function to the database and will assume that the name of the argument to the function that should contain the session is "session".
+    """
+    ...
+
+
+@overload
+def sql_command(commit_results: Callable[P, T]) -> Callable[P, T]:
     """Decorator that checks whether the :class:`~sqlalchemy.orm.Session`-typed argument of a function exists and is valid, and runs the function with it if so. Otherwise, it create a Python context manager with the session and calls the function within it.
 
     Using the decorator with no arguments will commit the results of running the function to the database and will assume that the name of the argument to the function that should contain the session is "session".
@@ -401,7 +424,10 @@ def sql_command(
 def sql_command(
     commit_results: bool = True,
     session_keyword: str = "session",
-) -> "Callable[[Callable[P, Coroutine[Any, Any, T]]], Callable[P, Coroutine[Any, Any, T]]]":
+) -> (
+    Callable[[Callable[P, Coroutine[Any, Any, T]]], Callable[P, Coroutine[Any, Any, T]]]
+    | Callable[[Callable[P, T]], Callable[P, T]]
+):
     """Decorator that checks whether the :class:`~sqlalchemy.orm.Session`-typed argument of a function exists and is valid, and runs the function with it if so. Otherwise, it create a Python context manager with the session and calls the function within it.
 
     Parameters
@@ -411,33 +437,72 @@ def sql_command(
     session_keyword : str, optional
         The name of the argument that is meant to store the session in the function. Defaults to "session".
     """
-    pass
+    ...
 
 
 def sql_command(
-    commit_results: "Callable[P, Coroutine[Any, Any, T]] | bool" = True,
+    commit_results: Callable[P, T] | Callable[P, Coroutine[Any, Any, T]] | bool = True,
     session_keyword: str = "session",
-) -> "Callable[[Callable[P, Coroutine[Any, Any, T]]], Callable[P, Coroutine[Any, Any, T]]] | Callable[P, Coroutine[Any, Any, T]]":
+) -> (
+    Callable[[Callable[P, T]], Callable[P, T]]
+    | Callable[
+        [Callable[P, Coroutine[Any, Any, T]]],
+        Callable[P, Coroutine[Any, Any, T]],
+    ]
+    | Callable[P, Coroutine[Any, Any, T]]
+    | Callable[P, T]
+):
     if callable(commit_results):
         calling_function = commit_results
         commit_results = True
     else:
         calling_function = None
 
-    def decorator(
-        func: "Callable[P, Coroutine[Any, Any, T]]",
-    ) -> "Callable[P, Coroutine[Any, Any, T]]":
-        @wraps(func)
-        async def wrapper_func(*args, **kwargs) -> T:
-            if isinstance(kwargs.get(session_keyword), SQLSession):
-                return await func(*args, **kwargs)
+    @overload
+    def decorator(func: Callable[P, T]) -> Callable[P, T]: ...
 
-            with Session() as session:
-                kwargs[session_keyword] = session
-                if commit_results:
-                    with session.begin():
-                        return await func(*args, **kwargs)
-                return await func(*args, **kwargs)
+    @overload
+    def decorator(
+        func: Callable[P, Coroutine[Any, Any, T]],
+    ) -> Callable[P, Coroutine[Any, Any, T]]: ...
+
+    def decorator(
+        func: Callable[P, T] | Callable[P, Coroutine[Any, Any, T]],
+    ) -> Callable[P, T] | Callable[P, Coroutine[Any, Any, T]]:
+        if inspect.iscoroutinefunction(func):
+            if TYPE_CHECKING:
+                func = cast(Callable[P, Coroutine[Any, Any, T]], func)
+
+            @wraps(func)
+            async def wrapper_func_async(*args, **kwargs) -> T:
+                if isinstance(kwargs.get(session_keyword), SQLSession):
+                    return await func(*args, **kwargs)
+
+                with Session() as session:
+                    kwargs[session_keyword] = session
+                    if commit_results:
+                        with session.begin():
+                            return await func(*args, **kwargs)
+                    return await func(*args, **kwargs)
+
+            wrapper_func = wrapper_func_async
+        else:
+            if TYPE_CHECKING:
+                func = cast(Callable[P, T], func)
+
+            @wraps(func)
+            def wrapper_func_sync(*args, **kwargs) -> T:
+                if isinstance(kwargs.get(session_keyword), SQLSession):
+                    return func(*args, **kwargs)
+
+                with Session() as session:
+                    kwargs[session_keyword] = session
+                    if commit_results:
+                        with session.begin():
+                            return func(*args, **kwargs)
+                    return func(*args, **kwargs)
+
+            wrapper_func = wrapper_func_sync
 
         return wrapper_func
 
