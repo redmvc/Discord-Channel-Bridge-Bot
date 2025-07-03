@@ -115,7 +115,7 @@ async def setup_bot(*, session: SQLSession):
 
         # -----
         logger.info("Loading emoji hash map from database...")
-        emoji_hash_map.map = emoji_hash_map.EmojiHashMap()
+        emoji_hash_map.map = await emoji_hash_map.EmojiHashMap.create_hash_map()
         logger.info("Emoji hash map loaded.")
 
         # -----
@@ -503,7 +503,8 @@ async def bridge_message_helper(
             forwarded_message_channel_is_nsfw = False
 
             message_content = await replace_missing_emoji(
-                message.content, session=session
+                message.content,
+                session=session,
             )
             message_attachments = message.attachments
             message_embeds = message.embeds

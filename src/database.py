@@ -1,5 +1,5 @@
 from functools import wraps
-from typing import Any, Callable, Iterable, ParamSpec, overload
+from typing import Any, Callable, Coroutine, Iterable, ParamSpec, overload
 
 from beartype import beartype
 from sqlalchemy import Boolean, Integer
@@ -387,7 +387,9 @@ async def sql_retry(
 
 
 @overload
-def sql_command(commit_results: "Callable[P, T]") -> "Callable[P, T]":
+def sql_command(
+    commit_results: "Callable[P, Coroutine[Any, Any, T]]",
+) -> "Callable[P, Coroutine[Any, Any, T]]":
     """Decorator that checks whether the :class:`~sqlalchemy.orm.Session`-typed argument of a function exists and is valid, and runs the function with it if so. Otherwise, it create a Python context manager with the session and calls the function within it.
 
     Using the decorator with no arguments will commit the results of running the function to the database and will assume that the name of the argument to the function that should contain the session is "session".
@@ -399,7 +401,7 @@ def sql_command(commit_results: "Callable[P, T]") -> "Callable[P, T]":
 def sql_command(
     commit_results: bool = True,
     session_keyword: str = "session",
-) -> "Callable[[Callable[P, T]], Callable[P, T]]":
+) -> "Callable[[Callable[P, Coroutine[Any, Any, T]]], Callable[P, Coroutine[Any, Any, T]]]":
     """Decorator that checks whether the :class:`~sqlalchemy.orm.Session`-typed argument of a function exists and is valid, and runs the function with it if so. Otherwise, it create a Python context manager with the session and calls the function within it.
 
     Parameters
@@ -413,30 +415,29 @@ def sql_command(
 
 
 def sql_command(
-    commit_results: "Callable[P, T] | bool" = True,
+    commit_results: "Callable[P, Coroutine[Any, Any, T]] | bool" = True,
     session_keyword: str = "session",
-) -> "Callable[[Callable[P, T]], Callable[P, T]] | Callable[P, T]":
+) -> "Callable[[Callable[P, Coroutine[Any, Any, T]]], Callable[P, Coroutine[Any, Any, T]]] | Callable[P, Coroutine[Any, Any, T]]":
     if callable(commit_results):
         calling_function = commit_results
         commit_results = True
     else:
         calling_function = None
 
-    def decorator(func: "Callable[P, T]") -> "Callable[P, T]":
+    def decorator(
+        func: "Callable[P, Coroutine[Any, Any, T]]",
+    ) -> "Callable[P, Coroutine[Any, Any, T]]":
         @wraps(func)
-        def wrapper_func(*args, **kwargs) -> T:
-            if (kwargs.get(session_keyword) is not None) or any(
-                isinstance(arg, SQLSession) for arg in args
-            ):
-                return func(*args, **kwargs)
+        async def wrapper_func(*args, **kwargs) -> T:
+            if isinstance(kwargs.get(session_keyword), SQLSession):
+                return await func(*args, **kwargs)
 
             with Session() as session:
                 kwargs[session_keyword] = session
                 if commit_results:
                     with session.begin():
-                        return func(*args, **kwargs)
-
-                return func(*args, **kwargs)
+                        return await func(*args, **kwargs)
+                return await func(*args, **kwargs)
 
         return wrapper_func
 
