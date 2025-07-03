@@ -2069,9 +2069,9 @@ async def bridge_reaction_add(
                     )
                     return
 
-        reactions_added = await asyncio.gather(*async_add_reactions)
-        await sql_retry(lambda: session.add_all([r for r in reactions_added if r]))
-        session.commit()
+            reactions_added = await asyncio.gather(*async_add_reactions)
+            await sql_retry(lambda: session.add_all([r for r in reactions_added if r]))
+            session.commit()
     except Exception as e:
         if session:
             session.rollback()
