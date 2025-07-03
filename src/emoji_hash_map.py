@@ -55,7 +55,9 @@ class EmojiHashMap:
 
                 emoji_hash = row.image_hash
 
-                emoji_actually_accessible = not not globals.client.get_emoji(emoji_id)
+                emoji_actually_accessible = (
+                    emoji := globals.client.get_emoji(emoji_id)
+                ) and emoji.is_usable()
                 if (
                     row.server_id
                     and (server_id := int(row.server_id))
@@ -113,7 +115,7 @@ class EmojiHashMap:
         server_id: int | str | None = None,
         is_internal: bool = False,
     ):
-        """Add an emoji to the hash map and return its ID.
+        """Add an emoji to the hash map.
 
         Parameters
         ----------
@@ -144,21 +146,20 @@ class EmojiHashMap:
 
         self._emoji_to_hash[emoji_id] = image_hash
         if accessible is None:
-            accessible = not not globals.client.get_emoji(emoji_id)
+            accessible = (
+                emoji := globals.client.get_emoji(emoji_id)
+            ) and emoji.is_usable()
 
-        if not self._hash_to_emoji.get(image_hash):
+        if image_hash not in self._hash_to_emoji:
             self._hash_to_emoji[image_hash] = set()
         self._hash_to_emoji[image_hash].add(emoji_id)
 
         if accessible:
-            if not self._hash_to_available_emoji.get(image_hash):
+            if image_hash not in self._hash_to_available_emoji:
                 self._hash_to_available_emoji[image_hash] = set()
             self._hash_to_available_emoji[image_hash].add(emoji_id)
-        elif (
-            self._hash_to_available_emoji.get(image_hash)
-            and emoji_id in self._hash_to_available_emoji[image_hash]
-        ):
-            self._hash_to_available_emoji[image_hash].remove(emoji_id)
+        elif image_hash in self._hash_to_available_emoji:
+            self._hash_to_available_emoji[image_hash].discard(emoji_id)
 
         if is_internal:
             self._hash_to_internal_emoji[image_hash] = emoji_id
@@ -586,7 +587,10 @@ class EmojiHashMap:
             image = await globals.get_image_from_URL(emoji.url)
             image_hash = globals.hash_image(image)
             self._add_emoji_to_map(
-                emoji.id, image_hash, accessible=True, is_internal=is_internal
+                emoji.id,
+                image_hash,
+                accessible=True,
+                is_internal=is_internal,
             )
 
             return await self.upsert_emoji(
@@ -779,22 +783,6 @@ class EmojiHashMap:
                 session=session,
             )
 
-            if emoji_to_copy:
-                await self.map_emoji(
-                    external_emoji=emoji_to_copy,
-                    internal_emoji=emoji,
-                    image_hash=emoji_image_hash,
-                    session=session,
-                )
-            elif emoji_to_copy_id:
-                await self.map_emoji(
-                    external_emoji_id=emoji_to_copy_id,
-                    external_emoji_name=emoji_to_copy_name,
-                    internal_emoji=emoji,
-                    image_hash=emoji_image_hash,
-                    session=session,
-                )
-
             session.commit()
         except Exception as e:
             if session:
@@ -895,7 +883,7 @@ class EmojiHashMap:
 
                 image_hash = globals.hash_image(image)
 
-            external_emoji_accessible = not not full_emoji
+            external_emoji_accessible = full_emoji.is_usable() if full_emoji else False
             await self.add_emoji(
                 emoji_id=external_emoji_id,
                 emoji_name=external_emoji_name,
@@ -1041,6 +1029,10 @@ class EmojiHashMap:
         else:
             hash_to_emoji = self._hash_to_emoji.get(image_hash)
         if not hash_to_emoji:
+            logger.debug(
+                "Hash for emoji with ID %s was found but couldn't be mapped to available emoji.",
+                emoji_id,
+            )
             return None
 
         if not return_str:
@@ -1170,12 +1162,12 @@ class EmojiHashMap:
         ):
             return emoji
 
-        if (
-            (matching_emoji_ids := self.get_matches(emoji_id))
-            and (matching_emoji_id := set(matching_emoji_ids).pop())
-            and (emoji := globals.client.get_emoji(matching_emoji_id))
-        ):
-            return emoji
+        if matching_emoji_ids := self.get_matches(emoji_id):
+            for matching_emoji_id in matching_emoji_ids:
+                if (
+                    emoji := globals.client.get_emoji(matching_emoji_id)
+                ) and emoji.is_usable():
+                    return emoji
 
         return None
 
@@ -1423,10 +1415,16 @@ class EmojiHashMap:
         if already_existing_hash := self._emoji_to_hash.get(emoji_id):
             return already_existing_hash
 
+        if (emoji := globals.client.get_emoji(emoji_id)) and emoji.is_usable():
+            accessible = True
+        else:
+            accessible = False
+
         _, image_hash = await self.add_emoji(
             emoji=emoji,
             emoji_id=emoji_id,
             emoji_name=emoji_name,
+            accessible=accessible,
             update_db=True,
             session=session,
         )
