@@ -84,11 +84,11 @@ async def setup_bot():
 
 
 @overload
-async def setup_bot(session: SQLSession): ...
+async def setup_bot(*, session: SQLSession | None = None): ...
 
 
 @sql_command
-async def setup_bot(session: SQLSession):
+async def setup_bot(*, session: SQLSession):
     """Load the data registered in the database into memory.
 
     Parameters
@@ -397,6 +397,7 @@ async def bridge_message_helper(message: discord.Message, message_channel_id: in
 async def bridge_message_helper(
     message: discord.Message,
     message_channel_id: int,
+    *,
     session: SQLSession | None,
 ): ...
 
@@ -406,6 +407,7 @@ async def bridge_message_helper(
 async def bridge_message_helper(
     message: discord.Message,
     message_channel_id: int,
+    *,
     session: SQLSession,
 ):
     """Mirror a message to all of its outbound bridge targets.
@@ -500,7 +502,9 @@ async def bridge_message_helper(
             forwarded_message = None
             forwarded_message_channel_is_nsfw = False
 
-            message_content = await replace_missing_emoji(message.content, session)
+            message_content = await replace_missing_emoji(
+                message.content, session=session
+            )
             message_attachments = message.attachments
             message_embeds = message.embeds
         else:
@@ -549,7 +553,7 @@ async def bridge_message_helper(
                         discord.utils.remove_markdown(replied_to_message.clean_content),
                         50,
                     ),
-                    session,
+                    session=session,
                 )
                 replied_to_author = replied_to_message.author
 
@@ -908,7 +912,7 @@ async def _bridge_message_to_target_channel(
                             ),
                             50,
                         ),
-                        session,
+                        session=session,
                     )
             except discord.HTTPException:
                 reply_error_msg = "The message being replied to could not be loaded."
@@ -1245,7 +1249,7 @@ async def edit_message_helper(
         async_message_edits: list[Coroutine[Any, Any, None]] = []
 
         # Ensure that the message has emoji I have access to
-        message_content = await replace_missing_emoji(message_content, session)
+        message_content = await replace_missing_emoji(message_content, session=session)
 
         for bridged_channel_id, webhook in reachable_channels.items():
             # Iterate through the target channels and edit the bridged messages
@@ -1433,6 +1437,7 @@ async def replace_missing_emoji(message_content: str) -> str:
 @overload
 async def replace_missing_emoji(
     message_content: str,
+    *,
     session: SQLSession | None = None,
 ) -> str: ...
 
@@ -1441,6 +1446,7 @@ async def replace_missing_emoji(
 @beartype
 async def replace_missing_emoji(
     message_content: str,
+    *,
     session: SQLSession,
 ) -> str:
     """Return a version of the contents of a message that replaces any instances of an emoji that the bot can't find with matching ones, if possible.
@@ -1719,13 +1725,19 @@ async def delete_message_helper(message_id: int, channel_id: int):
 async def delete_message_helper(
     message_id: int,
     channel_id: int,
+    *,
     session: SQLSession | None,
 ): ...
 
 
 @sql_command
 @beartype
-async def delete_message_helper(message_id: int, channel_id: int, session: SQLSession):
+async def delete_message_helper(
+    message_id: int,
+    channel_id: int,
+    *,
+    session: SQLSession,
+):
     """Delete bridged versions of a message, if possible.
 
     Parameters
@@ -2027,14 +2039,24 @@ async def bridge_reaction_add(
 
         emoji_id_str = str(emoji_id)
 
+        logger.debug("Fetching fallback emoji from accessible emoji...")
         fallback_emoji = emoji_hash_map.map.get_accessible_emoji(emoji_id)
         if not fallback_emoji:
             # I don't have the emoji mapped locally, I'll add it to my server and update my map
+            logger.debug("Couldn't find accessible fallback emoji.")
             try:
                 fallback_emoji = await emoji_hash_map.map.copy_emoji_into_server(
                     emoji_to_copy=emoji
                 )
-            except Exception:
+                if fallback_emoji:
+                    logger.debug("Copied.")
+                else:
+                    logger.debug("Failed to copy fallback emoji into server.")
+            except Exception as e:
+                logger.warning(
+                    "Exception raised when trying to copy fallback emoji into server: %s",
+                    e,
+                )
                 fallback_emoji = None
     else:
         # It's a standard emoji, it's fine
@@ -2677,12 +2699,12 @@ async def auto_bridge_thread(thread: discord.Thread):
 
 
 @overload
-async def auto_bridge_thread(thread: discord.Thread, session: SQLSession | None): ...
+async def auto_bridge_thread(thread: discord.Thread, *, session: SQLSession | None): ...
 
 
 @sql_command
 @beartype
-async def auto_bridge_thread(thread: discord.Thread, session: SQLSession):
+async def auto_bridge_thread(thread: discord.Thread, *, session: SQLSession):
     """Create matching threads across a bridge if the created thread's parent channel has auto-bridge-threads enabled.
 
     Parameters
@@ -2776,12 +2798,12 @@ async def bridge_unbridged_messages():
 
 
 @overload
-async def bridge_unbridged_messages(session: SQLSession | None): ...
+async def bridge_unbridged_messages(*, session: SQLSession | None): ...
 
 
 @sql_command(commit_results=False)
 @beartype
-async def bridge_unbridged_messages(session: SQLSession):
+async def bridge_unbridged_messages(*, session: SQLSession):
     """Find all messages that were meant to be bridged while the bot was disconnected and bridge them.
 
     Parameters

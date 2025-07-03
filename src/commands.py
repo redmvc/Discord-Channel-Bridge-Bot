@@ -290,6 +290,7 @@ async def create_bridges(
     source_channel: discord.TextChannel | discord.Thread,
     target_channel: discord.TextChannel | discord.Thread,
     direction: Literal["outbound", "inbound"] | None,
+    *,
     session: SQLSession | None,
 ): ...
 
@@ -300,6 +301,7 @@ async def create_bridges(
     source_channel: discord.TextChannel | discord.Thread,
     target_channel: discord.TextChannel | discord.Thread,
     direction: Literal["outbound", "inbound"] | None,
+    *,
     session: SQLSession,
 ):
     """Create bridges between `source_channel` and `target_channel`.
@@ -535,6 +537,7 @@ async def toggle_auto_bridge_threads(message_channel_id: int) -> bool:
 @overload
 async def toggle_auto_bridge_threads(
     message_channel_id: int,
+    *,
     session: SQLSession | None,
 ) -> bool: ...
 
@@ -543,6 +546,7 @@ async def toggle_auto_bridge_threads(
 @beartype
 async def toggle_auto_bridge_threads(
     channel_id: int,
+    *,
     session: SQLSession,
 ) -> bool:
     """Toggle thread auto-bridging for the channel identified by `channel_id` and return True if auto-bridging was enabled and False otherwise.
@@ -566,7 +570,7 @@ async def toggle_auto_bridge_threads(
 
         return True
     else:
-        await stop_auto_bridging_threads_helper(channel_id, session)
+        await stop_auto_bridging_threads_helper(channel_id, session=session)
 
         return False
 
@@ -822,6 +826,7 @@ async def stop_auto_bridging_threads_helper(
 @overload
 async def stop_auto_bridging_threads_helper(
     channel_ids_to_remove: int | Iterable[int],
+    *,
     session: SQLSession | None = None,
 ): ...
 
@@ -830,6 +835,7 @@ async def stop_auto_bridging_threads_helper(
 @beartype
 async def stop_auto_bridging_threads_helper(
     channel_ids_to_remove: int | Iterable[int],
+    *,
     session: SQLSession,
 ):
     """Remove a group of channels from the auto_bridge_thread_channels table and list.
@@ -901,7 +907,7 @@ async def validate_auto_bridge_thread_channels(
     if len(channel_ids_to_remove) == 0:
         return
 
-    await stop_auto_bridging_threads_helper(channel_ids_to_remove, session)
+    await stop_auto_bridging_threads_helper(channel_ids_to_remove, session=session)
 
 
 @beartype
@@ -1054,6 +1060,7 @@ async def demolish_bridges(
 async def demolish_bridges(
     source_channel: discord.TextChannel | discord.Thread,
     target_channel: discord.TextChannel | discord.Thread,
+    *,
     session: SQLSession | None,
 ): ...
 
@@ -1063,6 +1070,7 @@ async def demolish_bridges(
 async def demolish_bridges(
     source_channel: discord.TextChannel | discord.Thread,
     target_channel: discord.TextChannel | discord.Thread,
+    *,
     session: SQLSession,
 ):
     """Demolish bridges between `source_channel` and `target_channel`.
@@ -1249,6 +1257,7 @@ async def demolish_all_bridges(
         tuple[dict[int, Bridge] | None, dict[int, Bridge] | None],
     ],
     channels_affected: set[int],
+    *,
     session: SQLSession | None,
 ) -> bool: ...
 
@@ -1262,6 +1271,7 @@ async def demolish_all_bridges(
         tuple[dict[int, Bridge] | None, dict[int, Bridge] | None],
     ],
     channels_affected: set[int],
+    *,
     session: SQLSession,
 ) -> bool:
     """Try to demolish all bridges listed, then return True if all were demolished or False if some failed to be demolished for some reason.

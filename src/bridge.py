@@ -142,17 +142,17 @@ class Bridges:
         self.webhooks = Webhooks()
 
     @overload
-    async def load_from_database(self, session: SQLSession): ...
+    async def load_from_database(self, *, session: SQLSession): ...
 
     @overload
-    async def load_from_database(self, session: None): ...
+    async def load_from_database(self, *, session: None): ...
 
     @overload
     async def load_from_database(self): ...
 
     @sql_command
     @beartype
-    async def load_from_database(self, session: SQLSession):
+    async def load_from_database(self, *, session: SQLSession):
         """Load all bridges saved in the bot's connected database.
 
         Parameters

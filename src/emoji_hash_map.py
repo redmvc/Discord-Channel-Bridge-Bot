@@ -21,17 +21,14 @@ class EmojiHashMap:
     """A mapping between emoji IDs and hashes of their images."""
 
     @overload
-    def __init__(self, session: SQLSession): ...
-
-    @overload
-    def __init__(self, session: SQLSession | None): ...
-
-    @overload
     def __init__(self): ...
+
+    @overload
+    def __init__(self, *, session: SQLSession | None): ...
 
     @sql_command
     @beartype
-    def __init__(self, session: SQLSession):
+    def __init__(self, *, session: SQLSession):
         """Initialise the emoji hash map from the emoji table.
 
         Parameters
@@ -173,7 +170,6 @@ class EmojiHashMap:
         image: bytes | None = None,
         image_hash: str | None = None,
         accessible: bool = False,
-        session: SQLSession,
     ): ...
 
     @overload
@@ -469,19 +465,16 @@ class EmojiHashMap:
         logger.debug("Emoji with ID %s deleted from map.", emoji_id)
 
         if update_db or session:
-            await self._delete_emoji_from_db(emoji_id, session)
+            await self._delete_emoji_from_db(emoji_id, session=session)
+
+    @overload
+    async def _delete_emoji_from_db(self, emoji_id: int): ...
 
     @overload
     async def _delete_emoji_from_db(
         self,
         emoji_id: int,
-        session: SQLSession,
-    ): ...
-
-    @overload
-    async def _delete_emoji_from_db(
-        self,
-        emoji_id: int,
+        *,
         session: SQLSession | None = None,
     ): ...
 
@@ -489,6 +482,7 @@ class EmojiHashMap:
     async def _delete_emoji_from_db(
         self,
         emoji_id: int,
+        *,
         session: SQLSession,
     ):
         logger.debug("Deleting emoji with ID %s from database...", emoji_id)
@@ -760,7 +754,7 @@ class EmojiHashMap:
             emoji_to_delete_id,
             emoji,
             emoji_server_id,
-            session,
+            session=session,
         )
 
     @overload
@@ -773,7 +767,6 @@ class EmojiHashMap:
         emoji_to_delete_id: int | None,
         emoji: discord.Emoji,
         emoji_server_id: int,
-        session: SQLSession,
     ) -> discord.Emoji | None: ...
 
     @overload
@@ -786,6 +779,7 @@ class EmojiHashMap:
         emoji_to_delete_id: int | None,
         emoji: discord.Emoji,
         emoji_server_id: int,
+        *,
         session: SQLSession | None,
     ) -> discord.Emoji | None: ...
 
@@ -799,6 +793,7 @@ class EmojiHashMap:
         emoji_to_delete_id: int | None,
         emoji: discord.Emoji,
         emoji_server_id: int,
+        *,
         session: SQLSession,
     ) -> discord.Emoji | None:
         # Copied the emoji, going to update my table
