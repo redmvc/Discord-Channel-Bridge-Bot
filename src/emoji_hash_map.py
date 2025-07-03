@@ -1045,6 +1045,10 @@ class EmojiHashMap:
         else:
             hash_to_emoji = self._hash_to_emoji.get(image_hash)
         if not hash_to_emoji:
+            logger.debug(
+                "Hash for emoji with ID %s was found but couldn't be mapped to available emoji.",
+                emoji_id,
+            )
             return None
 
         if not return_str:
