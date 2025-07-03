@@ -1,11 +1,10 @@
 import asyncio
 import random
-from typing import Any, Coroutine, Literal, Sequence, overload
+from typing import TYPE_CHECKING, overload
 
 import discord
 from beartype import beartype
 from sqlalchemy import Delete as SQLDelete
-from sqlalchemy import ScalarResult
 from sqlalchemy import Select as SQLSelect
 from sqlalchemy import Update as SQLUpdate
 from sqlalchemy import UpdateBase
@@ -16,6 +15,11 @@ from sqlalchemy.orm import Session as SQLSession
 import globals
 from database import DBEmoji, engine, sql_retry, sql_upsert
 from validations import ArgumentError, logger
+
+if TYPE_CHECKING:
+    from typing import Any, Coroutine, Literal, Sequence
+
+    from sqlalchemy import ScalarResult
 
 
 class EmojiHashMap:
@@ -44,7 +48,7 @@ class EmojiHashMap:
                 close_after = True
 
             select_hashed_emoji: SQLSelect[tuple[DBEmoji]] = SQLSelect(DBEmoji)
-            hashed_emoji_query_result: ScalarResult[DBEmoji] = session.scalars(
+            hashed_emoji_query_result: "ScalarResult[DBEmoji]" = session.scalars(
                 select_hashed_emoji
             )
             emoji_ids_to_delete: set[str] = set()
@@ -571,7 +575,7 @@ class EmojiHashMap:
             if not server:
                 raise ValueError("Bot is not in server.")
 
-            servers: Sequence[discord.Guild] = [server]
+            servers: "Sequence[discord.Guild]" = [server]
             logger.info("Loading emoji from server %s into hash map...", server.name)
             ending_info_message = "Emoji from server %s loaded."
         else:
@@ -608,7 +612,7 @@ class EmojiHashMap:
                 for server in servers:
                     logger.debug("Loading server %s...", server.name)
 
-                    update_emoji_async: list[Coroutine[Any, Any, UpdateBase]] = []
+                    update_emoji_async: list["Coroutine[Any, Any, UpdateBase]"] = []
 
                     is_internal = (
                         globals.emoji_server is not None
@@ -935,7 +939,7 @@ class EmojiHashMap:
         emoji: discord.PartialEmoji | int | str,
         *,
         only_accessible: bool = False,
-        return_str: Literal[False],
+        return_str: "Literal[False]",
     ) -> frozenset[int] | None:
         """Return a frozenset with the emoji IDs of emoji available to the bot that match the emoji passed as argument, if there are any.
 
@@ -960,7 +964,7 @@ class EmojiHashMap:
         emoji: discord.PartialEmoji | int | str,
         *,
         only_accessible: bool = False,
-        return_str: Literal[True],
+        return_str: "Literal[True]",
     ) -> frozenset[str] | None:
         """Return a frozenset with the emoji IDs, converted to strings, of emoji available to the bot that match the emoji passed as argument, if there are any.
 
@@ -1085,7 +1089,7 @@ class EmojiHashMap:
         self,
         emoji_id: int,
         *,
-        skip_self: Literal[False],
+        skip_self: "Literal[False]",
     ) -> discord.Emoji | None:
         """Return an emoji matching the ID passed. First tries to return the one matching the ID itself, then an internal equivalent, and finally any accessible ones from other servers.
 
@@ -1107,7 +1111,7 @@ class EmojiHashMap:
         self,
         emoji_id: int,
         *,
-        skip_self: Literal[True],
+        skip_self: "Literal[True]",
     ) -> discord.Emoji | None:
         """Return an emoji matching the ID passed. First tries to find an internal equivalent to the emoji, and if it can it tries to look for any accessible ones from other servers.
 

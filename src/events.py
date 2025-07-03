@@ -2,7 +2,7 @@ import asyncio
 import inspect
 import re
 from copy import deepcopy
-from typing import Any, Coroutine, Literal, NamedTuple, NotRequired, TypedDict, overload
+from typing import TYPE_CHECKING, NamedTuple, TypedDict, overload
 
 import discord
 from beartype import beartype
@@ -28,6 +28,9 @@ from database import (
     sql_retry,
 )
 from validations import ChannelTypeError, logger
+
+if TYPE_CHECKING:
+    from typing import Any, Coroutine, Literal, NotRequired
 
 
 class ThreadSplat(TypedDict, total=False):
@@ -261,7 +264,7 @@ async def on_typing(
             pass
 
     async with globals.rate_limiter:
-        channels_typing: list[Coroutine[Any, Any, None]] = []
+        channels_typing: list["Coroutine[Any, Any, None]"] = []
         for _, bridge in outbound_bridges.items():
             channels_typing.append(type_through_bridge(bridge))
 
@@ -555,7 +558,7 @@ async def bridge_message_helper(message: discord.Message):
 
             # Send a message out to each target webhook
             async_bridged_messages: list[
-                Coroutine[Any, Any, list[BridgedMessage] | None]
+                "Coroutine[Any, Any, list[BridgedMessage] | None]"
             ] = []
             for target_id, webhook in reachable_channels.items():
                 if not webhook:
@@ -667,10 +670,10 @@ class BridgedMessage(NamedTuple):
 
 
 class ReplyEmbedDict(TypedDict, total=False):
-    type: Literal["rich"]
+    type: "Literal['rich']"
     description: str
-    url: NotRequired[str]
-    thumbnail: NotRequired["ReplyEmbedThumbnailDict"]
+    url: "NotRequired[str]"
+    thumbnail: "NotRequired[ReplyEmbedThumbnailDict]"
 
 
 class ReplyEmbedThumbnailDict(TypedDict):
@@ -1137,7 +1140,7 @@ async def edit_message_helper(
 
     # Find all messages matching this one
     try:
-        async_message_edits: list[Coroutine[Any, Any, None]] = []
+        async_message_edits: list["Coroutine[Any, Any, None]"] = []
         with SQLSession(engine) as session:
             # Ensure that the message has emoji I have access to
             message_content = await replace_missing_emoji(message_content, session)
@@ -1594,7 +1597,7 @@ async def delete_message_helper(message_id: int, channel_id: int):
     # Find all messages matching this one
     session = None
     try:
-        async_message_deletes: list[Coroutine[Any, Any, None]] = []
+        async_message_deletes: list["Coroutine[Any, Any, None]"] = []
         with SQLSession(engine) as session:
             select_message_map: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
                 DBMessageMap
@@ -1861,7 +1864,7 @@ async def bridge_reaction_add(
         # Create a function to add reactions to messages asynchronously and gather them all at the end
         source_message_id_str = str(message_id)
         source_channel_id_str = str(channel_id)
-        async_add_reactions: list[Coroutine[Any, Any, DBReactionMap | None]] = []
+        async_add_reactions: list["Coroutine[Any, Any, DBReactionMap | None]"] = []
 
         async def add_reaction_helper(
             bridged_channel: discord.TextChannel | discord.Thread,

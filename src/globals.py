@@ -3,84 +3,76 @@ import inspect
 import io
 import json
 from hashlib import md5
-from typing import (
-    Any,
-    Callable,
-    Literal,
-    SupportsInt,
-    TypedDict,
-    TypeVar,
-    cast,
-    overload,
-)
+from typing import TYPE_CHECKING, Any, Callable, TypeVar, cast, overload
 
 import aiohttp
 import discord
 from aiolimiter import AsyncLimiter
 from beartype import beartype
-from typing_extensions import NotRequired
 
 from validations import ArgumentError, ChannelTypeError, HTTPResponseError, logger
 
+if TYPE_CHECKING:
+    from typing import Literal, NotRequired, SupportsInt, TypedDict
 
-class Settings(TypedDict):
-    """A TypedDict with the bot's settings. The `settings.json` file must contain a `"context"` entry whose value is another key in the file with the attributes below. For example:
+    class Settings(TypedDict):
+        """A TypedDict with the bot's settings. The `settings.json` file must contain a `"context"` entry whose value is another key in the file with the attributes below. For example:
 
-    .. code-block:: json
-        {
-            "context": "production",
-            "production": {
-                "app_token": "...",
-                "db_dialect": "...",
-                ...
-            },
-            "testing": {
-                "app_token": "...",
-                "db_dialect": "...",
-                ...
+        .. code-block:: json
+            {
+                "context": "production",
+                "production": {
+                    "app_token": "...",
+                    "db_dialect": "...",
+                    ...
+                },
+                "testing": {
+                    "app_token": "...",
+                    "db_dialect": "...",
+                    ...
+                }
             }
-        }
 
-    Attributes
-    ----------
-    app_token : str
-        The token used by the Discord developers API.
-    db_dialect : Literal['mysql'] | Literal['postgresql'] | Literal['sqlite']
-        The database dialect.
-    db_driver : Literal['pymysql'] | Literal['psycopg2'] | Literal['pysqlite']
-        The database driver.
-    db_host : str
-        The server host.
-    db_port : int
-        The server port.
-    db_user : str
-        The root username.
-    db_pwd : str
-        The root password.
-    db_name : str
-        The database name.
-    emoji_server_id : NotRequired[SupportsInt | str]
-        The ID of a Discord server for storing custom emoji. The bot must have `Create Expressions` and `Manage Expressions` permissions in the server.
-    whitelisted_apps : NotRequired[list[SupportsInt | str]]
-        A list of IDs of applications whose outputs are bridged.
-    """
+        Attributes
+        ----------
+        app_token : str
+            The token used by the Discord developers API.
+        db_dialect : Literal['mysql'] | Literal['postgresql'] | Literal['sqlite']
+            The database dialect.
+        db_driver : Literal['pymysql'] | Literal['psycopg2'] | Literal['pysqlite']
+            The database driver.
+        db_host : str
+            The server host.
+        db_port : int
+            The server port.
+        db_user : str
+            The root username.
+        db_pwd : str
+            The root password.
+        db_name : str
+            The database name.
+        emoji_server_id : NotRequired[SupportsInt | str]
+            The ID of a Discord server for storing custom emoji. The bot must have `Create Expressions` and `Manage Expressions` permissions in the server.
+        whitelisted_apps : NotRequired[list[SupportsInt | str]]
+            A list of IDs of applications whose outputs are bridged.
+        """
 
-    app_token: str
-    db_dialect: Literal["mysql", "postgresql", "sqlite"]
-    db_driver: Literal["pymysql", "psycopg2", "pysqlite"]
-    db_host: str
-    db_port: int
-    db_user: str
-    db_pwd: str
-    db_name: str
-    emoji_server_id: NotRequired[SupportsInt | str]
-    whitelisted_apps: NotRequired[list[SupportsInt | str]]
+        app_token: str
+        db_dialect: "Literal['mysql', 'postgresql', 'sqlite']"
+        db_driver: "Literal['pymysql', 'psycopg2', 'pysqlite']"
+        db_host: str
+        db_port: int
+        db_user: str
+        db_pwd: str
+        db_name: str
+        emoji_server_id: "NotRequired[SupportsInt | str]"
+        whitelisted_apps: "NotRequired[list[SupportsInt | str]]"
 
 
-settings_root: dict[str, str | Settings] = json.load(open("settings.json"))
+settings_root: "dict[str, str | Settings]" = json.load(open("settings.json"))
 assert isinstance(settings_root["context"], str)
 context = settings_root["context"]
-settings: Settings = cast(Settings, settings_root[context])
+settings: "Settings" = cast("Settings", settings_root[context])
 
 # Variables for connection to the Discord client
 client = discord.Client(
@@ -164,7 +156,7 @@ async def get_channel_from_id(channel_or_id: int) -> DiscordChannel | None:
 async def get_channel_from_id(
     channel_or_id: int,
     *,
-    ensure_text_or_thread: Literal[False] = False,
+    ensure_text_or_thread: "Literal[False]",
 ) -> DiscordChannel | None:
     """Return a channel with the ID passed as argument, or None if it couldn't be found.
 
@@ -197,7 +189,7 @@ async def get_channel_from_id(
 async def get_channel_from_id(
     channel_or_id: int,
     *,
-    ensure_text_or_thread: Literal[True],
+    ensure_text_or_thread: "Literal[True]",
 ) -> discord.TextChannel | discord.Thread:
     """Return the TextChannel or Thread with the ID passed as argument, or None if it couldn't be found.
 
@@ -248,7 +240,7 @@ async def get_channel_from_id(channel_or_id: CH) -> CH:
 async def get_channel_from_id(
     channel_or_id: CH,
     *,
-    ensure_text_or_thread: Literal[False] = False,
+    ensure_text_or_thread: "Literal[False]",
 ) -> CH:
     """Return the channel passed as argument.
 
@@ -270,7 +262,7 @@ async def get_channel_from_id(
 async def get_channel_from_id(
     channel_or_id: DiscordChannel,
     *,
-    ensure_text_or_thread: Literal[True],
+    ensure_text_or_thread: "Literal[True]",
 ) -> discord.TextChannel | discord.Thread:
     """Return the channel passed as argument.
 

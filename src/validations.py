@@ -8,7 +8,9 @@ T = TypeVar("T", bound=Any)
 
 # Objects to log events
 logging.basicConfig(
-    filename="logs.log", format="%(asctime)s %(levelname)s: %(message)s", filemode="w"
+    filename="logs.log",
+    format="%(asctime)s %(levelname)s: %(message)s",
+    filemode="w",
 )
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
