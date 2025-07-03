@@ -1825,14 +1825,24 @@ async def bridge_reaction_add(
 
         emoji_id_str = str(emoji_id)
 
+        logger.debug("Fetching fallback emoji from accessible emoji...")
         fallback_emoji = emoji_hash_map.map.get_accessible_emoji(emoji_id)
         if not fallback_emoji:
             # I don't have the emoji mapped locally, I'll add it to my server and update my map
+            logger.debug("Couldn't find accessible fallback emoji.")
             try:
                 fallback_emoji = await emoji_hash_map.map.copy_emoji_into_server(
                     emoji_to_copy=emoji
                 )
-            except Exception:
+                if fallback_emoji:
+                    logger.debug("Copied.")
+                else:
+                    logger.debug("Failed to copy fallback emoji into server.")
+            except Exception as e:
+                logger.warning(
+                    "Exception raised when trying to copy fallback emoji into server: %s",
+                    e,
+                )
                 fallback_emoji = None
     else:
         # It's a standard emoji, it's fine
