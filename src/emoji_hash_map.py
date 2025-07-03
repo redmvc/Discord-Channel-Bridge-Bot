@@ -770,10 +770,7 @@ class EmojiHashMap:
 
         logger.debug("Emoji copied into server. Inserting into database...")
         return await self._copy_emoji_into_db(
-            emoji_to_copy,
-            emoji_to_copy_id,
             emoji_image_hash,
-            emoji_to_copy_name,
             emoji_to_delete_id,
             emoji,
             emoji_server_id,
@@ -783,10 +780,7 @@ class EmojiHashMap:
     @overload
     async def _copy_emoji_into_db(
         self,
-        emoji_to_copy: discord.PartialEmoji | None,
-        emoji_to_copy_id: str | int | None,
         emoji_image_hash: str,
-        emoji_to_copy_name: str,
         emoji_to_delete_id: int | None,
         emoji: discord.Emoji,
         emoji_server_id: int,
@@ -795,10 +789,7 @@ class EmojiHashMap:
     @overload
     async def _copy_emoji_into_db(
         self,
-        emoji_to_copy: discord.PartialEmoji | None,
-        emoji_to_copy_id: str | int | None,
         emoji_image_hash: str,
-        emoji_to_copy_name: str,
         emoji_to_delete_id: int | None,
         emoji: discord.Emoji,
         emoji_server_id: int,
@@ -809,10 +800,7 @@ class EmojiHashMap:
     @sql_command
     async def _copy_emoji_into_db(
         self,
-        emoji_to_copy: discord.PartialEmoji | None,
-        emoji_to_copy_id: str | int | None,
         emoji_image_hash: str,
-        emoji_to_copy_name: str,
         emoji_to_delete_id: int | None,
         emoji: discord.Emoji,
         emoji_server_id: int,
@@ -842,22 +830,6 @@ class EmojiHashMap:
                 is_internal=True,
                 session=session,
             )
-
-            if emoji_to_copy:
-                await self.map_emoji(
-                    external_emoji=emoji_to_copy,
-                    internal_emoji=emoji,
-                    image_hash=emoji_image_hash,
-                    session=session,
-                )
-            elif emoji_to_copy_id:
-                await self.map_emoji(
-                    external_emoji_id=emoji_to_copy_id,
-                    external_emoji_name=emoji_to_copy_name,
-                    internal_emoji=emoji,
-                    image_hash=emoji_image_hash,
-                    session=session,
-                )
         except Exception as e:
             logger.error(
                 "An SQL error occurred while trying to copy an emoji into the emoji server: %s",
