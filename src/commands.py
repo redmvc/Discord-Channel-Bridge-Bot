@@ -1,18 +1,17 @@
 import asyncio
 import re
-from typing import Any, AsyncIterator, Coroutine, Iterable, Literal
+from typing import TYPE_CHECKING, Any, Iterable, Literal
 
 import discord
 from beartype import beartype
 from sqlalchemy import Delete as SQLDelete
-from sqlalchemy import ScalarResult
 from sqlalchemy import Select as SQLSelect
 from sqlalchemy.exc import StatementError as SQLError
 from sqlalchemy.orm import Session as SQLSession
 
 import emoji_hash_map
 import globals
-from bridge import Bridge, bridges
+from bridge import bridges
 from database import (
     DBAppWhitelist,
     DBAutoBridgeThreadChannels,
@@ -21,6 +20,13 @@ from database import (
     sql_retry,
 )
 from validations import ChannelTypeError, logger, validate_channels
+
+if TYPE_CHECKING:
+    from typing import AsyncIterator, Coroutine
+
+    from sqlalchemy import ScalarResult
+
+    from bridge import Bridge
 
 
 @globals.command_tree.command(
@@ -216,7 +222,7 @@ async def bridge(
 
     await interaction.response.defer(thinking=True, ephemeral=True)
 
-    join_threads: list[Coroutine[Any, Any, None]] = []
+    join_threads: list["Coroutine[Any, Any, None]"] = []
     if isinstance(message_channel, discord.Thread) and not message_channel.me:
         try:
             join_threads.append(message_channel.join())
@@ -231,7 +237,7 @@ async def bridge(
     session = None
     try:
         with SQLSession(engine) as session:
-            create_bridges: list[Coroutine[Any, Any, Bridge]] = []
+            create_bridges: list["Coroutine[Any, Any, Bridge]"] = []
             if direction != "inbound":
                 create_bridges.append(
                     bridges.create_bridge(
@@ -700,7 +706,7 @@ async def demolish_all(
     await interaction.response.defer(thinking=True, ephemeral=True)
 
     # I'll make a list of all channels that are currently bridged to or from this channel
-    bridges_being_demolished: list[Coroutine[Any, Any, None]] = []
+    bridges_being_demolished: list["Coroutine[Any, Any, None]"] = []
     session = None
     exceptions: set[int] = set()
     try:
@@ -886,7 +892,7 @@ async def whitelist(interaction: discord.Interaction, apps: str):
     try:
         channel_id_str = str(channel.id)
         with SQLSession(engine) as session:
-            run_queries: list[Coroutine[Any, Any, Any]] = []
+            run_queries: list["Coroutine[Any, Any, Any]"] = []
             if len(apps_to_add) > 0:
                 run_queries.append(
                     sql_retry(
@@ -1297,8 +1303,8 @@ async def bridge_thread_helper(
                 select_message_map: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
                     DBMessageMap
                 ).where(DBMessageMap.source_message == str(source_message_id))
-                target_starting_messages: ScalarResult[DBMessageMap] = await sql_retry(
-                    lambda: session.scalars(select_message_map)
+                target_starting_messages: "ScalarResult[DBMessageMap]" = (
+                    await sql_retry(lambda: session.scalars(select_message_map))
                 )
                 for target_starting_message in target_starting_messages:
                     matching_starting_messages[
@@ -1313,8 +1319,8 @@ async def bridge_thread_helper(
             bridged_threads: list[int] = []
             failed_channels: list[int] = []
 
-            create_bridges: list[Coroutine[Any, Any, Bridge]] = []
-            add_user_to_threads: list[Coroutine[Any, Any, None]] = []
+            create_bridges: list["Coroutine[Any, Any, Bridge]"] = []
+            add_user_to_threads: list["Coroutine[Any, Any, None]"] = []
             try:
                 add_user_to_threads.append(thread_to_bridge.join())
             except Exception:
@@ -1588,11 +1594,11 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
     # This variable is where I'll gather the list of users per reaction
     # The key of each entry is a reaction emoji ID
     # The entry is a list of coroutines to get the users that reacted with that emoji
-    all_reactions_async: dict[str, list[Coroutine[Any, Any, set[int]]]] = {}
+    all_reactions_async: dict[str, list["Coroutine[Any, Any, set[int]]"]] = {}
 
     # This function gets a list of user IDs from an async iterator associated with each reaction
     async def get_users_from_iterator(
-        user_iterator: AsyncIterator[discord.Member | discord.User],
+        user_iterator: "AsyncIterator[discord.Member | discord.User]",
     ):
         reactions: set[int] = set()
         async for user in user_iterator:
@@ -1701,7 +1707,7 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
                 select_message_map: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
                     DBMessageMap
                 ).where(DBMessageMap.source_message == str(source_message_id))
-                bridged_messages: ScalarResult[DBMessageMap] = await sql_retry(
+                bridged_messages: "ScalarResult[DBMessageMap]" = await sql_retry(
                     lambda: session.scalars(select_message_map)
                 )
                 for message_row in bridged_messages:
@@ -1757,7 +1763,7 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
     try:
 
         async def get_list_of_reacting_users(
-            list_of_reacters: list[Coroutine[Any, Any, set[int]]],
+            list_of_reacters: list["Coroutine[Any, Any, set[int]]"],
         ) -> set[int]:
             gathered_users = await asyncio.gather(*list_of_reacters)
             set_of_users: set[int] = set().union(*gathered_users)

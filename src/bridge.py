@@ -1,12 +1,11 @@
 import asyncio
 import inspect
 from copy import deepcopy
-from typing import Any, Callable, Coroutine, Literal, overload
+from typing import TYPE_CHECKING, Literal, overload
 
 import discord
 from beartype import beartype
 from sqlalchemy import Delete as SQLDelete
-from sqlalchemy import ScalarResult
 from sqlalchemy import Select as SQLSelect
 from sqlalchemy import and_ as sql_and
 from sqlalchemy import or_ as sql_or
@@ -30,6 +29,11 @@ from validations import (
     validate_channels,
     validate_webhook,
 )
+
+if TYPE_CHECKING:
+    from typing import Any, Callable, Coroutine, Literal
+
+    from sqlalchemy import ScalarResult
 
 
 class Bridge:
@@ -168,10 +172,10 @@ class Bridges:
         invalid_webhook_ids: set[str] = set()
 
         select_all_webhooks: SQLSelect[tuple[DBWebhook]] = SQLSelect(DBWebhook)
-        webhook_query_result: ScalarResult[DBWebhook] = session.scalars(
+        webhook_query_result: "ScalarResult[DBWebhook]" = session.scalars(
             select_all_webhooks
         )
-        add_webhook_async: list[Coroutine[Any, Any, discord.Webhook]] = []
+        add_webhook_async: list["Coroutine[Any, Any, discord.Webhook]"] = []
         for channel_webhook in webhook_query_result:
             channel_id = int(channel_webhook.channel)
             webhook_id = int(channel_webhook.webhook)
@@ -214,9 +218,9 @@ class Bridges:
         all_target_channels: set[str] = set()
         targets_with_sources: set[str] = set()
 
-        async_create_bridges: list[Coroutine[Any, Any, Bridge]] = []
+        async_create_bridges: list["Coroutine[Any, Any, Bridge]"] = []
         select_all_bridges: SQLSelect[tuple[DBBridge]] = SQLSelect(DBBridge)
-        bridge_query_result: ScalarResult[DBBridge] = session.scalars(
+        bridge_query_result: "ScalarResult[DBBridge]" = session.scalars(
             select_all_bridges
         )
         for bridge in bridge_query_result:
@@ -995,9 +999,9 @@ class Bridges:
             logger.error(err)
             raise err
 
-        get_bridges: Callable[
+        get_bridges: """Callable[
             [discord.TextChannel | discord.Thread | int], dict[int, Bridge] | None
-        ]
+        ]"""
         if direction == "outbound":
             get_bridges = self.get_outbound_bridges
         else:
