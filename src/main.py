@@ -2011,7 +2011,14 @@ async def bridge_reaction_add(
             )
             select_message_map: SQLSelect[tuple[DBMessageMap]] = (
                 SQLSelect(DBMessageMap)
-                .where(DBMessageMap.source_message == str(source_message_id))
+                .where(
+                    DBMessageMap.source_message == str(source_message_id),
+                    (
+                        DBMessageMap.target_channel.in_(
+                            [str(id) for id in reachable_channel_ids]
+                        )
+                    ),
+                )
                 .join(
                     max_message_subq,
                     sql_and(
@@ -2034,11 +2041,9 @@ async def bridge_reaction_add(
                 lambda: session.scalars(select_message_map)
             )
             for message_row in bridged_messages_query_result:
-                target_channel_id = int(message_row.target_channel)
-                if target_channel_id not in reachable_channel_ids:
-                    continue
-
-                bridged_channel = await globals.get_channel_from_id(target_channel_id)
+                bridged_channel = await globals.get_channel_from_id(
+                    int(message_row.target_channel)
+                )
                 if not isinstance(
                     bridged_channel,
                     (discord.TextChannel, discord.Thread),
@@ -2048,7 +2053,8 @@ async def bridge_reaction_add(
                 try:
                     async_add_reactions.append(
                         add_reaction_helper(
-                            bridged_channel, int(message_row.target_message)
+                            bridged_channel,
+                            int(message_row.target_message),
                         )
                     )
                 except discord.HTTPException as e:
