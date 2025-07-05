@@ -5,11 +5,7 @@ from typing import TYPE_CHECKING, cast
 import discord
 from aiolimiter import AsyncLimiter
 from beartype import beartype
-
-from validations import setup_logger
-
-# Object to log events
-logger = setup_logger("test_logger", "test_logs.log", "DEBUG")
+from test_runner import logger
 
 if TYPE_CHECKING:
     from typing import Any, Coroutine, SupportsInt, TypedDict
