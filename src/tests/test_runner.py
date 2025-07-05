@@ -1,10 +1,13 @@
 import asyncio
+import sys
 from abc import ABC
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Coroutine, TypeVar, cast
 
 from aiolimiter import AsyncLimiter
 from discord import Client, Guild
 
+sys.path.append(str(Path(__file__).parent.parent))
 from validations import setup_logger
 
 if TYPE_CHECKING:
