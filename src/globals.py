@@ -101,6 +101,9 @@ auto_bridge_thread_channels: set[int] = set()
 # Server which can be used to store unknown emoji for mirroring reactions
 emoji_server: discord.Guild | None = None
 
+# User referring to a bot for unit tests, should only be set by the testing procedures
+test_app: discord.User | None = None
+
 # Dictionary listing all apps whitelisted per channel
 per_channel_whitelist: dict[int, set[int]] = {}
 

@@ -9,6 +9,7 @@ from discord import Client, Guild
 
 sys.path.append(str(Path(__file__).parent.parent))
 from validations import setup_logger
+import globals
 
 if TYPE_CHECKING:
     from discord import TextChannel
@@ -125,6 +126,10 @@ class TestRunner:
                     testing_channels,
                 )
             logger.info("Created.")
+
+            # Register the test bot in globals
+            assert tester_bot.user
+            globals.test_app = await bridge_bot.fetch_user(tester_bot.user.id)
 
             # Run the tests
             logger.info("Running tests.")

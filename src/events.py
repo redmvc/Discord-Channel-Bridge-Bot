@@ -1,7 +1,9 @@
 import asyncio
 import inspect
 import re
+import sys
 from copy import deepcopy
+from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple, TypedDict, overload
 
 import discord
@@ -31,6 +33,13 @@ from validations import ChannelTypeError, logger
 
 if TYPE_CHECKING:
     from typing import Any, Coroutine, Literal, NotRequired
+
+    from tests.tester_bot import process_tester_bot_command
+else:
+    path_to_tests = Path(__file__).parent.joinpath("tests")
+    if path_to_tests.is_dir():
+        sys.path.append(str(path_to_tests))
+        from tester_bot import process_tester_bot_command
 
 
 class ThreadSplat(TypedDict, total=False):
@@ -304,8 +313,10 @@ async def on_message(message: discord.Message):
             del globals.message_lock[message_id]
             return
 
-        if (message.author.id == globals.client.application_id) or (
-            (application_id := message.application_id)
+        author_id = message.author.id
+        application_id = message.application_id
+        if (author_id == globals.client.application_id) or (
+            application_id
             and (
                 application_id == globals.client.application_id
                 or (
@@ -333,6 +344,18 @@ async def on_message(message: discord.Message):
 
         if not await globals.wait_until_ready():
             del globals.message_lock[message_id]
+            return
+
+        if (
+            globals.test_app
+            and (
+                (globals.test_app.id == application_id)
+                or (globals.test_app.id == author_id)
+            )
+            and message.content.strip().startswith("/")
+        ):
+            # Test app sending a slash command
+            await process_tester_bot_command(message)
             return
 
         await bridge_message_helper(message)

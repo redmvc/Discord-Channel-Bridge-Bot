@@ -183,3 +183,15 @@ def start_client() -> "Coroutine[Any, Any, None]":
     Coroutine[Any, Any, None]
     """
     return client.start(settings.get("app_token"), reconnect=True)
+
+
+async def process_tester_bot_command(message: discord.Message):
+    """Running unit tests and the tester bot sent a command.
+
+    Parameters
+    ----------
+    message : :class:`~discord.Message`
+        The message the tester bot sent.
+    """
+    command_and_args = message.content.strip()[1:].split(" ")
+    command = command_and_args[0]
