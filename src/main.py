@@ -48,8 +48,8 @@ def start_client(blocking: bool = True) -> Coroutine[Any, Any, None] | None:
     """
     events.register_events()
     app_token = globals.settings.get("app_token")
-    logger.info("Connecting client...")
     if blocking:
+        logger.info("Connecting client...")
         globals.client.run(app_token, reconnect=True)
     else:
         return globals.client.start(app_token, reconnect=True)
