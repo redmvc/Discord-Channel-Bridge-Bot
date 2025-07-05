@@ -26,7 +26,7 @@ if TYPE_CHECKING:
                     "db_dialect": "...",
                     ...
                 },
-                "testing": {
+                "development": {
                     "app_token": "...",
                     "db_dialect": "...",
                     ...
