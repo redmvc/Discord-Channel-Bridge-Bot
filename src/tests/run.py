@@ -1,10 +1,8 @@
 import asyncio
-import sys
-from pathlib import Path
+
 import tester_bot
 from tester_bot import start_client as start_tester_bot
 
-sys.path.append(str(Path(__file__).parent.parent))
 import globals
 from main import start_client as start_bridge_bot
 

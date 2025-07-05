@@ -1,21 +1,18 @@
 import asyncio
 import json
-import sys
-from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
-from beartype import beartype
 import discord
 from aiolimiter import AsyncLimiter
+from beartype import beartype
 
-sys.path.append(str(Path(__file__).parent.parent))
 from validations import setup_logger
 
 # Object to log events
 logger = setup_logger("test_logger", "test_logs.log", "DEBUG")
 
 if TYPE_CHECKING:
-    from typing import SupportsInt, TypedDict, Coroutine, Any
+    from typing import Any, Coroutine, SupportsInt, TypedDict
 
     class Settings(TypedDict):
         """A TypedDict with the bot's settings. The `settings.json` file must contain a `"tests"` entry with the attributes below. For example:
