@@ -82,6 +82,17 @@ class TestRunner:
         logger.debug("Rate limiter has capacity.")
 
         async with rate_limiter:
+            # Fetch the view of the testing server from the Bridge Bot's perspective
+            logger.debug("Fetching testing server...")
+            if not (
+                bridge_bot_testing_server := bridge_bot.get_guild(testing_server.id)
+            ):
+                bridge_bot_testing_server = await bridge_bot.fetch_guild(
+                    testing_server.id
+                )
+            testing_server = bridge_bot_testing_server
+            logger.debug("Fetched.")
+
             # Delete all channels in the server
             logger.info("Deleting server channels...")
             server_channels = await testing_server.fetch_channels()
