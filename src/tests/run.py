@@ -3,7 +3,6 @@ import asyncio
 import tester_bot
 from test_runner import test_runner
 from tester_bot import start_client as start_tester_bot
-from tester_bot import testing_server
 
 import globals
 from main import start_client as start_bridge_bot
@@ -39,7 +38,7 @@ async def run_tests():
         await test_runner.run_tests(
             bots.bridge_bot_client,
             bots.tester_bot_client,
-            testing_server,
+            tester_bot.testing_server,
         )
 
 
