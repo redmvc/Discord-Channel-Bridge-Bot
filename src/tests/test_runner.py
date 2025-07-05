@@ -1,14 +1,32 @@
 import asyncio
 from abc import ABC
-from typing import Any, Callable, Coroutine, TypeVar
+from typing import TYPE_CHECKING, Any, Callable, Coroutine, TypeVar, cast
 
-from discord import Client
+from aiolimiter import AsyncLimiter
+from discord import Client, Guild
 
 from validations import setup_logger
 
+if TYPE_CHECKING:
+    from discord import TextChannel
+
 logger = setup_logger("test_logger", "test_logs.log", "DEBUG")
 
-CoroT = TypeVar("CoroT", bound=Callable[[Client, Client], Coroutine[Any, Any, None]])
+# Helper to prevent us from being rate limited
+rate_limiter = AsyncLimiter(1, 10)
+
+CoroT = TypeVar(
+    "CoroT",
+    bound=Callable[
+        [
+            Client,
+            Client,
+            Guild,
+            tuple["TextChannel", "TextChannel", "TextChannel", "TextChannel"],
+        ],
+        Coroutine[Any, Any, None],
+    ],
+)
 
 
 class TestRunner:
@@ -36,7 +54,12 @@ class TestRunner:
             type(test_case).__name__,
         )
 
-    async def run_tests(self, bridge_bot: Client, tester_bot: Client):
+    async def run_tests(
+        self,
+        bridge_bot: Client,
+        tester_bot: Client,
+        testing_server: Guild,
+    ):
         """Run the tests registered to this object.
 
         Parameters
@@ -45,10 +68,57 @@ class TestRunner:
             The Bridge Bot client.
         tester_bot : :class:`~discord.Client`
             The Tester Bot client.
+        testing_server : :class:`~discord.Guild`
+            The server in which to run the tests.
         """
-        for test_case in self.test_cases:
-            for test in test_case.tests:
-                await test(bridge_bot, tester_bot)
+        logger.info("Starting to run tests.")
+        if not rate_limiter.has_capacity():
+            raise ConnectionError(
+                "Rate limiter does not have capacity for running the tests."
+            )
+        logger.debug("Rate limiter has capacity.")
+
+        async with rate_limiter:
+            # Delete all channels in the server
+            logger.info("Deleting server channels...")
+            server_channels = await testing_server.fetch_channels()
+            delete_channels: list[Coroutine[Any, Any, None]] = []
+            for channel in server_channels:
+                delete_channels.append(channel.delete())
+            await asyncio.gather(*delete_channels)
+            logger.info("Deleted.")
+
+            # Create four channels for testing
+            logger.info("Creating test channels...")
+            create_testing_channels: list[Coroutine[Any, Any, "TextChannel"]] = []
+            for i in range(4):
+                create_testing_channels.append(
+                    testing_server.create_text_channel(f"testing_channel_{i + 1}")
+                )
+            testing_channels = tuple(
+                tester_bot.get_channel(channel.id)
+                for channel in await asyncio.gather(*create_testing_channels)
+            )
+            assert len(testing_channels) == 4
+            if TYPE_CHECKING:
+                testing_channels = cast(
+                    tuple[
+                        "TextChannel",
+                        "TextChannel",
+                        "TextChannel",
+                        "TextChannel",
+                    ],
+                    testing_channels,
+                )
+            logger.info("Created.")
+
+            # Run the tests
+            logger.info("Running tests.")
+            for test_case in self.test_cases:
+                logger.debug(f"Starting test case {type(test_case).__name__}.")
+                for test in test_case.tests:
+                    logger.debug(f"Starting test {test.__name__}.")
+                    await test(bridge_bot, tester_bot, testing_server, testing_channels)
 
 
 class TestCase(ABC):
@@ -56,25 +126,40 @@ class TestCase(ABC):
 
     Attributes
     ----------
-    tests : list[(:class:`~discord.Client`, :class:`~discord.Client`) -> Coroutine[Any, Any, None]]
+    tests : list[(:class:`~discord.Client`, :class:`~discord.Client`, :class:`~discord.Guild`, tuple[:class:`~discord.TextChannel`, :class:`~discord.TextChannel`, :class:`~discord.TextChannel`, :class:`~discord.TextChannel`]) -> Coroutine[Any, Any, None]]
         The list of registered tests.
     """
 
     def __init__(self, test_base: TestRunner):
         test_base.register_test_case(self)
-        self.tests: list[Callable[[Client, Client], Coroutine[Any, Any, None]]] = []
+        self.tests: list[
+            Callable[
+                [
+                    Client,
+                    Client,
+                    Guild,
+                    tuple[
+                        "TextChannel",
+                        "TextChannel",
+                        "TextChannel",
+                        "TextChannel",
+                    ],
+                ],
+                Coroutine[Any, Any, None],
+            ]
+        ] = []
 
     def test(self, coro: CoroT) -> CoroT:
         """Decorator to register a test function to this object.
 
         Parameters
         ----------
-        coro : (:class:`~discord.Client`, :class:`~discord.Client`) -> Coroutine[Any, Any, None]
-            The test function to run. Must be a coroutine whose first argument is the Bridge Bot and whose second argument is the Tester Bot.
+        coro : (:class:`~discord.Client`, :class:`~discord.Client`, :class:`~discord.Guild`, tuple[:class:`~discord.TextChannel`, :class:`~discord.TextChannel`, :class:`~discord.TextChannel`, :class:`~discord.TextChannel`]) -> Coroutine[Any, Any, None]
+            The test function to run. Must be a coroutine whose arguments are, respectively: the Bridge Bot client, the Tester Bot client, the Discord server for testing, and a tuple with four Discord text channels in that server as seen by the Tester Bot.
 
         Returns
         -------
-        (:class:`~discord.Client`, :class:`~discord.Client`) -> Coroutine[Any, Any, None]
+        (:class:`~discord.Client`, :class:`~discord.Client`, :class:`~discord.Guild`, tuple[:class:`~discord.TextChannel`, :class:`~discord.TextChannel`, :class:`~discord.TextChannel`, :class:`~discord.TextChannel`]) -> Coroutine[Any, Any, None]
         """
         if not asyncio.iscoroutinefunction(coro):
             raise TypeError("Test registered must be a coroutine function.")

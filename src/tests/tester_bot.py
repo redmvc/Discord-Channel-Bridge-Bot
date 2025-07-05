@@ -3,7 +3,6 @@ import json
 from typing import TYPE_CHECKING, cast
 
 import discord
-from aiolimiter import AsyncLimiter
 from beartype import beartype
 from test_runner import logger
 
@@ -59,9 +58,6 @@ is_ready: bool = False
 
 # Server in which testing will be run
 testing_server: discord.Guild
-
-# Helper to prevent us from being rate limited
-rate_limiter = AsyncLimiter(1, 10)
 
 
 @client.event
