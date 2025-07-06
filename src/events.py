@@ -355,8 +355,8 @@ async def on_message(message: discord.Message):
             and message.content.strip().startswith("/")
         ):
             # Test app sending a slash command
-            await process_tester_bot_command(message)
-            return
+            if await process_tester_bot_command(message, globals.test_app):
+                return
 
         await bridge_message_helper(message)
 

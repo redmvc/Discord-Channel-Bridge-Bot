@@ -174,7 +174,7 @@ class TestCase(ABC):
         Parameters
         ----------
         coro : (:class:`~discord.Client`, :class:`~discord.Client`, :class:`~discord.Guild`, tuple[:class:`~discord.TextChannel`, :class:`~discord.TextChannel`, :class:`~discord.TextChannel`, :class:`~discord.TextChannel`]) -> Coroutine[Any, Any, None]
-            The test function to run. Must be a coroutine whose arguments are, respectively: the Bridge Bot client, the Tester Bot client, the Discord server for testing, and a tuple with four Discord text channels in that server as seen by the Tester Bot.
+            The test function to run. Must be a coroutine whose arguments are, respectively: the Bridge Bot client, the Tester Bot client, the Discord server for testing as seen by the Bridge Bot, and a tuple with four Discord text channels in that server as seen by the Tester Bot.
 
         Returns
         -------

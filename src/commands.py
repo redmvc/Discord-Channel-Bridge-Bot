@@ -198,14 +198,16 @@ async def bridge(
 
     if target_channel.id == message_channel.id:
         await interaction.response.send_message(
-            "❌ You can't bridge a channel to itself.", ephemeral=True
+            "❌ You can't bridge a channel to itself.",
+            ephemeral=True,
         )
         return
 
     assert isinstance(interaction.user, discord.Member)
     assert interaction.guild
     target_channel_member = await globals.get_channel_member(
-        target_channel, interaction.user.id
+        target_channel,
+        interaction.user.id,
     )
     if (
         not message_channel.permissions_for(interaction.user).manage_webhooks
@@ -1166,7 +1168,8 @@ class CancelHashServer(discord.ui.Button[Any]):
 
     async def callback(self, interaction: discord.Interaction):
         await self._original_interaction.edit_original_response(
-            view=None, content="Request cancelled."
+            view=None,
+            content="Request cancelled.",
         )
         logger.debug(
             "Call to /hash_server_emoji with interaction ID %s cancelled.",
@@ -1191,7 +1194,8 @@ class ConfirmHashServer(discord.ui.Button[Any]):
     async def callback(self, interaction: discord.Interaction):
         # await self._original_interaction.delete_original_response()
         await self._original_interaction.edit_original_response(
-            view=None, content="Hashing..."
+            view=None,
+            content="Hashing...",
         )
         await interaction.response.defer(thinking=True, ephemeral=True)
         try:
