@@ -4,6 +4,7 @@ from abc import ABC
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Coroutine, TypeVar, cast
 
+import tester_bot
 from aiolimiter import AsyncLimiter
 from discord import Client, Guild
 from tester_bot import logger
@@ -41,8 +42,10 @@ class TestRunner:
         The list of registered test cases.
     """
 
-    def __init__(self):
+    def __init__(self, bridge_bot: Client, tester_bot: Client):
         self.test_cases: list["TestCase"] = []
+        self.tester_bot = tester_bot
+        self.bridge_bot = bridge_bot
 
     def register_test_case(self, test_case: "TestCase"):
         """Register a test case to this object.
@@ -57,20 +60,11 @@ class TestRunner:
             type(test_case).__name__,
         )
 
-    async def run_tests(
-        self,
-        bridge_bot: Client,
-        tester_bot: Client,
-        testing_server: Guild,
-    ):
+    async def run_tests(self, testing_server: Guild):
         """Run the tests registered to this object.
 
         Parameters
         ----------
-        bridge_bot : :class:`~discord.Client`
-            The Bridge Bot client.
-        tester_bot : :class:`~discord.Client`
-            The Tester Bot client.
         testing_server : :class:`~discord.Guild`
             The server in which to run the tests.
         """
@@ -85,9 +79,11 @@ class TestRunner:
             # Fetch the view of the testing server from the Bridge Bot's perspective
             logger.debug("Fetching testing server...")
             if not (
-                bridge_bot_testing_server := bridge_bot.get_guild(testing_server.id)
+                bridge_bot_testing_server := self.bridge_bot.get_guild(
+                    testing_server.id
+                )
             ):
-                bridge_bot_testing_server = await bridge_bot.fetch_guild(
+                bridge_bot_testing_server = await self.bridge_bot.fetch_guild(
                     testing_server.id
                 )
             testing_server = bridge_bot_testing_server
@@ -110,7 +106,7 @@ class TestRunner:
                     testing_server.create_text_channel(f"testing_channel_{i + 1}")
                 )
             testing_channels = tuple(
-                tester_bot.get_channel(channel.id)
+                self.tester_bot.get_channel(channel.id)
                 for channel in await asyncio.gather(*create_testing_channels)
             )
             assert len(testing_channels) == 4
@@ -127,8 +123,8 @@ class TestRunner:
             logger.info("Created.")
 
             # Register the test bot in globals
-            assert tester_bot.user
-            globals.test_app = await bridge_bot.fetch_user(tester_bot.user.id)
+            assert self.tester_bot.user
+            globals.test_app = await self.bridge_bot.fetch_user(self.tester_bot.user.id)
 
             # Run the tests
             logger.info("Running tests.")
@@ -136,7 +132,12 @@ class TestRunner:
                 logger.debug(f"Starting test case {type(test_case).__name__}.")
                 for test in test_case.tests:
                     logger.debug(f"Starting test {test.__name__}.")
-                    await test(bridge_bot, tester_bot, testing_server, testing_channels)
+                    await test(
+                        self.bridge_bot,
+                        self.tester_bot,
+                        testing_server,
+                        testing_channels,
+                    )
 
 
 class TestCase(ABC):
@@ -188,4 +189,4 @@ class TestCase(ABC):
         return coro
 
 
-test_runner = TestRunner()
+test_runner = TestRunner(globals.client, tester_bot.client)

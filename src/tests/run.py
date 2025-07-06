@@ -34,12 +34,8 @@ class Bots:
 
 async def run_tests():
     """Run all tests registered to the test runner."""
-    async with Bots() as bots:
-        await test_runner.run_tests(
-            bots.bridge_bot_client,
-            bots.tester_bot_client,
-            tester_bot.testing_server,
-        )
+    async with Bots():
+        await test_runner.run_tests(tester_bot.testing_server)
 
 
 if __name__ == "__main__":
