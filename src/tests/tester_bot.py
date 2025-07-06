@@ -8,10 +8,10 @@ from typing import TYPE_CHECKING, List, Optional, Sequence, Union, cast
 
 import discord
 from beartype import beartype
-from test_runner import logger
 
 sys.path.append(str(Path(__file__).parent.parent))
 import globals
+from validations import setup_logger
 
 if TYPE_CHECKING:
     from typing import Any, Coroutine, SupportsInt, TypedDict
@@ -41,6 +41,8 @@ if TYPE_CHECKING:
         app_token: str
         testing_server_id: "SupportsInt | str"
 
+
+logger = setup_logger("test_logger", "test_logs.log", "DEBUG")
 
 MISSING = discord.utils.MISSING
 

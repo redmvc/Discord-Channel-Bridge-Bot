@@ -6,15 +6,14 @@ from typing import TYPE_CHECKING, Any, Callable, Coroutine, TypeVar, cast
 
 from aiolimiter import AsyncLimiter
 from discord import Client, Guild
+from tester_bot import logger
 
 sys.path.append(str(Path(__file__).parent.parent))
-from validations import setup_logger
 import globals
 
 if TYPE_CHECKING:
     from discord import TextChannel
 
-logger = setup_logger("test_logger", "test_logs.log", "DEBUG")
 
 # Helper to prevent us from being rate limited
 rate_limiter = AsyncLimiter(1, 10)
