@@ -261,14 +261,14 @@ if TYPE_CHECKING:
 
 
 async def expect(
-    object: Literal["message"],
+    obj: Literal["message"],
     *,
     in_: "int | TextChannel | Thread",
     to_: "list[Expectation] | Expectation",
     timeout: float = 10,
     heartbeat: float = 0.5,
 ) -> "Message | None":
-    if object == "message":
+    if obj == "message":
         in_ = globals.get_id_from_channel(in_)
         end_time = datetime.now() + timedelta(seconds=timeout)
         while not (received_messages := tester_bot.received_messages[in_]) and (
