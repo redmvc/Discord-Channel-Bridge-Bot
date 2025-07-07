@@ -494,14 +494,44 @@ async def get_channel_member(
     :class:`~discord.Forbidden`
         The client does not not have access to the server the channel is in.
     """
-    channel_member = channel.guild.get_member(member_id)
-    if not channel_member:
+    return await get_server_member(channel.guild, member_id)
+
+
+@beartype
+async def get_server_member(
+    server: discord.Guild,
+    member_id: int,
+) -> discord.Member | None:
+    """Return a server's member by their ID, or None if they can't be found.
+
+    Parameters
+    ----------
+    server : :class:`~discord.abc.GuildChannel` | :class:`~discord.Thread`
+        A Discord server.
+    member_id : int
+        The ID of the server member.
+
+    Returns
+    -------
+    :class:`~discord.Member` | None
+
+    Raises
+    ------
+    :class:`~discord.HTTPException`
+        Fetching the member failed.
+    :class:`~discord.NotFound`
+        The member could not be found.
+    :class:`~discord.Forbidden`
+        The client does not not have access to the server the channel is in.
+    """
+    server_member = server.get_member(member_id)
+    if not server_member:
         try:
-            channel_member = await channel.guild.fetch_member(member_id)
+            server_member = await server.fetch_member(member_id)
         except Exception:
             return None
 
-    return channel_member
+    return server_member
 
 
 @beartype
