@@ -1,8 +1,18 @@
 import asyncio
 import sys
 from abc import ABC
+from datetime import datetime, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Coroutine, TypeVar, cast
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Coroutine,
+    Literal,
+    TypedDict,
+    TypeVar,
+    cast,
+)
 
 import tester_bot
 from aiolimiter import AsyncLimiter
@@ -13,7 +23,9 @@ sys.path.append(str(Path(__file__).parent.parent))
 import globals
 
 if TYPE_CHECKING:
-    from discord import TextChannel
+    from typing import NotRequired
+
+    from discord import Message, TextChannel, Thread
 
 
 # Helper to prevent us from being rate limited
@@ -127,17 +139,26 @@ class TestRunner:
             globals.test_app = await self.bridge_bot.fetch_user(self.tester_bot.user.id)
 
             # Run the tests
+            logger.info("")
             logger.info("Running tests.")
+            logger.info("")
+            print("\nRunning tests.\n")
             for test_case in self.test_cases:
-                logger.debug(f"Starting test case {type(test_case).__name__}.")
+                logger.info(f"Starting test case {type(test_case).__name__}.")
+                print(f"Starting test case {type(test_case).__name__}.")
                 for test in test_case.tests:
-                    logger.debug(f"Starting test {test.__name__}.")
+                    logger.info(f"Starting test {test.__name__}.")
+                    print(f"Starting test {test.__name__}.")
                     await test(
                         self.bridge_bot,
                         self.tester_bot,
                         testing_server,
                         testing_channels,
                     )
+                    logger.info("")
+                    print("")
+                logger.info("")
+                print("")
 
 
 class TestCase(ABC):
@@ -187,6 +208,116 @@ class TestCase(ABC):
         self.tests.append(coro)
         logger.debug("%s has successfully been registered as a test.", coro.__name__)
         return coro
+
+
+def log_expectation(
+    message: str,
+    type: Literal["success", "failure"],
+    *,
+    print_to_console: bool = True,
+):
+    """Log an expectation and optionally print it to console.
+
+    Parameters
+    ----------
+    message : str
+        The message to be logged.
+    type : Literal["success", "failure"]
+        Whether it's a success or a failure. Will add emoji to the start of the message depending on which.
+    print_to_console : bool, optional
+        Whether to also print the message to console. Defaults to True.
+    """
+    if type == "failure":
+        message = f"FAILURE: {message}"
+        logger.error(message)
+        message = f"❌ {message}"
+    else:
+        message = f"SUCCESS: {message}"
+        logger.info(message)
+        message = f"✅ {message}"
+
+    if print_to_console:
+        print(message)
+
+
+if TYPE_CHECKING:
+
+    class Expectation(TypedDict, total=False):
+        contain: "NotRequired[str]"
+        equal: "NotRequired[str]"
+        be_a_reply_to: "NotRequired[Message]"
+
+
+async def expect(
+    object: Literal["message"],
+    *,
+    in_: "int | TextChannel | Thread",
+    to_: "list[Expectation] | Expectation",
+    timeout: float = 10,
+    heartbeat: float = 0.5,
+) -> "Message | None":
+    if object == "message":
+        in_ = globals.get_id_from_channel(in_)
+        end_time = datetime.now() + timedelta(seconds=timeout)
+        while not (received_messages := tester_bot.received_messages[in_]) and (
+            datetime.now() <= end_time
+        ):
+            await asyncio.sleep(heartbeat)
+
+        if not received_messages:
+            log_expectation(
+                f"expected message in channel <#{in_}> timed out", "failure"
+            )
+            return None
+        log_expectation(f"expected message in channel <#{in_}>", "success")
+
+        if not isinstance(to_, list):
+            to_ = [to_]
+
+        received_message = received_messages.pop(0)
+        content = received_message.content
+        for exp in to_:
+            if contain := exp.get("contain"):
+                if contain in content:
+                    log_expectation(
+                        f"expected message to contain text\n    {contain}",
+                        "success",
+                    )
+                else:
+                    log_expectation(
+                        f"expected message to contain text\n    {contain}\n  was instead:\n    {content}",
+                        "failure",
+                    )
+            elif equal := exp.get("equal"):
+                if content == equal:
+                    log_expectation(
+                        f"expected message to equal\n    {equal}",
+                        "success",
+                    )
+                else:
+                    log_expectation(
+                        f"expected message to equal\n    {equal}\n  was instead:\n    {content}",
+                        "failure",
+                    )
+
+            if be_a_reply_to := exp.get("be_a_reply_to"):
+                if not (message_reference := received_message.reference):
+                    log_expectation(
+                        f"expected message to be a reply to message with ID {be_a_reply_to.id} but it was not a reply",
+                        "failure",
+                    )
+                elif (reference_id := message_reference.message_id) != be_a_reply_to.id:
+                    log_expectation(
+                        f"expected message to be a reply to message with ID {be_a_reply_to.id} but it was a reply to message with ID {reference_id} instead",
+                        "failure",
+                    )
+                else:
+                    log_expectation(
+                        f"expected message to be a reply to message with ID {be_a_reply_to.id}",
+                        "success",
+                    )
+
+        return received_message
 
 
 test_runner = TestRunner(globals.client, tester_bot.client)

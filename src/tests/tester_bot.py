@@ -3,6 +3,7 @@ import inspect
 import json
 import logging
 import sys
+from collections import defaultdict
 from pathlib import Path
 from typing import TYPE_CHECKING, List, Optional, Sequence, Union, cast
 
@@ -42,7 +43,7 @@ if TYPE_CHECKING:
         testing_server_id: "SupportsInt | str"
 
 
-logger = setup_logger("test_logger", "test_logs.log", "DEBUG")
+logger = setup_logger("test_logger", "test_logs.log", "INFO")
 
 MISSING = discord.utils.MISSING
 
@@ -69,6 +70,9 @@ is_ready: bool = False
 
 # Server in which testing will be run
 testing_server: discord.Guild
+
+# Messages sent by the bridge bot via the interaction
+received_messages: dict[int, list[discord.Message]] = defaultdict(lambda: [])
 
 
 @client.event
@@ -148,6 +152,15 @@ async def on_ready():
     # -----
     is_ready = True
     logger.info("Bot is ready.")
+
+
+@client.event
+async def on_message(message: discord.Message):
+    if (bridge_bot_user := globals.client.user) and (
+        (message.author.id == bridge_bot_user.id)
+        or (message.application_id == bridge_bot_user.id)
+    ):
+        received_messages[message.channel.id].append(message)
 
 
 @beartype
@@ -443,14 +456,14 @@ async def process_tester_bot_command(
     command_and_args = message.content.strip()[1:].split()
 
     # -----
-    logger.info("Tester bot sent a slash command: %s", command_and_args[0])
+    logger.debug("Tester bot sent a slash command: %s", command_and_args[0])
     if not (command := globals.command_tree.get_command(command_and_args[0])):
         command = globals.command_tree.get_command(
             command_and_args[0],
             guild=message.guild,
         )
     if not isinstance(command, discord.app_commands.Command):
-        logger.info("Invalid command; treating message as regular message.")
+        logger.debug("Invalid command; treating message as regular message.")
         return False
 
     # -----
@@ -488,7 +501,7 @@ async def process_tester_bot_command(
         member = tester_bot_user
 
     # -----
-    logger.info("Executing command...")
+    logger.debug("Executing command...")
     try:
         await command.callback(
             cast(
@@ -500,6 +513,6 @@ async def process_tester_bot_command(
     except Exception as e:
         logger.error(e)
         raise
-    logger.info("Command executed.")
+    logger.debug("Command executed.")
 
     return True
