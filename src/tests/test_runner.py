@@ -16,7 +16,7 @@ from typing import (
 
 import tester_bot
 from aiolimiter import AsyncLimiter
-from discord import Client, Guild
+from discord import Client, Guild, Permissions
 from tester_bot import logger
 
 sys.path.append(str(Path(__file__).parent.parent))
@@ -25,11 +25,13 @@ import globals
 if TYPE_CHECKING:
     from typing import NotRequired
 
-    from discord import Message, TextChannel, Thread
+    from discord import Message, TextChannel, Thread, Role
 
 
 # Helper to prevent us from being rate limited
 rate_limiter = AsyncLimiter(1, 10)
+
+webhook_permissions_role: "Role | None" = None
 
 CoroT = TypeVar(
     "CoroT",
@@ -138,6 +140,13 @@ class TestRunner:
             assert self.tester_bot.user
             globals.test_app = await self.bridge_bot.fetch_user(self.tester_bot.user.id)
 
+            # Create a role in the testing server with the necessary permissions
+            global webhook_permissions_role
+            webhook_permissions_role = await testing_server.create_role(
+                name="webhook_permissions_role",
+                permissions=Permissions(manage_webhooks=True),
+            )
+
             # Run the tests
             logger.info("")
             logger.info("Running tests.")
@@ -159,6 +168,9 @@ class TestRunner:
                     print("")
                 logger.info("")
                 print("")
+
+            if webhook_permissions_role:
+                await webhook_permissions_role.delete()
 
 
 class TestCase(ABC):
@@ -316,6 +328,8 @@ async def expect(
                         f"expected message to be a reply to message with ID {be_a_reply_to.id}",
                         "success",
                     )
+            
+            # TODO: be ephemeral
 
         return received_message
 
