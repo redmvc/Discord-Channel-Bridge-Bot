@@ -266,6 +266,7 @@ class Expectation(TypedDict, total=False):
     contain: "NotRequired[str]"
     equal: "NotRequired[str]"
     be_a_reply_to: "NotRequired[discord.Message]"
+    be_from: "NotRequired[int | discord.User | discord.Member | discord.Client]"
 
 
 @beartype
@@ -335,6 +336,27 @@ async def expect(
                 else:
                     log_expectation(
                         f"expected message to be a reply to message with ID {be_a_reply_to.id}",
+                        "success",
+                    )
+
+            if be_from := exp.get("be_from"):
+                if isinstance(be_from, discord.Client):
+                    assert be_from.user
+                    be_from = be_from.user.id
+                elif not isinstance(be_from, int):
+                    be_from = be_from.id
+
+                if be_from in [
+                    (application_id := received_message.application_id),
+                    (author_id := received_message.author.id),
+                ]:
+                    log_expectation(
+                        f"expected message to be from user with ID {be_from}",
+                        "success",
+                    )
+                else:
+                    log_expectation(
+                        f"expected message to be from user with ID {be_from} but was from {application_id or author_id} instead",
                         "success",
                     )
 
