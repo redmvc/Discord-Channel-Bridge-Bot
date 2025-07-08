@@ -14,9 +14,10 @@ from typing import (
     cast,
 )
 
+import discord
 import tester_bot
 from aiolimiter import AsyncLimiter
-from discord import Client, Guild, Permissions
+from beartype import beartype
 from tester_bot import logger
 
 sys.path.append(str(Path(__file__).parent.parent))
@@ -25,22 +26,25 @@ import globals
 if TYPE_CHECKING:
     from typing import NotRequired
 
-    from discord import Message, TextChannel, Thread, Role
-
 
 # Helper to prevent us from being rate limited
 rate_limiter = AsyncLimiter(1, 10)
 
-webhook_permissions_role: "Role | None" = None
+webhook_permissions_role: discord.Role | None = None
 
 CoroT = TypeVar(
     "CoroT",
     bound=Callable[
         [
-            Client,
-            Client,
-            Guild,
-            tuple["TextChannel", "TextChannel", "TextChannel", "TextChannel"],
+            discord.Client,
+            discord.Client,
+            discord.Guild,
+            tuple[
+                discord.TextChannel,
+                discord.TextChannel,
+                discord.TextChannel,
+                discord.TextChannel,
+            ],
         ],
         Coroutine[Any, Any, None],
     ],
@@ -56,11 +60,13 @@ class TestRunner:
         The list of registered test cases.
     """
 
-    def __init__(self, bridge_bot: Client, tester_bot: Client):
+    @beartype
+    def __init__(self, bridge_bot: discord.Client, tester_bot: discord.Client):
         self.test_cases: list["TestCase"] = []
         self.tester_bot = tester_bot
         self.bridge_bot = bridge_bot
 
+    @beartype
     def register_test_case(self, test_case: "TestCase"):
         """Register a test case to this object.
 
@@ -74,7 +80,8 @@ class TestRunner:
             type(test_case).__name__,
         )
 
-    async def run_tests(self, testing_server: Guild):
+    @beartype
+    async def run_tests(self, testing_server: discord.Guild):
         """Run the tests registered to this object.
 
         Parameters
@@ -114,7 +121,7 @@ class TestRunner:
 
             # Create four channels for testing
             logger.info("Creating test channels...")
-            create_testing_channels: list[Coroutine[Any, Any, "TextChannel"]] = []
+            create_testing_channels: list[Coroutine[Any, Any, discord.TextChannel]] = []
             for i in range(4):
                 create_testing_channels.append(
                     testing_server.create_text_channel(f"testing_channel_{i + 1}")
@@ -127,10 +134,10 @@ class TestRunner:
             if TYPE_CHECKING:
                 testing_channels = cast(
                     tuple[
-                        "TextChannel",
-                        "TextChannel",
-                        "TextChannel",
-                        "TextChannel",
+                        discord.TextChannel,
+                        discord.TextChannel,
+                        discord.TextChannel,
+                        discord.TextChannel,
                     ],
                     testing_channels,
                 )
@@ -144,7 +151,7 @@ class TestRunner:
             global webhook_permissions_role
             webhook_permissions_role = await testing_server.create_role(
                 name="webhook_permissions_role",
-                permissions=Permissions(manage_webhooks=True),
+                permissions=discord.Permissions(manage_webhooks=True),
             )
 
             # Run the tests
@@ -182,25 +189,27 @@ class TestCase(ABC):
         The list of registered tests.
     """
 
+    @beartype
     def __init__(self, test_base: TestRunner):
         test_base.register_test_case(self)
         self.tests: list[
             Callable[
                 [
-                    Client,
-                    Client,
-                    Guild,
+                    discord.Client,
+                    discord.Client,
+                    discord.Guild,
                     tuple[
-                        "TextChannel",
-                        "TextChannel",
-                        "TextChannel",
-                        "TextChannel",
+                        discord.TextChannel,
+                        discord.TextChannel,
+                        discord.TextChannel,
+                        discord.TextChannel,
                     ],
                 ],
                 Coroutine[Any, Any, None],
             ]
         ] = []
 
+    @beartype
     def test(self, coro: CoroT) -> CoroT:
         """Decorator to register a test function to this object.
 
@@ -222,6 +231,7 @@ class TestCase(ABC):
         return coro
 
 
+@beartype
 def log_expectation(
     message: str,
     type: Literal["success", "failure"],
@@ -252,22 +262,21 @@ def log_expectation(
         print(message)
 
 
-if TYPE_CHECKING:
-
-    class Expectation(TypedDict, total=False):
-        contain: "NotRequired[str]"
-        equal: "NotRequired[str]"
-        be_a_reply_to: "NotRequired[Message]"
+class Expectation(TypedDict, total=False):
+    contain: "NotRequired[str]"
+    equal: "NotRequired[str]"
+    be_a_reply_to: "NotRequired[discord.Message]"
 
 
+@beartype
 async def expect(
     obj: Literal["message"],
     *,
-    in_: "int | TextChannel | Thread",
-    to_: "list[Expectation] | Expectation",
+    in_: int | discord.TextChannel | discord.Thread,
+    to_: list[Expectation] | Expectation,
     timeout: float = 10,
     heartbeat: float = 0.5,
-) -> "Message | None":
+) -> discord.Message | None:
     if obj == "message":
         in_ = globals.get_id_from_channel(in_)
         end_time = datetime.now() + timedelta(seconds=timeout)
@@ -328,7 +337,7 @@ async def expect(
                         f"expected message to be a reply to message with ID {be_a_reply_to.id}",
                         "success",
                     )
-            
+
             # TODO: be ephemeral
 
         return received_message
