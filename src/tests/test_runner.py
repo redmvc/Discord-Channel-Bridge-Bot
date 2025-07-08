@@ -271,14 +271,14 @@ class Expectation(TypedDict, total=False):
 
 @beartype
 async def expect(
-    obj: Literal["message"],
+    obj: Literal["next_message"],
     *,
     in_: int | discord.TextChannel | discord.Thread,
     to_: list[Expectation] | Expectation,
     timeout: float = 10,
     heartbeat: float = 0.5,
 ) -> discord.Message | None:
-    if obj == "message":
+    if obj == "next_message":
         in_ = globals.get_id_from_channel(in_)
         end_time = datetime.now() + timedelta(seconds=timeout)
         while not (received_messages := tester_bot.received_messages[in_]) and (
