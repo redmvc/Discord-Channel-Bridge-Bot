@@ -12,6 +12,7 @@ from typing import (
     TypedDict,
     TypeVar,
     cast,
+    overload,
 )
 
 import discord
@@ -267,111 +268,159 @@ class Expectation(TypedDict, total=False):
     equal: "NotRequired[str]"
     be_a_reply_to: "NotRequired[discord.Message]"
     be_from: "NotRequired[int | discord.User | discord.Member | discord.Client]"
+    be_in_channel: "NotRequired[int | discord.TextChannel | discord.Thread]"
+
+
+@overload
+async def expect(
+    obj: Literal["next_message"],
+    *,
+    in_channel: int | discord.TextChannel | discord.Thread,
+    to: list[Expectation] | Expectation,
+    timeout: float = 10,
+    heartbeat: float = 0.5,
+) -> discord.Message | None: ...
+
+
+@overload
+async def expect(
+    obj: discord.Message,
+    *,
+    in_channel: int | discord.TextChannel | discord.Thread | None = None,
+    to: list[Expectation] | Expectation,
+    timeout: float = 10,
+    heartbeat: float = 0.5,
+) -> discord.Message | None: ...
 
 
 @beartype
 async def expect(
-    obj: Literal["next_message"],
+    obj: Literal["next_message"] | discord.Message,
     *,
-    in_: int | discord.TextChannel | discord.Thread,
-    to_: list[Expectation] | Expectation,
+    in_channel: int | discord.TextChannel | discord.Thread | None = None,
+    to: list[Expectation] | Expectation,
     timeout: float = 10,
     heartbeat: float = 0.5,
 ) -> discord.Message | None:
+    if not isinstance(to, list):
+        to = [to]
+
+    if in_channel:
+        in_channel = globals.get_id_from_channel(in_channel)
+
     if obj == "next_message":
-        in_ = globals.get_id_from_channel(in_)
+        assert in_channel
+
         end_time = datetime.now() + timedelta(seconds=timeout)
-        while not (received_messages := tester_bot.received_messages[in_]) and (
+        while not (received_messages := tester_bot.received_messages[in_channel]) and (
             datetime.now() <= end_time
         ):
             await asyncio.sleep(heartbeat)
 
         if not received_messages:
             log_expectation(
-                f"expected message in channel <#{in_}> timed out", "failure"
+                f"expecting next message in channel <#{in_channel}> timed out",
+                "failure",
             )
             return None
-        log_expectation(f"expected message in channel <#{in_}>", "success")
 
-        if not isinstance(to_, list):
-            to_ = [to_]
+        obj = received_messages.pop(0)
+        log_expectation(f"expected next message in channel <#{in_channel}>", "success")
+    else:
+        if in_channel:
+            to[0]["be_in_channel"] = in_channel
 
-        received_message = received_messages.pop(0)
-        content = received_message.content
-        expectations = [(e, v) for exp in to_ for e, v in exp.items()]
-        for expectation, value in expectations:
-            if expectation == "be_a_reply_to":
-                if TYPE_CHECKING:
-                    assert isinstance(value, discord.Message)
+    content = obj.content
+    expectations = [(e, v) for exp in to for e, v in exp.items()]
+    for expectation, value in expectations:
+        if expectation == "be_in_channel":
+            if TYPE_CHECKING:
+                assert isinstance(value, int | discord.TextChannel | discord.Thread)
 
-                if not (message_reference := received_message.reference):
-                    log_expectation(
-                        f"expected message to be a reply to message with ID {value.id} but it was not a reply",
-                        "failure",
-                    )
-                elif (reference_id := message_reference.message_id) != value.id:
-                    log_expectation(
-                        f"expected message to be a reply to message with ID {value.id} but it was a reply to message with ID {reference_id} instead",
-                        "failure",
-                    )
-                else:
-                    log_expectation(
-                        f"expected message to be a reply to message with ID {value.id}",
-                        "success",
-                    )
+            if (message_channel_id := obj.channel.id) != value:
+                log_expectation(
+                    f"expected message to be in channel <#{value}> but it was actually in <#{message_channel_id}>",
+                    "failure",
+                )
+            else:
+                log_expectation(
+                    f"expected message to be in channel <#{value}>",
+                    "success",
+                )
+            continue
 
-                continue
+        if expectation == "be_a_reply_to":
+            if TYPE_CHECKING:
+                assert isinstance(value, discord.Message)
 
-            if expectation == "be_from":
-                if isinstance(value, discord.Client):
-                    assert value.user
-                    value = value.user.id
-                elif isinstance(value, discord.User | discord.Member):
-                    value = value.id
+            if not (message_reference := obj.reference):
+                log_expectation(
+                    f"expected message to be a reply to message with ID {value.id} but it was not a reply",
+                    "failure",
+                )
+            elif (reference_id := message_reference.message_id) != value.id:
+                log_expectation(
+                    f"expected message to be a reply to message with ID {value.id} but it was a reply to message with ID {reference_id} instead",
+                    "failure",
+                )
+            else:
+                log_expectation(
+                    f"expected message to be a reply to message with ID {value.id}",
+                    "success",
+                )
 
-                if value in [
-                    (application_id := received_message.application_id),
-                    (author_id := received_message.author.id),
-                ]:
-                    log_expectation(
-                        f"expected message to be from user with ID {value}",
-                        "success",
-                    )
-                else:
-                    log_expectation(
-                        f"expected message to be from user with ID {value} but was from {application_id or author_id} instead",
-                        "success",
-                    )
+            continue
 
-                continue
+        if expectation == "be_from":
+            if isinstance(value, discord.Client):
+                assert value.user
+                value = value.user.id
+            elif isinstance(value, discord.User | discord.Member):
+                value = value.id
 
-            assert isinstance(value, str)
-            if expectation == "contain":
-                if value in content:
-                    log_expectation(
-                        f"expected message to contain text\n    {value}",
-                        "success",
-                    )
-                else:
-                    log_expectation(
-                        f"expected message to contain text\n    {value}\n  was instead:\n    {content}",
-                        "failure",
-                    )
-            elif expectation == "equal":
-                if content == value:
-                    log_expectation(
-                        f"expected message to equal\n    {value}",
-                        "success",
-                    )
-                else:
-                    log_expectation(
-                        f"expected message to equal\n    {value}\n  was instead:\n    {content}",
-                        "failure",
-                    )
+            if value in [
+                (application_id := obj.application_id),
+                (author_id := obj.author.id),
+            ]:
+                log_expectation(
+                    f"expected message to be from user with ID {value}",
+                    "success",
+                )
+            else:
+                log_expectation(
+                    f"expected message to be from user with ID {value} but was from {application_id or author_id} instead",
+                    "success",
+                )
 
-            # TODO: be ephemeral
+            continue
 
-        return received_message
+        assert isinstance(value, str)
+        if expectation == "contain":
+            if value in content:
+                log_expectation(
+                    f"expected message to contain text\n    {value}",
+                    "success",
+                )
+            else:
+                log_expectation(
+                    f"expected message to contain text\n    {value}\n  was instead:\n    {content}",
+                    "failure",
+                )
+        elif expectation == "equal":
+            if content == value:
+                log_expectation(
+                    f"expected message to equal\n    {value}",
+                    "success",
+                )
+            else:
+                log_expectation(
+                    f"expected message to equal\n    {value}\n  was instead:\n    {content}",
+                    "failure",
+                )
+
+        # TODO: be ephemeral
+
+    return obj
 
 
 test_runner = TestRunner(globals.client, tester_bot.client)
