@@ -265,9 +265,13 @@ def log_expectation(
 
 class Expectation(TypedDict, total=False):
     contain: "NotRequired[str]"
+    not_contain: "NotRequired[str]"
     equal: "NotRequired[str]"
+    not_equal: "NotRequired[str]"
     be_a_reply_to: "NotRequired[discord.Message]"
+    not_be_a_reply_to: "NotRequired[discord.Message]"
     be_from: "NotRequired[int | discord.User | discord.Member | discord.Client]"
+    not_be_from: "NotRequired[int | discord.User | discord.Member | discord.Client]"
     be_in_channel: "NotRequired[int | discord.TextChannel | discord.Thread]"
 
 
@@ -333,40 +337,47 @@ async def expect(
     content = obj.content
     expectations = [(e, v) for exp in to for e, v in exp.items()]
     for expectation, value in expectations:
+        if negation := expectation.startswith("not_"):
+            expectation = expectation[4:]
+
         if expectation == "be_in_channel":
             if TYPE_CHECKING:
                 assert isinstance(value, int | discord.TextChannel | discord.Thread)
 
-            if (message_channel_id := obj.channel.id) != value:
+            log_message = f"expected message to {' not' if negation else ''}be in channel <#{value}>"
+            if ((message_channel_id := obj.channel.id) == value) != negation:
+                log_expectation(log_message, "success")
+            elif not negation:
                 log_expectation(
-                    f"expected message to be in channel <#{value}> but it was actually in <#{message_channel_id}>",
+                    f"{log_message} but it was actually in <#{message_channel_id}>",
                     "failure",
                 )
             else:
-                log_expectation(
-                    f"expected message to be in channel <#{value}>",
-                    "success",
-                )
+                log_expectation(f"{log_message} but it was", "failure")
             continue
 
         if expectation == "be_a_reply_to":
             if TYPE_CHECKING:
                 assert isinstance(value, discord.Message)
 
+            log_message = f"expected message to {' not' if negation else ''}be a reply to message with ID {value.id}"
             if not (message_reference := obj.reference):
                 log_expectation(
-                    f"expected message to be a reply to message with ID {value.id} but it was not a reply",
-                    "failure",
+                    f"{log_message} {'but' if not negation else 'and'} it was not a reply",
+                    "success" if negation else "failure",
                 )
             elif (reference_id := message_reference.message_id) != value.id:
-                log_expectation(
-                    f"expected message to be a reply to message with ID {value.id} but it was a reply to message with ID {reference_id} instead",
-                    "failure",
-                )
+                if not negation:
+                    log_expectation(
+                        f"{log_message} but it was a reply to message with ID {reference_id} instead",
+                        "failure",
+                    )
+                else:
+                    log_expectation(log_message, "success")
             else:
                 log_expectation(
-                    f"expected message to be a reply to message with ID {value.id}",
-                    "success",
+                    f"{log_message}{' but it was' if negation else ''}",
+                    "success" if not negation else "failure",
                 )
 
             continue
@@ -378,44 +389,62 @@ async def expect(
             elif isinstance(value, discord.User | discord.Member):
                 value = value.id
 
+            log_message = f"expected message to {' not' if negation else ''}be from user with ID {value}"
             if value in [
                 (application_id := obj.application_id),
                 (author_id := obj.author.id),
             ]:
                 log_expectation(
-                    f"expected message to be from user with ID {value}",
-                    "success",
+                    f"{log_message}{' but it was' if negation else ''}",
+                    "success" if not negation else "failure",
                 )
             else:
                 log_expectation(
-                    f"expected message to be from user with ID {value} but was from {application_id or author_id} instead",
-                    "success",
+                    (
+                        f"{log_message}"
+                        + (
+                            f" but it was from {application_id or author_id} instead"
+                            if not negation
+                            else ""
+                        )
+                    ),
+                    "success" if negation else "failure",
                 )
 
             continue
 
         assert isinstance(value, str)
         if expectation == "contain":
+            log_message = f"expected message to {' not' if negation else ''}contain text\n    {value}"
             if value in content:
                 log_expectation(
-                    f"expected message to contain text\n    {value}",
-                    "success",
+                    f"{log_message}{' but it did' if negation else ''}",
+                    "success" if not negation else "failure",
                 )
             else:
                 log_expectation(
-                    f"expected message to contain text\n    {value}\n  was instead:\n    {content}",
-                    "failure",
+                    (
+                        f"{log_message}"
+                        + (f"\n  was instead:\n    {content}" if not negation else "")
+                    ),
+                    "success" if negation else "failure",
                 )
         elif expectation == "equal":
+            log_message = (
+                f"expected message to {' not' if negation else ''}equal\n    {value}"
+            )
             if content == value:
                 log_expectation(
-                    f"expected message to equal\n    {value}",
-                    "success",
+                    f"{log_message}{'  \nbut it did' if negation else ''}",
+                    "success" if not negation else "failure",
                 )
             else:
                 log_expectation(
-                    f"expected message to equal\n    {value}\n  was instead:\n    {content}",
-                    "failure",
+                    (
+                        f"{log_message}"
+                        + (f"\n  was instead:\n    {content}" if not negation else "")
+                    ),
+                    "success" if negation else "failure",
                 )
 
         # TODO: be ephemeral
