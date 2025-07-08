@@ -52,6 +52,69 @@ CoroT = TypeVar(
 )
 
 
+async def give_manage_webhook_perms(
+    tester_bot: discord.Client,
+    testing_server: discord.Guild,
+):
+    """Give a bot Manage Webhook permissions in a server.
+
+    Parameters
+    ----------
+    tester_bot : :class:`~discord.Client`
+        The tester bot client.
+    testing_server : :class:`~discord.Guild`
+        The testing server from the perspective of the bridge bot client.
+    """
+    await _give_or_remove_manage_webhook_perms(tester_bot, testing_server, give=True)
+
+
+async def remove_manage_webhook_perms(
+    tester_bot: discord.Client,
+    testing_server: discord.Guild,
+):
+    """Remove Manage Webhook permissions from a bot in a server.
+
+    Parameters
+    ----------
+    tester_bot : :class:`~discord.Client`
+        The tester bot client.
+    testing_server : :class:`~discord.Guild`
+        The testing server from the perspective of the bridge bot client.
+    """
+    await _give_or_remove_manage_webhook_perms(tester_bot, testing_server, give=False)
+
+
+async def _give_or_remove_manage_webhook_perms(
+    tester_bot: discord.Client,
+    testing_server: discord.Guild,
+    *,
+    give: bool,
+):
+    """Gives the tester bot Manage Webhook permissions or take them away from it in the testing server.
+
+    Parameters
+    ----------
+    tester_bot : :class:`~discord.Client`
+        The tester bot client.
+    testing_server : :class:`~discord.Guild`
+        The testing server from the perspective of the bridge bot client.
+    give : bool
+        Whether to give or remove Manage Webhook permissions.
+    """
+    assert tester_bot.user
+    tester_bot_member = await globals.get_server_member(
+        testing_server,
+        tester_bot.user.id,
+    )
+
+    global webhook_permissions_role
+    if tester_bot_member and webhook_permissions_role:
+        if give and (webhook_permissions_role not in tester_bot_member.roles):
+            await tester_bot_member.add_roles(webhook_permissions_role)
+        elif not give and (webhook_permissions_role in tester_bot_member.roles):
+            await tester_bot_member.remove_roles(webhook_permissions_role)
+
+
 class TestRunner:
     """A class that runs all registered tests.
 
