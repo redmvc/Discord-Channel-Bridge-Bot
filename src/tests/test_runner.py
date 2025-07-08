@@ -360,22 +360,35 @@ async def expect(
 ) -> discord.Message | None: ...
 
 
+@overload
+async def expect(
+    obj: Literal["no_new_message"],
+    *,
+    in_channel: int | discord.TextChannel | discord.Thread,
+    to: None = None,
+    timeout: float = 10,
+    heartbeat: float = 0.5,
+) -> None: ...
+
+
 @beartype
 async def expect(
-    obj: Literal["next_message"] | discord.Message,
+    obj: Literal["next_message", "no_new_message"] | discord.Message,
     *,
     in_channel: int | discord.TextChannel | discord.Thread | None = None,
-    to: list[Expectation] | Expectation,
+    to: list[Expectation] | Expectation | None = None,
     timeout: float = 10,
     heartbeat: float = 0.5,
 ) -> discord.Message | None:
-    if not isinstance(to, list):
+    if to is None:
+        to = []
+    elif not isinstance(to, list):
         to = [to]
 
     if in_channel:
         in_channel = globals.get_id_from_channel(in_channel)
 
-    if obj == "next_message":
+    if obj in ("next_message", "no_new_message"):
         assert in_channel
 
         end_time = datetime.now() + timedelta(seconds=timeout)
@@ -385,8 +398,20 @@ async def expect(
             await asyncio.sleep(heartbeat)
 
         if not received_messages:
+            if obj == "next_message":
+                log_expectation(
+                    f"expecting next message in channel <#{in_channel}> timed out",
+                    "failure",
+                )
+            else:
+                log_expectation(
+                    f"expected no new messages in channel <#{in_channel}>",
+                    "success",
+                )
+            return None
+        elif obj == "no_new_message":
             log_expectation(
-                f"expecting next message in channel <#{in_channel}> timed out",
+                f"expected no new messages in channel <#{in_channel}> but received at least one message instead",
                 "failure",
             )
             return None
