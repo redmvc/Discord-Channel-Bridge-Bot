@@ -493,12 +493,19 @@ class TestRunner:
                     print(f"Starting test {test.__name__}.")
 
                     tester_bot.received_messages = defaultdict(lambda: [])
-                    await test(
-                        self.bridge_bot,
-                        self.tester_bot,
-                        testing_server,
-                        testing_channels,
-                    )
+                    try:
+                        await test(
+                            self.bridge_bot,
+                            self.tester_bot,
+                            testing_server,
+                            testing_channels,
+                        )
+                    except Exception as e:
+                        log_expectation(
+                            f"An error occurred while running the test: {e}",
+                            "failure",
+                        )
+                        continue
                     logger.info("")
                     print("")
                 logger.info("")
