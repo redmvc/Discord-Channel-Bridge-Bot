@@ -507,7 +507,6 @@ class TestRunner:
                             f"An error occurred while running the test: {e}",
                             "failure",
                         )
-                        continue
                     logger.info("")
                     print("")
                 logger.info("")
