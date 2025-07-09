@@ -794,13 +794,16 @@ async def expect(
         received_message = tester_bot.received_messages[in_channel].pop(0)
         if obj == "no_new_message":
             log_expectation(
-                f"expected no new messages in channel <#{in_channel}> but received at least one message instead",
+                f"expected no new messages in channel <#{in_channel}> but received at least one message instead: https://discord.com/channels/1/{in_channel}/{received_message.id}",
                 "failure",
             )
             return None
 
         obj = received_message
-        log_expectation(f"expected next message in channel <#{in_channel}>", "success")
+        log_expectation(
+            f"expected next message in channel <#{in_channel}>: https://discord.com/channels/1/{in_channel}/{received_message.id}",
+            "success",
+        )
     else:
         if in_channel:
             cast(ExistingMessageExpectation, to[0])["be_in_channel"] = in_channel
