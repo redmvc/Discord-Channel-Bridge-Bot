@@ -794,7 +794,7 @@ async def expect(
                 )
             return None
 
-        received_message = received_messages.pop(0)
+        received_message = tester_bot.received_messages[in_channel].pop(0)
         if obj == "no_new_message":
             log_expectation(
                 f"expected no new messages in channel <#{in_channel}> but received at least one message instead",
