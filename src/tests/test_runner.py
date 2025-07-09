@@ -229,6 +229,8 @@ class TestRunner:
                 for test in test_case.tests:
                     logger.info(f"Starting test {test.__name__}.")
                     print(f"Starting test {test.__name__}.")
+
+                    tester_bot.received_messages = {}
                     await test(
                         self.bridge_bot,
                         self.tester_bot,
