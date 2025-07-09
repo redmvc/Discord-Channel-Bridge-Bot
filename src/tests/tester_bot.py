@@ -216,16 +216,19 @@ class InteractionTester:
         self,
         message: discord.Message,
         tester_bot_user: discord.User | discord.Member,
+        *,
+        verbose: bool = True,
     ):
         self.id = 0
+        self.verbose = verbose
         self.user = tester_bot_user
         self.message = message
         self.channel = message.channel
         self.channel_id = message.channel.id
         self.guild = message.guild
-        self.response = InteractionResponseTester(self)
+        self.response = InteractionResponseTester(self, verbose)
         self.response_edits: list[discord.Message] = []
-        self.followup = WebhookTester(self)
+        self.followup = WebhookTester(self, verbose)
 
     async def edit_original_response(
         self,
@@ -237,7 +240,7 @@ class InteractionTester:
         view: Optional[discord.ui.View] = MISSING,
         allowed_mentions: Optional[discord.AllowedMentions] = None,
         poll: discord.Poll = MISSING,
-    ) -> discord.Message:
+    ) -> discord.Message | None:
         message_to_edit = (
             self.response_edits[-1]
             if self.response_edits
@@ -288,16 +291,18 @@ class InteractionTester:
             arguments["poll"] = poll
 
         # -----
-        reply = await message_to_edit.reply(content, **arguments)
-        self.response_edits.append(reply)
-        return reply
+        if self.verbose:
+            reply = await message_to_edit.reply(content, **arguments)
+            self.response_edits.append(reply)
+            return reply
 
 
 class InteractionResponseTester:
     """A class to fake Discord interaction responses for command testing."""
 
-    def __init__(self, interaction: InteractionTester):
+    def __init__(self, interaction: InteractionTester, verbose: bool = True):
         self.interaction = interaction
+        self.verbose = verbose
         self.message = None
         self.content = None
         self.args = None
@@ -319,7 +324,7 @@ class InteractionResponseTester:
         silent: bool = False,
         delete_after: Optional[float] = None,
         poll: discord.Poll = MISSING,
-    ) -> discord.Message:
+    ) -> discord.Message | None:
         logger.debug("Sending interaction response...")
         arguments = {}
 
@@ -376,10 +381,12 @@ class InteractionResponseTester:
         if poll is not MISSING:
             arguments["poll"] = poll
 
-        self.message = await self.interaction.message.reply(content, **arguments)
+        if self.verbose:
+            self.message = await self.interaction.message.reply(content, **arguments)
+            logger.debug("Sent.")
+
         self.content = content
         self.args = arguments
-        logger.debug("Sent.")
 
         return self.message
 
@@ -389,16 +396,20 @@ class InteractionResponseTester:
         ephemeral: bool = False,
         thinking: bool = False,
     ):
-        self.deferred_response = InteractionResponseTester(self.interaction)
-        await self.deferred_response.send_message(
-            f"Interaction was deferred with with thinking = {thinking}.",
-            ephemeral=ephemeral,
+        self.deferred_response = InteractionResponseTester(
+            self.interaction,
+            self.verbose,
         )
+        if self.verbose:
+            await self.deferred_response.send_message(
+                f"Interaction was deferred with with thinking = {thinking}.",
+                ephemeral=ephemeral,
+            )
 
 
 class WebhookTester(InteractionResponseTester):
-    def __init__(self, interaction: InteractionTester):
-        super().__init__(interaction)
+    def __init__(self, interaction: InteractionTester, verbose: bool = True):
+        super().__init__(interaction, verbose)
 
     async def send(
         self,
@@ -421,7 +432,7 @@ class WebhookTester(InteractionResponseTester):
         silent: bool = False,
         applied_tags: List[discord.ForumTag] = MISSING,
         poll: discord.Poll = MISSING,
-    ) -> discord.Message:
+    ) -> discord.Message | None:
         return await self.send_message(
             content,
             embed=embed,
@@ -441,6 +452,8 @@ class WebhookTester(InteractionResponseTester):
 async def process_tester_bot_command(
     message: discord.Message,
     tester_bot_user: discord.User,
+    *,
+    verbose: bool = True,
 ) -> bool:
     """Running unit tests and the tester bot sent a command. This function returns True if a command was found and processed and False otherwise.
 
@@ -448,6 +461,10 @@ async def process_tester_bot_command(
     ----------
     message : :class:`~discord.Message`
         The message the tester bot sent.
+    tester_bot_user : :class:`~discord.User`
+        The user object of the tester bot.
+    verbose : bool, optional
+        Whether the responses to the command should be sent to the relevant channels. Defaults to True.
 
     Returns
     -------
@@ -506,7 +523,7 @@ async def process_tester_bot_command(
         await command.callback(
             cast(
                 discord.interactions.Interaction,
-                InteractionTester(message, member),
+                InteractionTester(message, member, verbose=verbose),
             ),
             *args,  # type: ignore
         )
