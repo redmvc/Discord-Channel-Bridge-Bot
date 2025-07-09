@@ -1,4 +1,7 @@
 import asyncio
+import traceback
+from types import TracebackType
+from typing import Any
 
 import tester_bot
 from test_runner import test_runner
@@ -21,13 +24,22 @@ class Bots:
         await asyncio.gather(globals.wait_until_ready(), tester_bot.wait_until_ready())
         return self
 
-    async def __aexit__(self, exc_type, exc_value, traceback):
+    async def __aexit__(
+        self,
+        exc_type: type | None,
+        exc_value: Any | None,
+        tb: TracebackType | None,
+    ):
         await asyncio.gather(
             asyncio.create_task(self.bridge_bot_client.close()),
             self.running_bridge_bot_client_task,
             asyncio.create_task(self.tester_bot_client.close()),
             self.running_tester_bot_client_task,
         )
+
+        if exc_type:
+            traceback.print_tb(tb)
+            raise exc_type(exc_value)
 
         return True
 
