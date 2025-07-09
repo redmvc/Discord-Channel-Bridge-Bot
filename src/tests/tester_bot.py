@@ -214,21 +214,18 @@ class InteractionTester:
 
     def __init__(
         self,
-        message: discord.Message,
+        message: "discord.Message | FakeMessage",
         tester_bot_user: discord.User | discord.Member,
-        *,
-        verbose: bool = True,
     ):
         self.id = 0
-        self.verbose = verbose
         self.user = tester_bot_user
         self.message = message
         self.channel = message.channel
         self.channel_id = message.channel.id
         self.guild = message.guild
-        self.response = InteractionResponseTester(self, verbose)
-        self.response_edits: list[discord.Message] = []
-        self.followup = WebhookTester(self, verbose)
+        self.response = InteractionResponseTester(self)
+        self.response_edits: list["discord.Message | FakeMessage"] = []
+        self.followup = WebhookTester(self)
 
     async def edit_original_response(
         self,
@@ -240,7 +237,7 @@ class InteractionTester:
         view: Optional[discord.ui.View] = MISSING,
         allowed_mentions: Optional[discord.AllowedMentions] = None,
         poll: discord.Poll = MISSING,
-    ) -> discord.Message | None:
+    ) -> "discord.Message | FakeMessage | None":
         message_to_edit = (
             self.response_edits[-1]
             if self.response_edits
@@ -291,18 +288,16 @@ class InteractionTester:
             arguments["poll"] = poll
 
         # -----
-        if self.verbose:
-            reply = await message_to_edit.reply(content, **arguments)
-            self.response_edits.append(reply)
-            return reply
+        reply = await message_to_edit.reply(content, **arguments)
+        self.response_edits.append(reply)
+        return reply
 
 
 class InteractionResponseTester:
     """A class to fake Discord interaction responses for command testing."""
 
-    def __init__(self, interaction: InteractionTester, verbose: bool = True):
+    def __init__(self, interaction: InteractionTester):
         self.interaction = interaction
-        self.verbose = verbose
         self.message = None
         self.content = None
         self.args = None
@@ -324,7 +319,7 @@ class InteractionResponseTester:
         silent: bool = False,
         delete_after: Optional[float] = None,
         poll: discord.Poll = MISSING,
-    ) -> discord.Message | None:
+    ) -> "discord.Message | FakeMessage | None":
         logger.debug("Sending interaction response...")
         arguments = {}
 
@@ -381,9 +376,8 @@ class InteractionResponseTester:
         if poll is not MISSING:
             arguments["poll"] = poll
 
-        if self.verbose:
-            self.message = await self.interaction.message.reply(content, **arguments)
-            logger.debug("Sent.")
+        self.message = await self.interaction.message.reply(content, **arguments)
+        logger.debug("Sent.")
 
         self.content = content
         self.args = arguments
@@ -396,20 +390,16 @@ class InteractionResponseTester:
         ephemeral: bool = False,
         thinking: bool = False,
     ):
-        self.deferred_response = InteractionResponseTester(
-            self.interaction,
-            self.verbose,
+        self.deferred_response = InteractionResponseTester(self.interaction)
+        await self.deferred_response.send_message(
+            f"Interaction was deferred with with thinking = {thinking}.",
+            ephemeral=ephemeral,
         )
-        if self.verbose:
-            await self.deferred_response.send_message(
-                f"Interaction was deferred with with thinking = {thinking}.",
-                ephemeral=ephemeral,
-            )
 
 
 class WebhookTester(InteractionResponseTester):
-    def __init__(self, interaction: InteractionTester, verbose: bool = True):
-        super().__init__(interaction, verbose)
+    def __init__(self, interaction: InteractionTester):
+        super().__init__(interaction)
 
     async def send(
         self,
@@ -432,7 +422,7 @@ class WebhookTester(InteractionResponseTester):
         silent: bool = False,
         applied_tags: List[discord.ForumTag] = MISSING,
         poll: discord.Poll = MISSING,
-    ) -> discord.Message | None:
+    ) -> "discord.Message | FakeMessage | None":
         return await self.send_message(
             content,
             embed=embed,
@@ -449,11 +439,28 @@ class WebhookTester(InteractionResponseTester):
         )
 
 
+class FakeMessage:
+    """A class to fake messages sent by the client that shouldn't be expected."""
+
+    def __init__(self, content: str, channel: "discord.abc.MessageableChannel"):
+        self.content = content
+        self.channel = channel
+        self.guild = channel.guild
+
+    async def reply(self, *args, **kwargs) -> "FakeMessage":
+        return FakeMessage(
+            (
+                content_kw
+                if isinstance(content_kw := kwargs.get("content"), str)
+                else (args[0] if args and isinstance(args[0], str) else "")
+            ),
+            self.channel,
+        )
+
+
 async def process_tester_bot_command(
-    message: discord.Message,
+    message: discord.Message | FakeMessage,
     tester_bot_user: discord.User,
-    *,
-    verbose: bool = True,
 ) -> bool:
     """Running unit tests and the tester bot sent a command. This function returns True if a command was found and processed and False otherwise.
 
@@ -463,8 +470,6 @@ async def process_tester_bot_command(
         The message the tester bot sent.
     tester_bot_user : :class:`~discord.User`
         The user object of the tester bot.
-    verbose : bool, optional
-        Whether the responses to the command should be sent to the relevant channels. Defaults to True.
 
     Returns
     -------
@@ -501,10 +506,10 @@ async def process_tester_bot_command(
 
     # -----
     logger.debug("Fetching server member...")
-    if message.guild:
-        if not (member := message.guild.get_member(tester_bot_user.id)):
+    if message_guild := message.guild:
+        if not (member := message_guild.get_member(tester_bot_user.id)):
             try:
-                member = await message.guild.fetch_member(tester_bot_user.id)
+                member = await message_guild.fetch_member(tester_bot_user.id)
             except Exception:
                 member = tester_bot_user
 
@@ -523,7 +528,7 @@ async def process_tester_bot_command(
         await command.callback(
             cast(
                 discord.interactions.Interaction,
-                InteractionTester(message, member, verbose=verbose),
+                InteractionTester(message, member),
             ),
             *args,  # type: ignore
         )
