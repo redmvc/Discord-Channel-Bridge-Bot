@@ -438,10 +438,22 @@ class TestRunner:
             testing_server = bridge_bot_testing_server
             logger.debug("Fetched.")
 
+            # Register the test bot in globals
+            assert self.tester_bot.user
+            globals.test_app = await self.bridge_bot.fetch_user(self.tester_bot.user.id)
+
+            # Create a role in the testing server with the necessary permissions
+            global webhook_permissions_role
+            webhook_permissions_role = await testing_server.create_role(
+                name="webhook_permissions_role",
+                permissions=discord.Permissions(manage_webhooks=True),
+            )
+
             # Delete all channels in the server
             logger.info("Deleting server channels...")
             server_channels = await testing_server.fetch_channels()
             delete_channels: list[Coroutine[Any, Any, None]] = []
+            await give_manage_webhook_perms(self.tester_bot, testing_server)
             for channel in server_channels:
                 await demolish_bridges(channel.id, channel_and_threads=True)
                 delete_channels.append(channel.delete())
@@ -471,17 +483,6 @@ class TestRunner:
                     testing_channels,
                 )
             logger.info("Created.")
-
-            # Register the test bot in globals
-            assert self.tester_bot.user
-            globals.test_app = await self.bridge_bot.fetch_user(self.tester_bot.user.id)
-
-            # Create a role in the testing server with the necessary permissions
-            global webhook_permissions_role
-            webhook_permissions_role = await testing_server.create_role(
-                name="webhook_permissions_role",
-                permissions=discord.Permissions(manage_webhooks=True),
-            )
 
             # Run the tests
             logger.info("")
