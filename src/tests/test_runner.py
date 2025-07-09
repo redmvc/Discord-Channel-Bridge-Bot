@@ -372,7 +372,7 @@ class TestRunner:
 
     @beartype
     def __init__(self, bridge_bot: discord.Client, tester_bot: discord.Client):
-        self.test_cases: list["TestCase"] = []
+        self._test_cases: list["TestCase"] = []
         self.tester_bot = tester_bot
         self.bridge_bot = bridge_bot
 
@@ -384,11 +384,15 @@ class TestRunner:
         ----------
         test_case : :class:`TestCase`
         """
-        self.test_cases.append(test_case)
+        self._test_cases.append(test_case)
         logger.debug(
             "%s has successfully been registered as a test case.",
             type(test_case).__name__,
         )
+
+    @property
+    def test_cases(self) -> list["TestCase"]:
+        return self._test_cases
 
     @beartype
     async def run_tests(self, testing_server: discord.Guild):
@@ -504,7 +508,7 @@ class TestCase(ABC):
     @beartype
     def __init__(self, test_base: TestRunner):
         test_base.register_test_case(self)
-        self.tests: list[
+        self._tests: list[
             Callable[
                 [
                     discord.Client,
@@ -520,6 +524,27 @@ class TestCase(ABC):
                 Coroutine[Any, Any, None],
             ]
         ] = []
+
+    @property
+    def tests(
+        self,
+    ) -> list[
+        Callable[
+            [
+                discord.Client,
+                discord.Client,
+                discord.Guild,
+                tuple[
+                    discord.TextChannel,
+                    discord.TextChannel,
+                    discord.TextChannel,
+                    discord.TextChannel,
+                ],
+            ],
+            Coroutine[Any, Any, None],
+        ]
+    ]:
+        return self._tests
 
     @beartype
     def test(self, coro: CoroT) -> CoroT:
@@ -538,7 +563,7 @@ class TestCase(ABC):
             raise TypeError("Test registered must be a coroutine function.")
 
         setattr(self, coro.__name__, coro)
-        self.tests.append(coro)
+        self._tests.append(coro)
         logger.debug("%s has successfully been registered as a test.", coro.__name__)
         return coro
 
