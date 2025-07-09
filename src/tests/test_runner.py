@@ -655,8 +655,8 @@ async def expect(
     *,
     in_channel: int | discord.TextChannel | discord.Thread,
     to: list[MessageExpectation] | MessageExpectation,
-    timeout: float = 10,
-    heartbeat: float = 0.5,
+    timeout: float | int = 10,
+    heartbeat: float | int = 0.5,
 ) -> discord.Message | None:
     """Check that a message will arrive in `in_channel` within `timeout` seconds. If it does, also check that the given list of expectations is true of it, then return it.
 
@@ -667,9 +667,9 @@ async def expect(
         A channel in which a message should be expected, or ID of same.
     to : list[:class:`~MessageExpectation`] | :class:`~MessageExpectation`
         A list of things to expect of that message. The valid expectations are: "contain", "not_contain", "equal", "not_equal", "be_a_reply_to", "not_be_a_reply_to", "be_from", and "not_be_from".
-    timeout : float, optional
+    timeout : float | int, optional
         How long to wait, in seconds, for the message to arrive. If set to less than 1, will be set to 1. Defaults to 10.
-    heartbeat : float, optional
+    heartbeat : float | int, optional
         How long to wait, in seconds, between each check that the expected event occurred. If set to less than 0.5, will be set to 0.5; if set to a value greater than `timeout`, will be set to `timeout - 0.5`. Defaults to 0.5.
 
     Returns
@@ -708,8 +708,8 @@ async def expect(
     obj: Literal["no_new_message"],
     *,
     in_channel: int | discord.TextChannel | discord.Thread,
-    timeout: float = 10,
-    heartbeat: float = 0.5,
+    timeout: float | int = 10,
+    heartbeat: float | int = 0.5,
 ) -> None:
     """Check that no message will be sent in `in_channel` within the next `timeout` seconds.
 
@@ -718,9 +718,9 @@ async def expect(
     obj : Literal["no_new_message"]
     in_channel : int | :class:`~discord.TextChannel` | :class:`~discord.Thread`
         The channel in which that no new message should be sent, or ID of same.
-    timeout : float, optional
+    timeout : float | int, optional
         How long to wait, in seconds, before declaring that no message was sent in `in_channel`. If set to less than 1, will be set to 1. Defaults to 10.
-    heartbeat : float, optional
+    heartbeat : float | int, optional
         How long to wait, in seconds, between each check for new messages. If set to less than 0.5, will be set to 0.5; if set to a value greater than `timeout`, will be set to `timeout - 0.5`. Defaults to 0.5.
     """
     ...
@@ -732,8 +732,8 @@ async def expect(
     *,
     in_channel: int | discord.TextChannel | discord.Thread | None = None,
     to: Sequence[Expectation] | Expectation | None = None,
-    timeout: float = 10,
-    heartbeat: float = 0.5,
+    timeout: float | int = 10,
+    heartbeat: float | int = 0.5,
 ) -> discord.Message | None:
     """Check that a given list of expectations will be true of a certain object within `timeout` seconds.
 
@@ -745,17 +745,17 @@ async def expect(
         A channel in which that object should be expected, or ID of same. Defaults to None.
     to : Sequence[:class:`~Expectation`] | :class:`~Expectation` | None, optional
         A list of things to expect of that object. Defaults to None.
-    timeout : float, optional
+    timeout : float | int, optional
         How long to wait, in seconds, for the expected event to occur. If set to less than 1, will be set to 1. Defaults to 10.
-    heartbeat : float, optional
+    heartbeat : float | int, optional
         How long to wait, in seconds, between each check that the expected event occurred. If set to less than 0.5, will be set to 0.5; if set to a value greater than `timeout`, will be set to `timeout - 0.5`. Defaults to 0.5.
 
     Returns
     -------
     :class:`~discord.Message` | None
     """
-    timeout = max(timeout, 1)
-    heartbeat = min(max(heartbeat, 0.5), timeout - 0.5)
+    timeout = max(float(timeout), 1)
+    heartbeat = min(max(float(heartbeat), 0.5), timeout - 0.5)
 
     if to is None:
         to = []
