@@ -197,7 +197,7 @@ async def create_bridge(
 
     target_channel_id = globals.get_id_from_channel(target_channel)
 
-    command = f"/bridge {target_channel_id}{' ' + direction if direction else ''}"
+    command = f"/bridge {target_channel_id}{(' ' + direction) if direction else ''}"
     if send_message:
         return await source_channel.send(command)
 
@@ -762,9 +762,9 @@ async def expect(
         assert in_channel
 
         end_time = datetime.now() + timedelta(seconds=timeout)
-        while not (received_messages := tester_bot.received_messages[in_channel]) and (
-            datetime.now() <= end_time
-        ):
+        while (
+            not (received_messages := tester_bot.received_messages[in_channel])
+        ) and (datetime.now() <= end_time):
             await asyncio.sleep(heartbeat)
 
         if not received_messages:
@@ -779,14 +779,16 @@ async def expect(
                     "success",
                 )
             return None
-        elif obj == "no_new_message":
+
+        received_message = received_messages.pop(0)
+        if obj == "no_new_message":
             log_expectation(
                 f"expected no new messages in channel <#{in_channel}> but received at least one message instead",
                 "failure",
             )
             return None
 
-        obj = received_messages.pop(0)
+        obj = received_message
         log_expectation(f"expected next message in channel <#{in_channel}>", "success")
     else:
         if in_channel:
