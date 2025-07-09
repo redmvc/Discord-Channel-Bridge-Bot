@@ -443,6 +443,7 @@ class TestRunner:
             server_channels = await testing_server.fetch_channels()
             delete_channels: list[Coroutine[Any, Any, None]] = []
             for channel in server_channels:
+                await demolish_bridges(channel.id, channel_and_threads=True)
                 delete_channels.append(channel.delete())
             await asyncio.gather(*delete_channels)
             logger.info("Deleted.")
