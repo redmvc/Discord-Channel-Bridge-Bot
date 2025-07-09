@@ -467,7 +467,7 @@ async def process_tester_bot_command(
     Parameters
     ----------
     message : :class:`~discord.Message`
-        The message the tester bot sent.
+        The message the tester bot sent. Its content must start with a forward slash ("/").
     tester_bot_user : :class:`~discord.User`
         The user object of the tester bot.
 

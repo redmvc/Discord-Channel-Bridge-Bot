@@ -115,6 +115,252 @@ async def _give_or_remove_manage_webhook_perms(
             await tester_bot_member.remove_roles(webhook_permissions_role)
 
 
+@overload
+async def create_bridge(
+    source_channel: discord.TextChannel | discord.Thread | int,
+    target_channel: discord.TextChannel | discord.Thread | int,
+    *,
+    direction: Literal["inbound", "outbound"] | None = None,
+) -> None:
+    """Create a bridge between `source_channel` and `target_channel` without sending a message in `source_channel` to do so.
+
+    Parameters
+    ----------
+    source_channel : :class:`~discord.TextChannel` | :class:`~discord.Thread` | int
+        The channel from which to create a bridge, or ID of same.
+    target_channel : :class:`~discord.TextChannel` | :class:`~discord.Thread` | int
+        The channel to which to create a bridge, or ID of same.
+    direction : Literal["inbound", "outbound"] | None, optional
+        The direction of bridge to create. If set to "inbound", will create a bridge from `target_channel` to `source_channel`; if set to "outbound", will create a bridge from `source_channel` to `target_channel`; if set to None, will create both. Defaults to None.
+    """
+    ...
+
+
+@overload
+async def create_bridge(
+    source_channel: discord.TextChannel | discord.Thread | int,
+    target_channel: discord.TextChannel | discord.Thread | int,
+    *,
+    direction: Literal["inbound", "outbound"] | None = None,
+    send_message: Literal[True],
+) -> discord.Message:
+    """Send a message in `source_channel` to create a bridge between it and `target_channel`, then return that message.
+
+    Parameters
+    ----------
+    source_channel : :class:`~discord.TextChannel` | :class:`~discord.Thread` | int
+        The channel from which to create a bridge, or ID of same.
+    target_channel : :class:`~discord.TextChannel` | :class:`~discord.Thread` | int
+        The channel to which to create a bridge, or ID of same.
+    direction : Literal["inbound", "outbound"] | None, optional
+        The direction of bridge to create. If set to "inbound", will create a bridge from `target_channel` to `source_channel`; if set to "outbound", will create a bridge from `source_channel` to `target_channel`; if set to None, will create both. Defaults to None.
+
+    Returns
+    -------
+    :class:`~discord.Message`
+    """
+    ...
+
+
+@beartype
+async def create_bridge(
+    source_channel: discord.TextChannel | discord.Thread | int,
+    target_channel: discord.TextChannel | discord.Thread | int,
+    *,
+    direction: Literal["inbound", "outbound"] | None = None,
+    send_message: bool = False,
+) -> discord.Message | None:
+    """Create a bridge between `source_channel` and `target_channel` and, if a message was sent in `source_channel` to do so, return it.
+
+    Parameters
+    ----------
+    source_channel : :class:`~discord.TextChannel` | :class:`~discord.Thread` | int
+        The channel from which to create a bridge, or ID of same.
+    target_channel : :class:`~discord.TextChannel` | :class:`~discord.Thread` | int
+        The channel to which to create a bridge, or ID of same.
+    direction : Literal["inbound", "outbound"] | None, optional
+        The direction of bridge to create. If set to "inbound", will create a bridge from `target_channel` to `source_channel`; if set to "outbound", will create a bridge from `source_channel` to `target_channel`; if set to None, will create both. Defaults to None.
+    send_message : bool, optional
+        Whether to send an actual message in `source_channel` instead of faking it. Defaults to False.
+
+    Returns
+    -------
+    :class:`~discord.Message` | None
+    """
+    source_channel = await globals.get_channel_from_id(
+        source_channel,
+        ensure_text_or_thread=True,
+        bot_client=tester_bot.client,
+    )
+
+    target_channel_id = globals.get_id_from_channel(target_channel)
+
+    command = f"/bridge {target_channel_id}{' ' + direction if direction else ''}"
+    if send_message:
+        return await source_channel.send(command)
+
+    message = tester_bot.FakeMessage(command, source_channel)
+    assert globals.test_app
+    await tester_bot.process_tester_bot_command(message, globals.test_app)
+    return None
+
+
+@overload
+async def demolish_bridges(
+    source_channel: discord.TextChannel | discord.Thread | int,
+) -> None:
+    """Demolish all bridges to and from `source_channel` without sending a message in `source_channel` to do so..
+
+    Parameters
+    ----------
+    source_channel : :class:`~discord.TextChannel` | :class:`~discord.Thread` | int
+        The channel to and from which to demolish bridges, or ID of same.
+    """
+    ...
+
+
+@overload
+async def demolish_bridges(
+    source_channel: discord.TextChannel | discord.Thread | int,
+    *,
+    send_message: Literal[True],
+) -> discord.Message:
+    """Send a message in `source_channel` to demolish all bridges to and from it, then return that message.
+
+    Parameters
+    ----------
+    source_channel : :class:`~discord.TextChannel` | :class:`~discord.Thread` | int
+        The channel to and from which to demolish bridges, or ID of same.
+
+    Returns
+    -------
+    :class:`~discord.Message`
+    """
+    ...
+
+
+@overload
+async def demolish_bridges(
+    source_channel: discord.TextChannel | discord.Thread | int,
+    *,
+    channel_and_threads: Literal[True],
+) -> None:
+    """Demolish all bridges to and from `source_channel`, as well as those to and from its threads (if it's a text channel) or to and from its parent channel and its parent channel's threads (if it's a thread), without sending a message in `source_channel` to do so.
+
+    Parameters
+    ----------
+    source_channel : :class:`~discord.TextChannel` | :class:`~discord.Thread` | int
+        The channel to and from which to demolish bridges, or ID of same.
+    """
+    ...
+
+
+@overload
+async def demolish_bridges(
+    source_channel: discord.TextChannel | discord.Thread | int,
+    *,
+    channel_and_threads: Literal[True],
+    send_message: Literal[True],
+) -> discord.Message:
+    """Send a message in `source_channel` to demolish all bridges to and from it, as well as those to and from its threads (if it's a text channel) or to and from its parent channel and its parent channel's threads (if it's a thread), then return that message.
+
+    Parameters
+    ----------
+    source_channel : :class:`~discord.TextChannel` | :class:`~discord.Thread` | int
+        The channel to and from which to demolish bridges, or ID of same.
+
+    Returns
+    -------
+    :class:`~discord.Message`
+    """
+    ...
+
+
+@overload
+async def demolish_bridges(
+    source_channel: discord.TextChannel | discord.Thread | int,
+    target_channel: discord.TextChannel | discord.Thread | int,
+) -> None:
+    """Demolish the bridge between `source_channel` and `target_channel` without sending a message in `source_channel` to do so.
+
+    Parameters
+    ----------
+    source_channel : :class:`~discord.TextChannel` | :class:`~discord.Thread` | int
+        One of the channels to and from which to demolish bridges, or ID of same.
+    target_channel : :class:`~discord.TextChannel` | :class:`~discord.Thread` | int
+        The other channel to and from which to demolish bridges, or ID of same.
+    """
+    ...
+
+
+@overload
+async def demolish_bridges(
+    source_channel: discord.TextChannel | discord.Thread | int,
+    target_channel: discord.TextChannel | discord.Thread | int,
+    *,
+    send_message: Literal[True],
+) -> discord.Message:
+    """Send a message in `source_channel` to demolish the bridge between it and `target_channel`, then return that message.
+
+    Parameters
+    ----------
+    source_channel : :class:`~discord.TextChannel` | :class:`~discord.Thread` | int
+        One of the channels to and from which to demolish bridges, or ID of same.
+    target_channel : :class:`~discord.TextChannel` | :class:`~discord.Thread` | int
+        The other channel to and from which to demolish bridges, or ID of same.
+
+    Returns
+    -------
+    :class:`~discord.Message`
+    """
+    ...
+
+
+@beartype
+async def demolish_bridges(
+    source_channel: discord.TextChannel | discord.Thread | int,
+    target_channel: discord.TextChannel | discord.Thread | int | None = None,
+    *,
+    channel_and_threads: bool = False,
+    send_message: bool = False,
+) -> discord.Message | None:
+    """Demolish bridges to and from `source_channel` and, if a message was sent in `source_channel` to do so, return it.
+
+    Parameters
+    ----------
+    source_channel : :class:`~discord.TextChannel` | :class:`~discord.Thread` | int
+        The channel to and from which to demolish bridges, or ID of same.
+    target_channel : :class:`~discord.TextChannel` | :class:`~discord.Thread` | int | None, optional
+        If this argument is provided, only bridges between it and `source_channel` will be destroyed. Defaults to None, in which case all bridges to and from `source_channel` will be demolished.
+    channel_and_threads : bool, optional
+        Whether to demolish all bridges, including those of the parent channel and/or channel threads. Only used if `target_channel` is None. Defaults to False.
+    send_message : bool, optional
+        Whether to send an actual message in `source_channel` instead of faking it. Defaults to False.
+
+    Returns
+    -------
+    :class:`~discord.Message` | None
+    """
+    source_channel = await globals.get_channel_from_id(
+        source_channel,
+        ensure_text_or_thread=True,
+        bot_client=tester_bot.client,
+    )
+    if target_channel:
+        target_channel_id = globals.get_id_from_channel(target_channel)
+        command = f"/demolish {target_channel_id}"
+    else:
+        command = f"/demolish_all{' True' if channel_and_threads else ''}"
+
+    if send_message:
+        return await source_channel.send(command)
+
+    message = tester_bot.FakeMessage(command, source_channel)
+    assert globals.test_app
+    await tester_bot.process_tester_bot_command(message, globals.test_app)
+    return None
+
+
 class TestRunner:
     """A class that runs all registered tests.
 
