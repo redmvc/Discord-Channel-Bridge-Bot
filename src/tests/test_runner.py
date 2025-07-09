@@ -9,6 +9,7 @@ from typing import (
     Callable,
     Coroutine,
     Literal,
+    Sequence,
     TypedDict,
     TypeVar,
     cast,
@@ -372,6 +373,15 @@ class TestRunner:
 
     @beartype
     def __init__(self, bridge_bot: discord.Client, tester_bot: discord.Client):
+        """Create a class to run all registered tests.
+
+        Parameters
+        ----------
+        bridge_bot : :class:`~discord.Client`
+            The Bridge Bot's client.
+        tester_bot : :class:`~discord.Client`
+            The Tester Bot's client.
+        """
         self._test_cases: list["TestCase"] = []
         self.tester_bot = tester_bot
         self.bridge_bot = bridge_bot
@@ -382,7 +392,7 @@ class TestRunner:
 
         Parameters
         ----------
-        test_case : :class:`TestCase`
+        test_case : :class:`~TestCase`
         """
         self._test_cases.append(test_case)
         logger.debug(
@@ -392,6 +402,7 @@ class TestRunner:
 
     @property
     def test_cases(self) -> list["TestCase"]:
+        """The test cases registered to this object."""
         return self._test_cases
 
     @beartype
@@ -506,8 +517,15 @@ class TestCase(ABC):
     """
 
     @beartype
-    def __init__(self, test_base: TestRunner):
-        test_base.register_test_case(self)
+    def __init__(self, test_runner: TestRunner):
+        """Initialise a test case.
+
+        Parameters
+        ----------
+        test_runner : :class:`~TestRunner`
+            The test runner object to register this test case to.
+        """
+        test_runner.register_test_case(self)
         self._tests: list[
             Callable[
                 [
@@ -544,6 +562,7 @@ class TestCase(ABC):
             Coroutine[Any, Any, None],
         ]
     ]:
+        """The tests registered to this object."""
         return self._tests
 
     @beartype
@@ -553,7 +572,11 @@ class TestCase(ABC):
         Parameters
         ----------
         coro : (:class:`~discord.Client`, :class:`~discord.Client`, :class:`~discord.Guild`, tuple[:class:`~discord.TextChannel`, :class:`~discord.TextChannel`, :class:`~discord.TextChannel`, :class:`~discord.TextChannel`]) -> Coroutine[Any, Any, None]
-            The test function to run. Must be a coroutine whose arguments are, respectively: the Bridge Bot client, the Tester Bot client, the Discord server for testing as seen by the Bridge Bot, and a tuple with four Discord text channels in that server as seen by the Tester Bot.
+            The test function to run. Must be a coroutine that doesn't return anything whose arguments are, respectively:
+            - the Bridge Bot client;
+            - the Tester Bot client;
+            - the Discord server for testing as seen by the Bridge Bot;
+            - and a tuple with four Discord text channels in that server as seen by the Tester Bot.
 
         Returns
         -------
@@ -600,6 +623,10 @@ def log_expectation(
 
 
 class Expectation(TypedDict, total=False):
+    pass
+
+
+class MessageExpectation(Expectation, total=False):
     contain: "NotRequired[str]"
     not_contain: "NotRequired[str]"
     equal: "NotRequired[str]"
@@ -608,6 +635,9 @@ class Expectation(TypedDict, total=False):
     not_be_a_reply_to: "NotRequired[discord.Message]"
     be_from: "NotRequired[int | discord.User | discord.Member | discord.Client]"
     not_be_from: "NotRequired[int | discord.User | discord.Member | discord.Client]"
+
+
+class ExistingMessageExpectation(MessageExpectation, total=False):
     be_in_channel: "NotRequired[int | discord.TextChannel | discord.Thread]"
 
 
@@ -616,10 +646,29 @@ async def expect(
     obj: Literal["next_message"],
     *,
     in_channel: int | discord.TextChannel | discord.Thread,
-    to: list[Expectation] | Expectation,
+    to: list[MessageExpectation] | MessageExpectation,
     timeout: float = 10,
     heartbeat: float = 0.5,
-) -> discord.Message | None: ...
+) -> discord.Message | None:
+    """Check that a message will arrive in `in_channel` within `timeout` seconds. If it does, also check that the given list of expectations is true of it, then return it.
+
+    Parameters
+    ----------
+    obj : Literal["next_message"]
+    in_channel : int | :class:`~discord.TextChannel` | :class:`~discord.Thread`
+        A channel in which a message should be expected, or ID of same.
+    to : list[:class:`~MessageExpectation`] | :class:`~MessageExpectation`
+        A list of things to expect of that message. The valid expectations are: "contain", "not_contain", "equal", "not_equal", "be_a_reply_to", "not_be_a_reply_to", "be_from", and "not_be_from".
+    timeout : float, optional
+        How long to wait, in seconds, for the message to arrive. If set to less than 1, will be set to 1. Defaults to 10.
+    heartbeat : float, optional
+        How long to wait, in seconds, between each check that the expected event occurred. If set to less than 0.5, will be set to 0.5; if set to a value greater than `timeout`, will be set to `timeout - 0.5`. Defaults to 0.5.
+
+    Returns
+    -------
+    :class:`~discord.Message` | None
+    """
+    ...
 
 
 @overload
@@ -627,10 +676,23 @@ async def expect(
     obj: discord.Message,
     *,
     in_channel: int | discord.TextChannel | discord.Thread | None = None,
-    to: list[Expectation] | Expectation,
-    timeout: float = 10,
-    heartbeat: float = 0.5,
-) -> discord.Message | None: ...
+    to: list[ExistingMessageExpectation] | ExistingMessageExpectation,
+) -> discord.Message:
+    """Check that a given list of expectations is true of a message, then return it.
+
+    Parameters
+    ----------
+    obj : :class:`~discord.Message`
+    in_channel : int | :class:`~discord.TextChannel` | :class:`~discord.Thread` | None, optional
+        A channel in which the message should be expected. Equivalent to setting the "be_in_channel" expectation in `to`.
+    to : list[:class:`~MessageExpectation`] | :class:`~MessageExpectation`
+        A list of things to expect of that message. The valid expectations are: "contain", "not_contain", "equal", "not_equal", "be_a_reply_to", "not_be_a_reply_to", "be_from", "not_be_from", and "be_in_channel".
+
+    Returns
+    -------
+    :class:`~discord.Message`
+    """
+    ...
 
 
 @overload
@@ -638,10 +700,22 @@ async def expect(
     obj: Literal["no_new_message"],
     *,
     in_channel: int | discord.TextChannel | discord.Thread,
-    to: None = None,
     timeout: float = 10,
     heartbeat: float = 0.5,
-) -> None: ...
+) -> None:
+    """Check that no message will be sent in `in_channel` within the next `timeout` seconds.
+
+    Parameters
+    ----------
+    obj : Literal["no_new_message"]
+    in_channel : int | :class:`~discord.TextChannel` | :class:`~discord.Thread`
+        The channel in which that no new message should be sent, or ID of same.
+    timeout : float, optional
+        How long to wait, in seconds, before declaring that no message was sent in `in_channel`. If set to less than 1, will be set to 1. Defaults to 10.
+    heartbeat : float, optional
+        How long to wait, in seconds, between each check for new messages. If set to less than 0.5, will be set to 0.5; if set to a value greater than `timeout`, will be set to `timeout - 0.5`. Defaults to 0.5.
+    """
+    ...
 
 
 @beartype
@@ -649,16 +723,35 @@ async def expect(
     obj: Literal["next_message", "no_new_message"] | discord.Message,
     *,
     in_channel: int | discord.TextChannel | discord.Thread | None = None,
-    to: list[Expectation] | Expectation | None = None,
+    to: Sequence[Expectation] | Expectation | None = None,
     timeout: float = 10,
     heartbeat: float = 0.5,
 ) -> discord.Message | None:
+    """Check that a given list of expectations will be true of a certain object within `timeout` seconds.
+
+    Parameters
+    ----------
+    obj : Literal["next_message", "no_new_message"] | :class:`~discord.Message`
+        The object of which to expect things.
+    in_channel : int | :class:`~discord.TextChannel` | :class:`~discord.Thread` | None, optional
+        A channel in which that object should be expected, or ID of same. Defaults to None.
+    to : Sequence[:class:`~Expectation`] | :class:`~Expectation` | None, optional
+        A list of things to expect of that object. Defaults to None.
+    timeout : float, optional
+        How long to wait, in seconds, for the expected event to occur. If set to less than 1, will be set to 1. Defaults to 10.
+    heartbeat : float, optional
+        How long to wait, in seconds, between each check that the expected event occurred. If set to less than 0.5, will be set to 0.5; if set to a value greater than `timeout`, will be set to `timeout - 0.5`. Defaults to 0.5.
+
+    Returns
+    -------
+    :class:`~discord.Message` | None
+    """
     timeout = max(timeout, 1)
     heartbeat = min(max(heartbeat, 0.5), timeout - 0.5)
 
     if to is None:
         to = []
-    elif not isinstance(to, list):
+    elif not isinstance(to, Sequence):
         to = [to]
 
     if in_channel:
@@ -696,7 +789,7 @@ async def expect(
         log_expectation(f"expected next message in channel <#{in_channel}>", "success")
     else:
         if in_channel:
-            to[0]["be_in_channel"] = in_channel
+            cast(ExistingMessageExpectation, to[0])["be_in_channel"] = in_channel
 
     content = obj.content
     expectations = [(e, v) for exp in to for e, v in exp.items()]
