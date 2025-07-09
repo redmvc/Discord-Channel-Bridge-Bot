@@ -203,7 +203,8 @@ async def create_bridge(
 
     message = tester_bot.FakeMessage(command, source_channel)
     assert globals.test_app
-    await tester_bot.process_tester_bot_command(message, globals.test_app)
+    if not await tester_bot.process_tester_bot_command(message, globals.test_app):
+        raise Exception(f"{command} command failed to be executed")
     return None
 
 
@@ -359,7 +360,8 @@ async def demolish_bridges(
 
     message = tester_bot.FakeMessage(command, source_channel)
     assert globals.test_app
-    await tester_bot.process_tester_bot_command(message, globals.test_app)
+    if not await tester_bot.process_tester_bot_command(message, globals.test_app):
+        raise Exception(f"{command} command failed to be executed")
     return None
 
 
