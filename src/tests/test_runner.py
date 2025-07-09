@@ -1,6 +1,7 @@
 import asyncio
 import sys
 from abc import ABC
+from collections import defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import (
@@ -491,7 +492,7 @@ class TestRunner:
                     logger.info(f"Starting test {test.__name__}.")
                     print(f"Starting test {test.__name__}.")
 
-                    tester_bot.received_messages = {}
+                    tester_bot.received_messages = defaultdict(lambda: [])
                     await test(
                         self.bridge_bot,
                         self.tester_bot,
