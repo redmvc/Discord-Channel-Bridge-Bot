@@ -653,6 +653,9 @@ async def expect(
     timeout: float = 10,
     heartbeat: float = 0.5,
 ) -> discord.Message | None:
+    timeout = max(timeout, 1)
+    heartbeat = min(max(heartbeat, 0.5), timeout - 0.5)
+
     if to is None:
         to = []
     elif not isinstance(to, list):
