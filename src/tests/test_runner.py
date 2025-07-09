@@ -512,12 +512,8 @@ class TestRunner:
                 logger.info("")
                 print("")
 
-            await asyncio.gather(
-                *[
-                    demolish_bridges(ch, channel_and_threads=True)
-                    for ch in testing_channels
-                ]
-            )
+            for ch in testing_channels:
+                await demolish_bridges(ch, channel_and_threads=True)
             if webhook_permissions_role:
                 await webhook_permissions_role.delete()
 
