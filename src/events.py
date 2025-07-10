@@ -1759,7 +1759,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
     if not await globals.wait_until_ready():
         return
 
-    if not globals.client.user or payload.user_id == globals.client.user.id:
+    if globals.client.user and (payload.user_id == globals.client.user.id):
         # Don't bridge my own reaction
         return
 
