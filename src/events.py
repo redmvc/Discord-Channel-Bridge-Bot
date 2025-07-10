@@ -304,25 +304,23 @@ async def on_message(message: discord.Message):
     lock = asyncio.Lock()
     globals.message_lock[message_id] = lock
     async with lock:
-        if not isinstance(message.channel, (discord.TextChannel, discord.Thread)):
-            del globals.message_lock[message_id]
-            return
-
-        if message.type not in {discord.MessageType.default, discord.MessageType.reply}:
-            # Only bridge contentful messages
-            del globals.message_lock[message_id]
-            return
+        # I'll define each validity check for ease of reading
+        invalid_channel_type = not isinstance(
+            message.channel,
+            (discord.TextChannel, discord.Thread),
+        )
+        invalid_message_type = message.type not in {
+            discord.MessageType.default,
+            discord.MessageType.reply,
+        }
 
         author_id = message.author.id
         application_id = message.application_id
-        if (author_id == globals.client.application_id) or (
-            application_id and (application_id == globals.client.application_id)
-        ):
-            # Don't bridge messages from self
-            del globals.message_lock[message_id]
-            return
-
-        if application_id and (
+        client_application_id = globals.client.application_id
+        message_from_self = (author_id == client_application_id) or (
+            application_id and (application_id == client_application_id)
+        )
+        message_from_non_whitelisted_app = application_id and (
             (
                 not (
                     local_whitelist := globals.per_channel_whitelist.get(
@@ -335,20 +333,23 @@ async def on_message(message: discord.Message):
                 not (global_whitelist := globals.settings.get("whitelisted_apps"))
                 or application_id not in [int(app_id) for app_id in global_whitelist]
             )
-        ):
-            # Don't bridge messages from non-whitelisted applications
-            del globals.message_lock[message_id]
-            return
+        )
 
-        if not await globals.wait_until_ready():
+        if (
+            invalid_channel_type
+            or invalid_message_type
+            or message_from_self
+            or message_from_non_whitelisted_app
+            or (not await globals.wait_until_ready())
+        ):
             del globals.message_lock[message_id]
             return
 
         if (
-            globals.test_app
+            (test_app := globals.test_app)
             and (
-                (globals.test_app.id == application_id)
-                or (globals.test_app.id == author_id)
+                ((test_app_id := test_app.id) == application_id)
+                or (test_app_id == author_id)
             )
             and message.content.strip().startswith("/")
         ):
@@ -1089,19 +1090,16 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
         globals.message_lock[message_id] = lock
 
     async with lock:
-        if not globals.message_lock.get(message_id):
-            # Message has been deleted before the edit receipt somehow
-            return
-
-        if not (updated_message_content := payload.data.get("content")):
-            # Not a content edit
-            return
-
-        if not await globals.wait_until_ready():
-            return
+        message_was_deleted = not globals.message_lock.get(message_id)
+        contentless_edit = not (updated_message_content := payload.data.get("content"))
 
         channel_id = payload.channel_id
-        if not bridges.get_outbound_bridges(channel_id):
+        if (
+            message_was_deleted
+            or contentless_edit
+            or (not await globals.wait_until_ready())
+            or (not bridges.get_outbound_bridges(channel_id))
+        ):
             return
 
         await edit_message_helper(
@@ -1570,15 +1568,14 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
         globals.message_lock[message_id] = lock
 
     async with lock:
-        if not globals.message_lock.get(message_id):
-            # Message has been deleted already (two deletion receipts?)
-            return
-
-        if not await globals.wait_until_ready():
-            return
+        message_was_deleted = not globals.message_lock.get(message_id)
 
         channel_id = payload.channel_id
-        if not bridges.get_outbound_bridges(channel_id):
+        if (
+            message_was_deleted
+            or (not await globals.wait_until_ready())
+            or (not bridges.get_outbound_bridges(channel_id))
+        ):
             return
 
         await delete_message_helper(message_id, channel_id)
@@ -1777,16 +1774,16 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
     :class:`~discord.ServerTimeoutError`
         Connection to server timed out.
     """
-    if not await globals.wait_until_ready():
-        return
-
-    if not globals.client.user or payload.user_id == globals.client.user.id:
-        # Don't bridge my own reaction
-        return
+    own_reaction = (client_user := globals.client.user) and (
+        payload.user_id == client_user.id
+    )
 
     channel_id = payload.channel_id
-    if not bridges.get_outbound_bridges(channel_id):
-        # Only bridge reactions across outbound bridges
+    if (
+        (not await globals.wait_until_ready())
+        or own_reaction
+        or (not bridges.get_outbound_bridges(channel_id))
+    ):
         return
 
     await bridge_reaction_add(
@@ -2130,18 +2127,16 @@ async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
     payload : :class:`~discord.RawReactionActionEvent`
         The raw event payload data.
     """
-    if not await globals.wait_until_ready():
-        return
+    client_user_id = 0
+    own_reaction = (client_user := globals.client.user) and (
+        (client_user_id := client_user.id) == payload.user_id
+    )
 
-    if not globals.client.user:
-        return
-
-    if (client_user_id := globals.client.user.id) == payload.user_id:
-        # Don't bridge my own reactions
-        return
-
-    if not bridges.get_outbound_bridges(channel_id := payload.channel_id):
-        # Only remove reactions across outbound bridges
+    if (
+        (not await globals.wait_until_ready())
+        or own_reaction
+        or (not bridges.get_outbound_bridges(channel_id := payload.channel_id))
+    ):
         return
 
     try:
@@ -2217,11 +2212,9 @@ async def on_raw_reaction_clear_emoji(payload: discord.RawReactionClearEmojiEven
     payload : :class:`~discord.RawReactionClearEmojiEvent`
         The raw event payload data.
     """
-    if not await globals.wait_until_ready():
-        return
-
-    if not bridges.get_outbound_bridges(payload.channel_id):
-        # Only remove reactions across outbound bridges
+    if (not await globals.wait_until_ready()) or (
+        not bridges.get_outbound_bridges(payload.channel_id)
+    ):
         return
 
     await bridge_reaction_clear_emoji(
@@ -2268,11 +2261,9 @@ async def on_raw_reaction_clear(payload: discord.RawReactionClearEvent):
     payload : :class:`~discord.RawReactionClearEvent`
         The raw event payload data.
     """
-    if not await globals.wait_until_ready():
-        return
-
-    if not bridges.get_outbound_bridges(payload.channel_id):
-        # Only remove reactions across outbound bridges
+    if (not await globals.wait_until_ready()) or (
+        not bridges.get_outbound_bridges(payload.channel_id)
+    ):
         return
 
     message_id = payload.message_id
@@ -2511,7 +2502,28 @@ async def on_thread_create(thread: discord.Thread):
         The thread that was created.
     """
     # Bridge a thread from a channel that has auto_bridge_threads enabled
-    if not isinstance(thread.parent, discord.TextChannel):
+    if not await globals.wait_until_ready():
+        return
+    assert (bot_user := globals.client.user)
+
+    parent_channel = thread.parent
+    thread_is_not_off_text_channel = not isinstance(parent_channel, discord.TextChannel)
+    parent_not_in_auto_bridge = parent_channel and (
+        parent_channel.id not in globals.auto_bridge_thread_channels
+    )
+
+    thread_created_by_self = thread.owner_id and (thread.owner_id == bot_user.id)
+
+    no_manage_webhook_permissions = not thread.permissions_for(
+        thread.guild.me
+    ).manage_webhooks
+
+    if (
+        thread_is_not_off_text_channel
+        or parent_not_in_auto_bridge
+        or thread_created_by_self
+        or no_manage_webhook_permissions
+    ):
         return
 
     try:
@@ -2519,20 +2531,6 @@ async def on_thread_create(thread: discord.Thread):
     except Exception as e:
         logger.error("An error occurred while trying to join a thread: %s", e)
         raise
-
-    if not await globals.wait_until_ready():
-        return
-
-    parent_channel = thread.parent
-    if parent_channel.id not in globals.auto_bridge_thread_channels:
-        return
-
-    assert globals.client.user
-    if thread.owner_id and thread.owner_id == globals.client.user.id:
-        return
-
-    if not thread.permissions_for(thread.guild.me).manage_webhooks:
-        return
 
     await auto_bridge_thread(thread)
 
