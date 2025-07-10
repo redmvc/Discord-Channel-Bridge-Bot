@@ -322,16 +322,18 @@ async def on_message(message: discord.Message):
         )
         message_from_non_whitelisted_app = application_id and (
             (
-                not (
-                    local_whitelist := globals.per_channel_whitelist.get(
-                        message.channel.id
+                (
+                    not (
+                        local_whitelist := globals.per_channel_whitelist.get(
+                            message.channel.id
+                        )
                     )
                 )
-                or application_id not in local_whitelist
+                or (application_id not in local_whitelist)
             )
             and (
-                not (global_whitelist := globals.settings.get("whitelisted_apps"))
-                or application_id not in [int(app_id) for app_id in global_whitelist]
+                (not (global_whitelist := globals.settings.get("whitelisted_apps")))
+                or (application_id not in global_whitelist)
             )
         )
 
