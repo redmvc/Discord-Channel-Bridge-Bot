@@ -73,6 +73,8 @@ settings_root: "dict[str, str | Settings]" = json.load(open("settings.json"))
 assert isinstance(settings_root["context"], str)
 context = settings_root["context"]
 settings: "Settings" = cast("Settings", settings_root[context])
+if whitelisted_apps := settings.get("whitelisted_apps"):
+    settings["whitelisted_apps"] = [int(app_id) for app_id in whitelisted_apps]
 
 # Variables for connection to the Discord client
 client = discord.Client(
