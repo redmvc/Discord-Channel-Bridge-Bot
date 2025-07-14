@@ -115,7 +115,7 @@ async def creating_two_way_bridges_works(
         discord.TextChannel,
         discord.TextChannel,
     ],
-):
+) -> list[str]:
     await give_manage_webhook_perms(tester_bot, testing_server)
 
     channel_1 = testing_channels[0]

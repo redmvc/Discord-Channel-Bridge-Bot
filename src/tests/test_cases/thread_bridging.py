@@ -34,7 +34,7 @@ async def creating_bridge_between_threads_works(
         discord.TextChannel,
         discord.TextChannel,
     ],
-):
+) -> list[str]:
     await give_manage_webhook_perms(tester_bot, testing_server)
 
     channel_1 = testing_channels[0]
@@ -103,7 +103,7 @@ async def creating_bridge_from_thread_to_channel_works(
         discord.TextChannel,
         discord.TextChannel,
     ],
-):
+) -> list[str]:
     await give_manage_webhook_perms(tester_bot, testing_server)
 
     channel_1 = testing_channels[0]
