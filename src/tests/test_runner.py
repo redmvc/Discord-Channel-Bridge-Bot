@@ -809,6 +809,7 @@ async def expect(
                 f"expected no new messages in channel <#{in_channel}> but received at least one message instead: https://discord.com/channels/1/{in_channel}/{received_message.id}",
                 "failure",
             )
+            tester_bot.received_messages[in_channel] = []
             return None
 
         obj = received_message
