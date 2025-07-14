@@ -717,15 +717,42 @@ async def expect(
     ...
 
 
-@beartype
+@overload
 async def expect(
-    obj: Literal["next_message", "no_new_message"] | discord.Message,
+    obj: Literal["thread"],
     *,
-    in_channel: int | discord.TextChannel | discord.Thread | None = None,
-    to: Sequence[Expectation] | Expectation | None = None,
+    in_channel: int | discord.TextChannel,
+    with_name: str,
+    to: Literal["exist"],
     timeout: float | int = 10,
     heartbeat: float | int = 0.5,
-) -> tuple[discord.Message | None, list[str]]:
+) -> tuple[discord.Thread | None, list[str]]: ...
+
+
+@overload
+async def expect(
+    obj: Literal["thread"],
+    *,
+    in_channel: int | discord.TextChannel,
+    with_name: str,
+    to: Literal["not_exist"],
+    timeout: float | int = 10,
+    heartbeat: float | int = 0.5,
+) -> tuple[None, list[str]]: ...
+
+
+@beartype
+async def expect(
+    obj: Literal["next_message", "no_new_message", "thread"] | discord.Message,
+    *,
+    in_channel: int | discord.TextChannel | discord.Thread | None = None,
+    with_name: str | None = None,
+    to: (
+        Sequence[Expectation] | Expectation | Literal["exist", "not_exist"] | None
+    ) = None,
+    timeout: float | int = 10,
+    heartbeat: float | int = 0.5,
+) -> tuple[discord.Message | discord.Thread | None, list[str]]:
     """Check that a given list of expectations will be true of a certain object within `timeout` seconds, then return a tuple whose first element is the object (if it exists) and whose second element is the list of all failing tests.
 
     Parameters
@@ -734,7 +761,9 @@ async def expect(
         The object of which to expect things.
     in_channel : int | :class:`~discord.TextChannel` | :class:`~discord.Thread` | None, optional
         A channel in which that object should be expected, or ID of same. Defaults to None.
-    to : Sequence[:class:`~Expectation`] | :class:`~Expectation` | None, optional
+    with_name : str | None, optional
+        The name the object should have. Defaults to None.
+    to : Sequence[:class:`~Expectation`] | :class:`~Expectation` | Literal["exist", "not_exist"] | None, optional
         A list of things to expect of that object. Defaults to None.
     timeout : float | int, optional
         How long to wait, in seconds, for the expected event to occur. If set to less than 1, will be set to 1. Defaults to 10.
@@ -743,7 +772,7 @@ async def expect(
 
     Returns
     -------
-    tuple[:class:`~discord.Message` | None, list[str]]
+    tuple[:class:`~discord.Message` | :class:`~discord.Thread` | None, list[str]]
     """
     timeout = max(float(timeout), 1)
     heartbeat = min(max(float(heartbeat), 0.5), timeout - 0.5)
@@ -793,9 +822,42 @@ async def expect(
             f"expected next message in channel <#{in_channel}>: https://discord.com/channels/1/{in_channel}/{received_message.id}",
             "success",
         )
+    elif obj == "thread":
+        assert in_channel
+        assert with_name
+        assert isinstance(to, str)
+
+        thread = None
+        end_time = datetime.now() + timedelta(seconds=timeout)
+        while (
+            not (
+                (created_threads := tester_bot.created_threads.get(in_channel))
+                and (thread := created_threads.get(with_name))
+            )
+        ) and (datetime.now() <= end_time):
+            await asyncio.sleep(heartbeat)
+
+        message = f"expected{' no' if to == 'not_exist' else ''} thread named {with_name} to exist in channel <#{in_channel}>"
+
+        if to == "not_exist":
+            return_object = None
+        else:
+            return_object = thread
+
+        if (thread and (to == "exist")) or ((not thread) and (to == "not_exist")):
+            result = "success"
+            failure_message = []
+        else:
+            result = "failure"
+            failure_message = [message]
+
+        log_expectation(message, result)
+        return (return_object, failure_message)
     else:
         if in_channel:
             cast(ExistingMessageExpectation, to[0])["be_in_channel"] = in_channel
+
+    assert not isinstance(to, str)
 
     content = obj.content
     expectations = [(e, v) for exp in to for e, v in exp.items()]

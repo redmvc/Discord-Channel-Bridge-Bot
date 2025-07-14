@@ -74,6 +74,9 @@ testing_server: discord.Guild
 # Messages sent by the bridge bot via the interaction
 received_messages: dict[int, list[discord.Message]] = defaultdict(lambda: [])
 
+# Threads created in each channel with each name
+created_threads: dict[int, dict[str, discord.Thread]] = defaultdict(lambda: {})
+
 
 @client.event
 async def on_ready():
@@ -161,6 +164,11 @@ async def on_message(message: discord.Message):
         or (message.application_id == bridge_bot_user.id)
     ):
         received_messages[message.channel.id].append(message)
+
+
+@client.event
+async def on_thread_create(thread: discord.Thread):
+    created_threads[thread.parent_id][thread.name] = thread
 
 
 @beartype
@@ -527,7 +535,7 @@ async def process_tester_bot_command(
     try:
         await command.callback(
             cast(
-                discord.interactions.Interaction,
+                discord.Interaction,
                 InteractionTester(message, member),
             ),
             *args,  # type: ignore
