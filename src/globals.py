@@ -330,7 +330,7 @@ async def get_channel_from_id(
     ensure_text_or_thread : bool, optional
         Whether to assert that the channel is either a Discord text channel or a Thread before returning. Defaults to False.
     bot_client : :class:`~discord.Client` | None, optional
-        The client of the bot from whose perspective to fetch the channel. Defaults to None, in which case the Bridge Bot's client will be used.
+        The client of the bot from whose perspective to fetch the channel. Defaults to None, in which case the Bridge Bot's client will be used. If this argument is not None and `channel_or_id` is a channel, will get the channel's ID and then try to fetch it from `bot_client`'s perspective.
 
     Returns
     -------
@@ -349,6 +349,8 @@ async def get_channel_from_id(
     :class:`~discord.Forbidden`
         The client does not not have permission to fetch the channel with that ID.
     """
+    if (bot_client is not None) and not isinstance(channel_or_id, int):
+        channel_or_id = channel_or_id.id
     global client
     bot_client = bot_client or client
 

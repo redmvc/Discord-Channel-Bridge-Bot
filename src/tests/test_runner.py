@@ -189,18 +189,23 @@ async def create_bridge(
     -------
     :class:`~discord.Message` | None
     """
-    source_channel = await globals.get_channel_from_id(
-        source_channel,
-        ensure_text_or_thread=True,
-        bot_client=tester_bot.client,
-    )
 
     target_channel_id = globals.get_id_from_channel(target_channel)
 
     command = f"/bridge {target_channel_id}{(' ' + direction) if direction else ''}"
     if send_message:
+        source_channel = await globals.get_channel_from_id(
+            source_channel,
+            ensure_text_or_thread=True,
+            bot_client=tester_bot.client,
+        )
         return await source_channel.send(command)
 
+    source_channel = await globals.get_channel_from_id(
+        source_channel,
+        ensure_text_or_thread=True,
+        bot_client=globals.client,
+    )
     message = tester_bot.FakeMessage(command, source_channel)
     assert globals.test_app
     if not await tester_bot.process_tester_bot_command(message, globals.test_app):
@@ -344,11 +349,6 @@ async def demolish_bridges(
     -------
     :class:`~discord.Message` | None
     """
-    source_channel = await globals.get_channel_from_id(
-        source_channel,
-        ensure_text_or_thread=True,
-        bot_client=tester_bot.client,
-    )
     if target_channel:
         target_channel_id = globals.get_id_from_channel(target_channel)
         command = f"/demolish {target_channel_id}"
@@ -356,8 +356,18 @@ async def demolish_bridges(
         command = f"/demolish_all{' True' if channel_and_threads else ''}"
 
     if send_message:
+        source_channel = await globals.get_channel_from_id(
+            source_channel,
+            ensure_text_or_thread=True,
+            bot_client=tester_bot.client,
+        )
         return await source_channel.send(command)
 
+    source_channel = await globals.get_channel_from_id(
+        source_channel,
+        ensure_text_or_thread=True,
+        bot_client=globals.client,
+    )
     message = tester_bot.FakeMessage(command, source_channel)
     assert globals.test_app
     if not await tester_bot.process_tester_bot_command(message, globals.test_app):
