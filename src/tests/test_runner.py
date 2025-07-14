@@ -35,23 +35,23 @@ rate_limiter = AsyncLimiter(1, 10)
 
 webhook_permissions_role: discord.Role | None = None
 
-CoroT = TypeVar(
-    "CoroT",
-    bound=Callable[
-        [
-            discord.Client,
-            discord.Client,
-            discord.Guild,
-            tuple[
-                discord.TextChannel,
-                discord.TextChannel,
-                discord.TextChannel,
-                discord.TextChannel,
-            ],
+test_function_type = Callable[
+    [
+        discord.Client,
+        discord.Client,
+        discord.Guild,
+        tuple[
+            discord.TextChannel,
+            discord.TextChannel,
+            discord.TextChannel,
+            discord.TextChannel,
         ],
-        Coroutine[Any, Any, None],
     ],
-)
+    Coroutine[Any, Any, list[str]],
+]
+CoroT = TypeVar("CoroT", bound=test_function_type)
+
+failures: dict[str, list[str]] = {}
 
 
 async def give_manage_webhook_perms(
@@ -508,17 +508,20 @@ class TestRunner:
 
                     tester_bot.received_messages = defaultdict(lambda: [])
                     try:
-                        await test(
+                        failure_messages = await test(
                             self.bridge_bot,
                             self.tester_bot,
                             testing_server,
                             testing_channels,
                         )
+                        if failure_messages:
+                            failures[test.__name__] = failure_messages
                     except Exception as e:
-                        log_expectation(
-                            f"An error occurred while running the test: {e}",
-                            "failure",
-                        )
+                        failure_message = [
+                            f"An error occurred while running the test: {e}"
+                        ]
+                        failures[test.__name__] = failure_message
+                        log_expectation(failure_message[0], "failure")
                     logger.info("")
                     print("")
                 logger.info("")
@@ -550,42 +553,10 @@ class TestCase(ABC):
             The test runner object to register this test case to.
         """
         test_runner.register_test_case(self)
-        self._tests: list[
-            Callable[
-                [
-                    discord.Client,
-                    discord.Client,
-                    discord.Guild,
-                    tuple[
-                        discord.TextChannel,
-                        discord.TextChannel,
-                        discord.TextChannel,
-                        discord.TextChannel,
-                    ],
-                ],
-                Coroutine[Any, Any, None],
-            ]
-        ] = []
+        self._tests: list[test_function_type] = []
 
     @property
-    def tests(
-        self,
-    ) -> list[
-        Callable[
-            [
-                discord.Client,
-                discord.Client,
-                discord.Guild,
-                tuple[
-                    discord.TextChannel,
-                    discord.TextChannel,
-                    discord.TextChannel,
-                    discord.TextChannel,
-                ],
-            ],
-            Coroutine[Any, Any, None],
-        ]
-    ]:
+    def tests(self) -> list[test_function_type]:
         """The tests registered to this object."""
         return self._tests
 
@@ -595,8 +566,8 @@ class TestCase(ABC):
 
         Parameters
         ----------
-        coro : (:class:`~discord.Client`, :class:`~discord.Client`, :class:`~discord.Guild`, tuple[:class:`~discord.TextChannel`, :class:`~discord.TextChannel`, :class:`~discord.TextChannel`, :class:`~discord.TextChannel`]) -> Coroutine[Any, Any, None]
-            The test function to run. Must be a coroutine that doesn't return anything whose arguments are, respectively:
+        coro : (:class:`~discord.Client`, :class:`~discord.Client`, :class:`~discord.Guild`, tuple[:class:`~discord.TextChannel`, :class:`~discord.TextChannel`, :class:`~discord.TextChannel`, :class:`~discord.TextChannel`]) -> Coroutine[Any, Any, list[str]]
+            The test function to run. Must be a coroutine that returns a list with all of the failures in the test whose arguments are, respectively:
             - the Bridge Bot client;
             - the Tester Bot client;
             - the Discord server for testing as seen by the Bridge Bot;
@@ -604,7 +575,7 @@ class TestCase(ABC):
 
         Returns
         -------
-        (:class:`~discord.Client`, :class:`~discord.Client`, :class:`~discord.Guild`, tuple[:class:`~discord.TextChannel`, :class:`~discord.TextChannel`, :class:`~discord.TextChannel`, :class:`~discord.TextChannel`]) -> Coroutine[Any, Any, None]
+        (:class:`~discord.Client`, :class:`~discord.Client`, :class:`~discord.Guild`, tuple[:class:`~discord.TextChannel`, :class:`~discord.TextChannel`, :class:`~discord.TextChannel`, :class:`~discord.TextChannel`]) -> Coroutine[Any, Any, list[str]]
         """
         if not asyncio.iscoroutinefunction(coro):
             raise TypeError("Test registered must be a coroutine function.")
@@ -673,8 +644,8 @@ async def expect(
     to: list[MessageExpectation] | MessageExpectation,
     timeout: float | int = 10,
     heartbeat: float | int = 0.5,
-) -> discord.Message | None:
-    """Check that a message will arrive in `in_channel` within `timeout` seconds. If it does, also check that the given list of expectations is true of it, then return it.
+) -> tuple[discord.Message | None, list[str]]:
+    """Check that a message will arrive in `in_channel` within `timeout` seconds. If it does, also check that the given list of expectations is true of it, then return a tuple whose first element is the message and whose second element is a list of all the failing tests; otherwise, return a tuple whose first element is None and whose second element is a list with the failing test.
 
     Parameters
     ----------
@@ -690,7 +661,7 @@ async def expect(
 
     Returns
     -------
-    :class:`~discord.Message` | None
+    tuple[:class:`~discord.Message` | None, list[str]]
     """
     ...
 
@@ -701,8 +672,8 @@ async def expect(
     *,
     in_channel: int | discord.TextChannel | discord.Thread | None = None,
     to: list[ExistingMessageExpectation] | ExistingMessageExpectation,
-) -> discord.Message:
-    """Check that a given list of expectations is true of a message, then return it.
+) -> tuple[discord.Message, list[str]]:
+    """Check that a given list of expectations is true of a message, then return a tuple whose first element is the message and whose second element is a list of all the failing tests.
 
     Parameters
     ----------
@@ -714,7 +685,7 @@ async def expect(
 
     Returns
     -------
-    :class:`~discord.Message`
+    tuple[:class:`~discord.Message`, list[str]]
     """
     ...
 
@@ -726,8 +697,8 @@ async def expect(
     in_channel: int | discord.TextChannel | discord.Thread,
     timeout: float | int = 10,
     heartbeat: float | int = 0.5,
-) -> None:
-    """Check that no message will be sent in `in_channel` within the next `timeout` seconds.
+) -> tuple[None, list[str]]:
+    """Check that no message will be sent in `in_channel` within the next `timeout` seconds. If it is not, return a tuple `(None, [])`; if it is, return a tuple whose first element is None and whose second element is a list with the test failure message.
 
     Parameters
     ----------
@@ -738,6 +709,10 @@ async def expect(
         How long to wait, in seconds, before declaring that no message was sent in `in_channel`. If set to less than 1, will be set to 1. Defaults to 10.
     heartbeat : float | int, optional
         How long to wait, in seconds, between each check for new messages. If set to less than 0.5, will be set to 0.5; if set to a value greater than `timeout`, will be set to `timeout - 0.5`. Defaults to 0.5.
+
+    Returns
+    -------
+    tuple[None, list[str]]
     """
     ...
 
@@ -750,8 +725,8 @@ async def expect(
     to: Sequence[Expectation] | Expectation | None = None,
     timeout: float | int = 10,
     heartbeat: float | int = 0.5,
-) -> discord.Message | None:
-    """Check that a given list of expectations will be true of a certain object within `timeout` seconds.
+) -> tuple[discord.Message | None, list[str]]:
+    """Check that a given list of expectations will be true of a certain object within `timeout` seconds, then return a tuple whose first element is the object (if it exists) and whose second element is the list of all failing tests.
 
     Parameters
     ----------
@@ -768,7 +743,7 @@ async def expect(
 
     Returns
     -------
-    :class:`~discord.Message` | None
+    tuple[:class:`~discord.Message` | None, list[str]]
     """
     timeout = max(float(timeout), 1)
     heartbeat = min(max(float(heartbeat), 0.5), timeout - 0.5)
@@ -792,25 +767,26 @@ async def expect(
 
         if not received_messages:
             if obj == "next_message":
-                log_expectation(
-                    f"expecting next message in channel <#{in_channel}> timed out",
-                    "failure",
-                )
+                failure_message = [
+                    f"expecting next message in channel <#{in_channel}> timed out"
+                ]
+                log_expectation(failure_message[0], "failure")
             else:
+                failure_message = []
                 log_expectation(
                     f"expected no new messages in channel <#{in_channel}>",
                     "success",
                 )
-            return None
+            return (None, failure_message)
 
         received_message = tester_bot.received_messages[in_channel].pop(0)
         if obj == "no_new_message":
-            log_expectation(
-                f"expected no new messages in channel <#{in_channel}> but received at least one message instead: https://discord.com/channels/1/{in_channel}/{received_message.id}",
-                "failure",
-            )
+            failure_message = [
+                f"expected no new messages in channel <#{in_channel}> but received at least one message instead: https://discord.com/channels/1/{in_channel}/{received_message.id}"
+            ]
+            log_expectation(failure_message[0], "failure")
             tester_bot.received_messages[in_channel] = []
-            return None
+            return (None, failure_message)
 
         obj = received_message
         log_expectation(
@@ -823,6 +799,7 @@ async def expect(
 
     content = obj.content
     expectations = [(e, v) for exp in to for e, v in exp.items()]
+    failure_messages = []
     for expectation, value in expectations:
         if negation := expectation.startswith("not_"):
             expectation = expectation[4:]
@@ -835,12 +812,15 @@ async def expect(
             if ((message_channel_id := obj.channel.id) == value) != negation:
                 log_expectation(log_message, "success")
             elif not negation:
-                log_expectation(
-                    f"{log_message} but it was actually in <#{message_channel_id}>",
-                    "failure",
+                failure_message = (
+                    f"{log_message} but it was actually in <#{message_channel_id}>"
                 )
+                failure_messages.append(failure_message)
+                log_expectation(failure_message, "failure")
             else:
-                log_expectation(f"{log_message} but it was", "failure")
+                failure_message = f"{log_message} but it was"
+                failure_messages.append(failure_message)
+                log_expectation(failure_message, "failure")
             continue
 
         if expectation == "be_a_reply_to":
@@ -849,23 +829,26 @@ async def expect(
 
             log_message = f"expected message to {' not' if negation else ''}be a reply to message with ID {value.id}"
             if not (message_reference := obj.reference):
-                log_expectation(
-                    f"{log_message} {'but' if not negation else 'and'} it was not a reply",
-                    "success" if negation else "failure",
-                )
+                message = f"{log_message} {'but' if not negation else 'and'} it was not a reply"
+                if not negation:
+                    failure_messages.append(message)
+                    log_expectation(message, "failure")
+                else:
+                    log_expectation(message, "success")
             elif (reference_id := message_reference.message_id) != value.id:
                 if not negation:
-                    log_expectation(
-                        f"{log_message} but it was a reply to message with ID {reference_id} instead",
-                        "failure",
-                    )
+                    failure_message = f"{log_message} but it was a reply to message with ID {reference_id} instead"
+                    failure_messages.append(failure_message)
+                    log_expectation(failure_message, "failure")
                 else:
                     log_expectation(log_message, "success")
             else:
-                log_expectation(
-                    f"{log_message}{' but it was' if negation else ''}",
-                    "success" if not negation else "failure",
-                )
+                message = f"{log_message}{' but it was' if negation else ''}"
+                if not negation:
+                    log_expectation(message, "success")
+                else:
+                    failure_messages.append(message)
+                    log_expectation(message, "failure")
 
             continue
 
@@ -881,22 +864,23 @@ async def expect(
                 (application_id := obj.application_id),
                 (author_id := obj.author.id),
             ]:
-                log_expectation(
-                    f"{log_message}{' but it was' if negation else ''}",
-                    "success" if not negation else "failure",
-                )
+                message = f"{log_message}{' but it was' if negation else ''}"
+                if not negation:
+                    log_expectation(message, "success")
+                else:
+                    failure_messages.append(message)
+                    log_expectation(message, "failure")
             else:
-                log_expectation(
-                    (
-                        f"{log_message}"
-                        + (
-                            f" but it was from {application_id or author_id} instead"
-                            if not negation
-                            else ""
-                        )
-                    ),
-                    "success" if negation else "failure",
+                message = f"{log_message}" + (
+                    f" but it was from {application_id or author_id} instead"
+                    if not negation
+                    else ""
                 )
+                if negation:
+                    log_expectation(message, "success")
+                else:
+                    failure_messages.append(message)
+                    log_expectation(message, "failure")
 
             continue
 
@@ -904,39 +888,45 @@ async def expect(
         if expectation == "contain":
             log_message = f"expected message to {' not' if negation else ''}contain text\n    {value}"
             if value in content:
-                log_expectation(
-                    f"{log_message}{' but it did' if negation else ''}",
-                    "success" if not negation else "failure",
-                )
+                message = f"{log_message}{' but it did' if negation else ''}"
+                if not negation:
+                    log_expectation(message, "success")
+                else:
+                    failure_messages.append(message)
+                    log_expectation(message, "failure")
             else:
-                log_expectation(
-                    (
-                        f"{log_message}"
-                        + (f"\n  was instead:\n    {content}" if not negation else "")
-                    ),
-                    "success" if negation else "failure",
+                message = f"{log_message}" + (
+                    f"\n  was instead:\n    {content}" if not negation else ""
                 )
+                if negation:
+                    log_expectation(message, "success")
+                else:
+                    failure_messages.append(message)
+                    log_expectation(message, "failure")
         elif expectation == "equal":
             log_message = (
                 f"expected message to {' not' if negation else ''}equal\n    {value}"
             )
             if content == value:
-                log_expectation(
-                    f"{log_message}{'  \nbut it did' if negation else ''}",
-                    "success" if not negation else "failure",
-                )
+                message = f"{log_message}{'  \nbut it did' if negation else ''}"
+                if not negation:
+                    log_expectation(message, "success")
+                else:
+                    failure_messages.append(message)
+                    log_expectation(message, "failure")
             else:
-                log_expectation(
-                    (
-                        f"{log_message}"
-                        + (f"\n  was instead:\n    {content}" if not negation else "")
-                    ),
-                    "success" if negation else "failure",
+                message = f"{log_message}" + (
+                    f"\n  was instead:\n    {content}" if not negation else ""
                 )
+                if negation:
+                    log_expectation(message, "success")
+                else:
+                    failure_messages.append(message)
+                    log_expectation(message, "failure")
 
         # TODO: be ephemeral
 
-    return obj
+    return (obj, failure_messages)
 
 
 test_runner = TestRunner(globals.client, tester_bot.client)
