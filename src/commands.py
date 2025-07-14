@@ -294,7 +294,8 @@ async def bridge(
 
 
 @discord.app_commands.default_permissions(
-    manage_webhooks=True, create_public_threads=True
+    manage_webhooks=True,
+    create_public_threads=True,
 )
 @discord.app_commands.guild_only()
 @globals.command_tree.command(
@@ -370,7 +371,8 @@ async def bridge_thread(interaction: discord.Interaction):
 
 
 @discord.app_commands.default_permissions(
-    manage_webhooks=True, create_public_threads=True
+    manage_webhooks=True,
+    create_public_threads=True,
 )
 @discord.app_commands.guild_only()
 @globals.command_tree.command(
@@ -974,7 +976,8 @@ async def whitelist(interaction: discord.Interaction, apps: str):
 
 
 @discord.app_commands.default_permissions(
-    create_expressions=True, manage_expressions=True
+    create_expressions=True,
+    manage_expressions=True,
 )
 @globals.command_tree.command(
     name="map_emoji",
@@ -1101,7 +1104,8 @@ async def map_emoji(
 
 
 @discord.app_commands.default_permissions(
-    create_expressions=True, manage_expressions=True
+    create_expressions=True,
+    manage_expressions=True,
 )
 @globals.command_tree.command(
     name="hash_server_emoji",
@@ -1233,7 +1237,6 @@ class ConfirmHashServer(discord.ui.Button[Any]):
         )
 
 
-@beartype
 async def bridge_thread_helper(
     thread_to_bridge: discord.Thread,
     user_id: int,
