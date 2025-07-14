@@ -528,6 +528,7 @@ class TestRunner:
                 await demolish_bridges(ch, channel_and_threads=True)
             if webhook_permissions_role:
                 await webhook_permissions_role.delete()
+                webhook_permissions_role = None
 
 
 class TestCase(ABC):

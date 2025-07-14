@@ -3,8 +3,8 @@ import traceback
 from types import TracebackType
 from typing import Any
 
+import test_runner
 import tester_bot
-from test_runner import test_runner
 from tester_bot import start_client as start_tester_bot
 
 import globals
@@ -30,6 +30,9 @@ class Bots:
         exc_value: Any | None,
         tb: TracebackType | None,
     ):
+        if test_runner.webhook_permissions_role is not None:
+            await test_runner.webhook_permissions_role.delete()
+
         await asyncio.gather(
             asyncio.create_task(self.bridge_bot_client.close()),
             self.running_bridge_bot_client_task,
@@ -47,7 +50,7 @@ class Bots:
 async def run_tests():
     """Run all tests registered to the test runner."""
     async with Bots():
-        await test_runner.run_tests(tester_bot.testing_server)
+        await test_runner.test_runner.run_tests(tester_bot.testing_server)
 
 
 if __name__ == "__main__":
