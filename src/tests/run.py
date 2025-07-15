@@ -53,7 +53,11 @@ class Bots:
                 "failure",
             )
         else:
-            test_runner.log_expectation("All tests passed!", "success")
+            test_runner.log_expectation(
+                "All tests passed!",
+                "success",
+                print_success_to_console=True,
+            )
 
         if exc_type:
             traceback.print_tb(tb)
