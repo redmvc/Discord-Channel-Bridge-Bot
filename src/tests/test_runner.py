@@ -54,6 +54,37 @@ CoroT = TypeVar("CoroT", bound=test_function_type)
 failures: dict[str, list[str]] = {}
 
 
+@beartype
+def log_expectation(
+    message: str,
+    type: Literal["success", "failure"],
+    *,
+    print_to_console: bool = True,
+):
+    """Log an expectation and optionally print it to console.
+
+    Parameters
+    ----------
+    message : str
+        The message to be logged.
+    type : Literal["success", "failure"]
+        Whether it's a success or a failure. Will add emoji to the start of the message depending on which.
+    print_to_console : bool, optional
+        Whether to also print the message to console. Defaults to True.
+    """
+    if type == "failure":
+        message = f"FAILURE: {message}"
+        logger.error(message)
+        message = f"❌ {message}"
+    else:
+        message = f"SUCCESS: {message}"
+        logger.info(message)
+        message = f"✅ {message}"
+
+    if print_to_console:
+        print(message)
+
+
 async def give_manage_webhook_perms(
     tester_bot: discord.Client,
     testing_server: discord.Guild,
@@ -584,37 +615,6 @@ class TestCase(ABC):
         self._tests.append(coro)
         logger.debug("%s has successfully been registered as a test.", coro.__name__)
         return coro
-
-
-@beartype
-def log_expectation(
-    message: str,
-    type: Literal["success", "failure"],
-    *,
-    print_to_console: bool = True,
-):
-    """Log an expectation and optionally print it to console.
-
-    Parameters
-    ----------
-    message : str
-        The message to be logged.
-    type : Literal["success", "failure"]
-        Whether it's a success or a failure. Will add emoji to the start of the message depending on which.
-    print_to_console : bool, optional
-        Whether to also print the message to console. Defaults to True.
-    """
-    if type == "failure":
-        message = f"FAILURE: {message}"
-        logger.error(message)
-        message = f"❌ {message}"
-    else:
-        message = f"SUCCESS: {message}"
-        logger.info(message)
-        message = f"✅ {message}"
-
-    if print_to_console:
-        print(message)
 
 
 class Expectation(TypedDict, total=False):
