@@ -38,7 +38,7 @@ It's very straightforward to run your own copy of this bot. You'll need access t
    ```
    - Optionally, you can add an `"emoji_server_id"` entry to that list. If this ID points to a valid Discord server to which the bot has `Create Expressions` and `Manage Expressions` permissions, that server will be used to add any custom reactions it runs into but doesn't have access to while trying to bridge reactions.
    - You can also add a `"whitelisted_apps"` entry with a list of IDs of apps to let through the bridge.
-   - You may add other contexts than `"production"`, such as `"testing"`, for other situations.
+   - You may add other contexts than `"production"`, such as `"development"`, for other situations.
 5. Edit your `requirements.txt` file to include the appropriate SQL library depending on your SQL dialect, then run `pip install -r requirements.txt` on your command line from the main folder.
 6. Run `main.py`. This will automatically create the necessary tables in your database if they're not already there, and all commands will be working out of the box.
 

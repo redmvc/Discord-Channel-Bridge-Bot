@@ -1,21 +1,86 @@
-from __future__ import annotations
-
 import inspect
 import logging
-from typing import Any, TypeVar
+from typing import Any, Literal, TypeVar
 
 import discord
 
 T = TypeVar("T", bound=Any)
 
 # Objects to log events
-logging.basicConfig(
-    filename="logs.log", format="%(asctime)s %(levelname)s: %(message)s", filemode="w"
-)
-logger = logging.getLogger()
-logger.setLevel(logging.INFO)
+formatter = logging.Formatter("%(asctime)s %(levelname)s %(message)s")
+_existing_loggers: list[str] = []
 
 
+def setup_logger(
+    name: str,
+    log_file: str,
+    level: (
+        Literal[
+            "CRITICAL",
+            "FATAL",
+            "ERROR",
+            "WARNING",
+            "WARN",
+            "INFO",
+            "DEBUG",
+            "NOTSET",
+        ]
+        | int
+    ) = logging.INFO,
+) -> logging.Logger:
+    """Create a logger. This function allows for the creation of multiple simultaneous loggers writing to multiple files.
+
+    Parameters
+    ----------
+    name : str
+        The name of the logger to be created. Must not conflict with existing loggers.
+    log_file : str
+        The log file to write to.
+    level : Literal["CRITICAL", "FATAL", "ERROR", "WARNING", "WARN", "INFO", "DEBUG", "NOTSET"] | int, optional
+        The error level to log. If set to an integer, it must be an existing level from the logging package. Defaults to `~logging.INFO`.
+
+    Returns
+    -------
+    :class:`~logging.Logger`
+
+    Raises
+    ------
+    ValueError
+        A logger with this name already exists, or the logging level does not match an existing level.
+    """
+    if name in _existing_loggers:
+        raise ValueError(f"A logger named '{name}' has already been registered.")
+    if isinstance(level, int) and (
+        level
+        not in [
+            logging.CRITICAL,
+            logging.FATAL,
+            logging.ERROR,
+            logging.WARNING,
+            logging.WARN,
+            logging.INFO,
+            logging.DEBUG,
+            logging.NOTSET,
+        ]
+    ):
+        raise ValueError(f"Level {level} is not a valid logging level.")
+
+    handler = logging.FileHandler(log_file, mode="w")
+    handler.setFormatter(formatter)
+
+    logger = logging.getLogger(name)
+    logger.setLevel(level)
+    logger.addHandler(handler)
+
+    _existing_loggers.append(name)
+
+    return logger
+
+
+logger = setup_logger("bridge_bot_logger", "logs.log", logging.INFO)
+
+
+# Error classes
 class ChannelTypeError(ValueError):
     pass
 
@@ -36,14 +101,18 @@ def validate_channels(
     log_error: bool = True,
     **kwargs: Any,
 ) -> dict[str, discord.TextChannel | discord.Thread]:
-    """Raise `ChannelTypeError` if any of the channels passed as arguments is not a `discord.TextChannel` nor a `discord.Thread`, and otherwise return a tuple with the arguments cast to the right type.
+    """Raise ChannelTypeError if any of the objects passed as arguments is not a `~discord.TextChannel` nor a `~discord.Thread` off one, and otherwise return a dictionary with the arguments cast to the right type.
 
-    #### Args:
-        - `log_error`: Whether to register this error in the logger. Defaults to True.
-        - `kwargs`: The channels to validate.
+    Parameters
+    ----------
+    log_error : bool, optional
+        Whether to register this error in the logger. Defaults to True.
+    **kwags
+        The objects to validate.
 
-    #### Returns:
-        - The channels passed as arguments cast to the appropriate type.
+    Returns
+    -------
+    dict[str, `~discord.TextChannel` | `~discord.Thread`]
     """
     cast_channels: dict[str, discord.TextChannel | discord.Thread] = {}
     for channel_name, channel in kwargs.items():
@@ -67,14 +136,14 @@ def validate_webhook(
     webhook: discord.Webhook,
     target_channel: discord.TextChannel | discord.Thread,
 ):
-    """Raise `WebhookChannelError` if the webhook is not attached to the target channel or, if it's a thread, its parent.
+    """Raise WebhookChannelError if the webhook is not attached to the target channel or, if it's a thread, its parent.
 
-    #### Args:
-        - `webhook`: A Discord webhook.
-        - `target_channel`: The Discord text channel or thread to validate against.
-
-    #### Raises:
-        - `ChannelTypeError`: `target_channel` is a thread but not one that is off a text channel.
+    Parameters
+    ----------
+    webhook : `~discord.Webhook`
+        The webhook.
+    target_channel : `~discord.TextChannel` | `~discord.Thread`
+        The Discord text channel or thread to validate against.
     """
     if isinstance(target_channel, discord.TextChannel):
         target_channel_id = target_channel.id

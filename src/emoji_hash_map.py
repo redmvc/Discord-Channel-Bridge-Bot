@@ -1,34 +1,46 @@
 import asyncio
 import random
-from typing import Any, Coroutine, Literal, Sequence, overload
+from typing import TYPE_CHECKING, overload
 
 import discord
 from beartype import beartype
 from sqlalchemy import Delete as SQLDelete
-from sqlalchemy import ScalarResult
 from sqlalchemy import Select as SQLSelect
 from sqlalchemy import Update as SQLUpdate
 from sqlalchemy import UpdateBase
 from sqlalchemy import not_ as sql_not
-from sqlalchemy.exc import StatementError as SQLError
 from sqlalchemy.orm import Session as SQLSession
 
 import globals
-from database import DBEmoji, engine, sql_retry, sql_upsert
+from database import DBEmoji, sql_command, sql_retry, sql_upsert
 from validations import ArgumentError, logger
+
+if TYPE_CHECKING:
+    from typing import Any, Coroutine, Literal, Sequence
+
+    from sqlalchemy import ScalarResult
 
 
 class EmojiHashMap:
-    """
-    A mapping between emoji IDs and hashes of their images.
-    """
+    """A mapping between emoji IDs and hashes of their images."""
 
+    @overload
+    def __init__(self):
+        """Initialise the emoji hash map from the emoji table."""
+        ...
+
+    @overload
+    def __init__(self, *, session: SQLSession | None): ...
+
+    @sql_command
     @beartype
-    def __init__(self, session: SQLSession | None = None):
+    def __init__(self, *, session: SQLSession):
         """Initialise the emoji hash map from the emoji table.
 
-        #### Args:
-            - `session`: A connection to the database. Defaults to None.
+        Parameters
+        ----------
+        session : :class:`~sqlalchemy.orm.Session`
+            An SQLAlchemy ORM Session connecting to the database.
         """
         logger.info("Initialising emoji hash map...")
 
@@ -37,14 +49,9 @@ class EmojiHashMap:
         self._hash_to_available_emoji: dict[str, set[int]] = {}
         self._hash_to_internal_emoji: dict[str, int] = {}
 
-        close_after = False
         try:
-            if not session:
-                session = SQLSession(engine)
-                close_after = True
-
             select_hashed_emoji: SQLSelect[tuple[DBEmoji]] = SQLSelect(DBEmoji)
-            hashed_emoji_query_result: ScalarResult[DBEmoji] = session.scalars(
+            hashed_emoji_query_result: "ScalarResult[DBEmoji]" = session.scalars(
                 select_hashed_emoji
             )
             emoji_ids_to_delete: set[str] = set()
@@ -55,7 +62,9 @@ class EmojiHashMap:
 
                 emoji_hash = row.image_hash
 
-                emoji_actually_accessible = not not globals.client.get_emoji(emoji_id)
+                emoji_actually_accessible = (
+                    emoji := globals.client.get_emoji(emoji_id)
+                ) and emoji.is_usable()
                 if (
                     row.server_id
                     and (server_id := int(row.server_id))
@@ -90,43 +99,35 @@ class EmojiHashMap:
                     .values(accessible=sql_not(DBEmoji.accessible))
                 )
         except Exception as e:
-            if close_after and session:
-                session.rollback()
-                session.close()
-
             logger.error("An error occurred while creating an EmojiHashMap: %s", e)
             raise
-
-        if close_after:
-            session.commit()
-            session.close()
 
         logger.info("Emoji hash map initialised.")
 
     @beartype
     def _add_emoji_to_map(
         self,
-        emoji_id: int | str,
+        emoji_id: int,
         image_hash: str,
         *,
         accessible: bool | None = None,
         server_id: int | str | None = None,
-        is_internal: bool | None = None,
-    ) -> tuple[int, str]:
+        is_internal: bool = False,
+    ):
         """Add an emoji to the hash map.
 
-        #### Args:
-            - `emoji_id`: The ID of the emoji.
-            - `image_hash`: The hash of its image.
-            - `accessible`: Whether the emoji is accessible to the bot. Defaults to None, in which case will try to figure it out from the other arguments.
-            - `server_id`: The ID of the server this emoji is in. If included and equal to the bot's emoji server, will set `accessible` to True and add the emoji to the internal emoji hash map.
-            - `is_internal`: If set to True, will set `accessible` to True and add the emoji to the internal emoji hash map.
-
-        #### Raises:
-            - `ValueError`: `emoji_id` or `server_id` were not valid numerical IDs.
-
-        #### Returns:
-            - `tuple[int, str]`: A tuple with the emoji ID and the hash of its image.
+        Parameters
+        ----------
+        emoji_id : int
+            The ID of the emoji.
+        image_hash : str
+            The hash of its image.
+        accessible : bool | None, optional
+            Whether the emoji is accessible by the bot. Defaults to None, in which case will try to figure it out from the other arguments.
+        server_id : int | str | None, optional
+            The ID of the server this emoji is in. If included and equal to the bot's emoji server, will set `accessible` to True and add the emoji to the internal emoji hash map. Defaults to None.
+        is_internal : bool, optional
+            If set to True, will set `accessible` to True and add the emoji to the internal emoji hash map. Defaults to False.
         """
         logger.debug("Adding emoji with ID %s to emoji hash map...", emoji_id)
 
@@ -144,29 +145,41 @@ class EmojiHashMap:
 
         self._emoji_to_hash[emoji_id] = image_hash
         if accessible is None:
-            accessible = not not globals.client.get_emoji(emoji_id)
+            accessible = (
+                emoji := globals.client.get_emoji(emoji_id)
+            ) and emoji.is_usable()
 
-        if not self._hash_to_emoji.get(image_hash):
+        if image_hash not in self._hash_to_emoji:
             self._hash_to_emoji[image_hash] = set()
         self._hash_to_emoji[image_hash].add(emoji_id)
 
         if accessible:
-            if not self._hash_to_available_emoji.get(image_hash):
+            if image_hash not in self._hash_to_available_emoji:
                 self._hash_to_available_emoji[image_hash] = set()
             self._hash_to_available_emoji[image_hash].add(emoji_id)
-        elif (
-            self._hash_to_available_emoji.get(image_hash)
-            and emoji_id in self._hash_to_available_emoji[image_hash]
-        ):
-            self._hash_to_available_emoji[image_hash].remove(emoji_id)
+        elif image_hash in self._hash_to_available_emoji:
+            self._hash_to_available_emoji[image_hash].discard(emoji_id)
 
         if is_internal:
             self._hash_to_internal_emoji[image_hash] = emoji_id
 
         logger.debug("Emoji with ID %s added to map.", emoji_id)
-        return (emoji_id, image_hash)
 
-    @beartype
+    @overload
+    async def _add_emoji_to_database(
+        self,
+        *,
+        emoji: discord.PartialEmoji | discord.Emoji | None = None,
+        emoji_id: int | str | None = None,
+        emoji_name: str | None = None,
+        emoji_server_id: int | str | None = None,
+        emoji_animated: bool | None = None,
+        image: bytes | None = None,
+        image_hash: str | None = None,
+        accessible: bool = False,
+    ): ...
+
+    @overload
     async def _add_emoji_to_database(
         self,
         *,
@@ -179,32 +192,69 @@ class EmojiHashMap:
         image_hash: str | None = None,
         accessible: bool = False,
         session: SQLSession | None = None,
+    ): ...
+
+    @sql_command
+    @beartype
+    async def _add_emoji_to_database(
+        self,
+        *,
+        emoji: discord.PartialEmoji | discord.Emoji | None = None,
+        emoji_id: int | str | None = None,
+        emoji_name: str | None = None,
+        emoji_server_id: int | str | None = None,
+        emoji_animated: bool | None = None,
+        image: bytes | None = None,
+        image_hash: str | None = None,
+        accessible: bool = False,
+        session: SQLSession,
     ):
         """Inserts an emoji into the `emoji` database table.
 
-        #### Args:
-            - `emoji`: The Discord emoji to insert. Defaults to None, in which case `emoji_id` and `emoji_name` will be used instead.
-            - `emoji_id`: The ID of the emoji to insert. Defaults to None, in which case `emoji` will be used instead.
-            - `emoji_name`: The name of the emoji. Defaults to None, but must be included if `emoji_id` is. If it starts with `"a:"` the emoji will be marked as animated.
-            - `emoji_server_id`: The ID of the server this emoji is from. Defaults to None.
-            - `emoji_animated`: Whether the emoji is animated. Defaults to None, in which case its value will be inferred from the other arguments.
-            - `image`: The emoji image to extract a hash from. Defaults to None, in which case the hash will be calculated from the other arguments.
-            - `image_hash`: The hash of the emoji image. Defaults to None, in which case it will be calculated from the other arguments.
-            - `accessible`: Whether the bot can access the emoji. Defaults to False.
-            - `session`: A connection to the database. Defaults to None, in which case a new one will be created to be used.
+        Parameters
+        ----------
+        emoji : :class:`~discord.PartialEmoji` | :class:`~discord.Emoji` | None, optional
+            The Discord emoji to insert. Defaults to None, in which case `emoji_id` and `emoji_name` will be used instead.
+        emoji_id : int | str | None, optional
+            The ID of the emoji to insert. Defaults to None. Only used if `emoji` is not present.
+        emoji_name : str | None, optional
+            The name of the emoji. Defaults to None, in which case the client will try to find an emoji with ID `emoji_id`. If it's included, it must start with the string "a:" if the emoji animated. Only used if `emoji` is not present.
+        emoji_server_id : int | str | None, optional
+            The ID of the server this emoji is from. Defaults to None.
+        emoji_animated : bool | None, optional
+            Whether the emoji is animated. Defaults to None, in which case its value will be inferred from the other arguments.
+        image : bytes | None, optional
+            The emoji image to extract a hash from. Defaults to None, in which case the hash will be calculated from the other arguments.
+        image_hash : str | None, optional
+            The hash of the emoji image. Defaults to None, in which case it will be calculated from the other arguments.
+        accessible : bool, optional
+            Whether the bot can access the emoji. Defaults to False.
+        session : :class:`~sqlalchemy.orm.Session` | None, optional
+            An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
 
-        #### Raises:
-            - `ArgumentError`: The number of arguments passed is incorrect.
-            - `ValueError`: `emoji` argument was passed and had type `PartialEmoji` but it was not a custom emoji, or `emoji_id` argument was passed and had type `str` but it was not a valid numerical ID.
-            - `SQLError`: An error occurred while connecting to the database.
-            - `HTTPResponseError`: HTTP request to fetch image returned a status other than 200.
-            - `InvalidURL`: URL generated from emoji was not valid.
-            - `RuntimeError`: Session connection failed.
-            - `ServerTimeoutError`: Connection to server timed out.
+        Raises
+        ------
+        ArgumentError
+            Neither `emoji` nor `emoji_id` were passed, or `emoji_id` was passed, `emoji` and `emoji_name` weren't, and the client couldn't find an accessible emoji with ID `emoji_id`.
+        ValueError
+            `emoji` argument was passed and had type `PartialEmoji` but it was not a custom emoji, or `emoji_id` argument was passed and had type `str` but it was not a valid numerical ID.
+        `sqlalchemy.exc.StatementError`
+            An error occurred while connecting to the database.
+        HTTPResponseError
+            HTTP request to fetch image returned a status other than 200.
+        InvalidURL
+            URL generated from emoji was not valid.
+        RuntimeError
+            Session connection failed.
+        ServerTimeoutError
+            Connection to server timed out.
         """
-        emoji_id, emoji_name, emoji_animated_inferred, emoji_url = (
-            globals.get_emoji_information(emoji, emoji_id, emoji_name)
-        )
+        (
+            emoji_id,
+            emoji_name,
+            emoji_animated_inferred,
+            emoji_url,
+        ) = await globals.get_emoji_information(emoji, emoji_id, emoji_name)
         logger.debug("Adding emoji with ID %s to database...", emoji_id)
 
         if emoji_animated is None:
@@ -219,31 +269,15 @@ class EmojiHashMap:
                 )
             image_hash = globals.hash_image(image)
 
-        close_after = False
-        try:
-            if not session:
-                session = SQLSession(engine)
-                close_after = True
-
-            upsert_emoji = await self.upsert_emoji(
-                emoji_id=emoji_id,
-                emoji_name=emoji_name,
-                emoji_server_id=emoji_server_id,
-                emoji_animated=emoji_animated,
-                image_hash=image_hash,
-                accessible=accessible,
-            )
-            await sql_retry(lambda: session.execute(upsert_emoji))
-        except Exception:
-            if close_after and session:
-                session.rollback()
-                session.close()
-
-            raise
-
-        if close_after:
-            session.commit()
-            session.close()
+        upsert_emoji = await self.upsert_emoji(
+            emoji_id=emoji_id,
+            emoji_name=emoji_name,
+            emoji_server_id=emoji_server_id,
+            emoji_animated=emoji_animated,
+            image_hash=image_hash,
+            accessible=accessible,
+        )
+        await sql_retry(lambda: session.execute(upsert_emoji))
 
         logger.debug("Emoji with ID %s added to database.", emoji_id)
 
@@ -259,41 +293,47 @@ class EmojiHashMap:
         image: bytes | None = None,
         image_hash: str | None = None,
         accessible: bool = False,
-        is_internal: bool | None = None,
+        is_internal: bool = False,
         update_db: bool = False,
         session: SQLSession | None = None,
     ) -> tuple[int, str]:
-        """Insert an emoji into the hash map and, optionally, into the `emoji` database table.
+        """Insert an emoji into the hash map and, optionally, into the emoji database table, then return a tuple with the emoji ID and the hash of its image.
 
-        #### Args:
-            - `emoji`: The Discord emoji to insert. Defaults to None, in which case `emoji_id` and `emoji_name` will be used instead.
-            - `emoji_id`: The ID of the emoji to insert. Defaults to None, in which case `emoji` will be used instead.
-            - `emoji_name`: The name of the emoji. Defaults to None, but must be included if `emoji_id` is. If it starts with `"a:"` the emoji will be marked as animated.
-            - `emoji_server_id`: The ID of the server this emoji is from. Defaults to None.
-            - `emoji_animated`: Whether the emoji is animated. Defaults to None, in which case its value will be inferred from the other arguments.
-            - `image`: The emoji image to extract a hash from. Defaults to None, in which case the hash will be calculated from the other arguments.
-            - `image_hash`: The hash of the emoji image. Defaults to None, in which case it will be calculated from the other arguments.
-            - `accessible`: Whether the bot can access the emoji. Defaults to False.
-            - `is_internal`: If set to True, will set `accessible` to True and add the emoji to the internal emoji hash map.
-            - `update_db`: Whether the emoji should be inserted into the database. Defaults to False. Including `session` is equivalent to setting this variable to True.
-            - `session`: A connection to the database. If set to None and `update_db` is True, a new session will be created to perform the database operations. Defaults to None.
+        Parameters
+        ----------
+        emoji : :class:`~discord.PartialEmoji` | :class:`~discord.Emoji` | None, optional
+            The Discord emoji to insert. Defaults to None, in which case `emoji_id` and `emoji_name` will be used instead.
+        emoji_id : int | str | None, optional
+            The ID of the emoji to insert. Defaults to None. Only used if `emoji` is not present.
+        emoji_name : str | None, optional
+            The name of the emoji. Defaults to None, in which case the client will try to find an emoji with ID `emoji_id`. If it's included, it must start with the string "a:" if the emoji animated. Only used if `emoji` is not present.
+        emoji_server_id : int | str | None, optional
+            The ID of the server this emoji is from. Defaults to None.
+        emoji_animated : bool | None, optional
+            Whether the emoji is animated. Defaults to None, in which case its value will be inferred from the other arguments.
+        image : bytes | None, optional
+            The emoji image to extract a hash from. Defaults to None, in which case the hash will be calculated from the other arguments.
+        image_hash : str | None, optional
+            The hash of the emoji image. Defaults to None, in which case it will be calculated from the other arguments.
+        accessible : bool, optional
+            Whether the bot can access the emoji. Defaults to False.
+        is_internal : bool, optional
+            If set to True, will set `accessible` to True and add the emoji to the internal emoji hash map. Defaults to False.
+        update_db : bool, optional
+            Whether the emoji should be inserted into the database. Defaults to False. Including `session` is equivalent to setting this variable to True.
+        session : :class:`~sqlalchemy.orm.Session` | None, optional
+            An SQLAlchemy ORM Session connecting to the database. Defaults to None, but if `update_db` is set to True a new one will be created.
 
-        #### Raises:
-            - `ArgumentError`: The number of arguments passed is incorrect.
-            - `ValueError`: `emoji` argument was passed and had type `PartialEmoji` but it was not a custom emoji, or `emoji_id` argument was passed and had type `str` but it was not a valid numerical ID.
-            - `SQLError`: An error occurred while connecting to the database.
-            - `HTTPResponseError`: HTTP request to fetch image returned a status other than 200.
-            - `InvalidURL`: URL generated from emoji was not valid.
-            - `RuntimeError`: Session connection failed.
-            - `ServerTimeoutError`: Connection to server timed out.
-
-        #### Returns:
-            - `tuple[int, str]`: A tuple with the emoji ID and the hash of its image.
+        Returns
+        -------
+        tuple[int, str]
         """
         logger.debug("Adding %s to hash map.", emoji if emoji else emoji_id)
         if not emoji_id or not image_hash:
-            emoji_id, emoji_name, _, emoji_url = globals.get_emoji_information(
-                emoji, emoji_id, emoji_name
+            emoji_id, emoji_name, _, emoji_url = await globals.get_emoji_information(
+                emoji,
+                emoji_id,
+                emoji_name,
             )
             if not image_hash:
                 if not image:
@@ -306,12 +346,14 @@ class EmojiHashMap:
                         emoji_id,
                     )
                 image_hash = globals.hash_image(image)
+        else:
+            emoji_id = int(emoji_id)
 
         if is_internal:
             assert (emoji_server_id_raw := globals.settings.get("emoji_server_id"))
             emoji_server_id = int(emoji_server_id_raw)
 
-        emoji_id, image_hash = self._add_emoji_to_map(
+        self._add_emoji_to_map(
             emoji_id,
             image_hash,
             accessible=accessible,
@@ -320,32 +362,16 @@ class EmojiHashMap:
         )
 
         if update_db or session:
-            close_after = False
-            try:
-                if not session:
-                    session = SQLSession(engine)
-                    close_after = True
-
-                await self._add_emoji_to_database(
-                    emoji_id=emoji_id,
-                    emoji_name=emoji_name,
-                    emoji_server_id=emoji_server_id,
-                    emoji_animated=emoji_animated,
-                    image=image,
-                    image_hash=image_hash,
-                    accessible=accessible,
-                    session=session,
-                )
-            except Exception:
-                if close_after and session:
-                    session.rollback()
-                    session.close()
-
-                raise
-
-            if close_after:
-                session.commit()
-                session.close()
+            await self._add_emoji_to_database(
+                emoji_id=emoji_id,
+                emoji_name=emoji_name,
+                emoji_server_id=emoji_server_id,
+                emoji_animated=emoji_animated,
+                image=image,
+                image_hash=image_hash,
+                accessible=accessible,
+                session=session,
+            )
 
         return (emoji_id, image_hash)
 
@@ -356,19 +382,30 @@ class EmojiHashMap:
         emoji_id: int | str,
         emoji_name: str | None = None,
         emoji_server_id: int | str | None = None,
-        emoji_animated: bool | None = None,
+        emoji_animated: bool = False,
         image_hash: str,
-        accessible: bool | None = None,
+        accessible: bool = False,
     ) -> UpdateBase:
-        """Return an `UpdateBase` for upserting an emoji into the database.
+        """Return an :class:`~sqlalchemy.UpdateBase` for upserting an emoji into the database.
 
-        #### Args:
-            - `emoji_id`: The emoji ID.
-            - `emoji_name`: The name of the emoji. Defaults to None.
-            - `emoji_server_id`: The ID of the server the emoji is stored in. Defaults to None.
-            - `emoji_animated`: Whether the emoji is animated. Defaults to None, in which case it will be considered False.
-            - `image_hash`: The hash of the emoji's image.
-            - `accessible`: Whether the emoji is accessible by the bot. Defaults to None, in which case it will be considered False.
+        Parameters
+        ----------
+        emoji_id : int | str
+            The emoji ID.
+        emoji_name : str | None, optional
+            The name of the emoji. Defaults to None.
+        emoji_server_id : int | str | None, optional
+            The ID of the server the emoji is stored in. Defaults to None.
+        emoji_animated : bool, optional
+            Whether the emoji is animated. Defaults to False.
+        image_hash : str
+            The hash of the emoji's image.
+        accessible : bool, optional
+            Whether the emoji is accessible by the bot. Defaults to False.
+
+        Returns
+        -------
+        :class:`~sqlalchemy.UpdateBase`
         """
         if emoji_server_id:
             upsert_server_id = {"server_id": str(emoji_server_id)}
@@ -381,9 +418,9 @@ class EmojiHashMap:
             ignored_cols={"animated"},
             id=str(emoji_id),
             name=emoji_name,
-            animated=not not emoji_animated,
+            animated=emoji_animated,
             image_hash=image_hash,
-            accessible=not not accessible,
+            accessible=accessible,
             **upsert_server_id,
         )
 
@@ -396,10 +433,14 @@ class EmojiHashMap:
     ):
         """Delete an emoji from the hash map. If `session` is included, delete it from the database also.
 
-        #### Args:
-            - `emoji_id`: The ID of the emoji to delete.
-            - `update_db`: Whether the emoji should be deleted from the database. Defaults to False. Including `session` is equivalent to setting this variable to True.
-            - `session`: A connection to the database. If set to None and `update_db` is True, a new session will be created to perform the database operations. Defaults to None.
+        Parameters
+        ----------
+        emoji_id : int
+            The ID of the emoji to delete.
+        update_db : bool, optional
+            Whether the emoji should be deleted from the database. Defaults to False. Including `session` is equivalent to setting this variable to True.
+        session : :class:`~sqlalchemy.orm.Session` | None, optional
+            An SQLAlchemy ORM Session connecting to the database. If set to None and `update_db` is True a new one will be created. Defaults to None
         """
         if not self._emoji_to_hash.get(emoji_id):
             logger.debug(
@@ -431,51 +472,121 @@ class EmojiHashMap:
         logger.debug("Emoji with ID %s deleted from map.", emoji_id)
 
         if update_db or session:
-            logger.debug("Deleting emoji with ID %s from database...", emoji_id)
-            close_after = False
-            try:
-                if not session:
-                    session = SQLSession(engine)
-                    close_after = True
+            await self._delete_emoji_from_db(emoji_id, session=session)
 
-                await sql_retry(
-                    lambda: session.execute(
-                        SQLDelete(DBEmoji).where(DBEmoji.id == str(emoji_id))
-                    )
-                )
-            except Exception:
-                if close_after and session:
-                    session.rollback()
-                    session.close()
+    @overload
+    async def _delete_emoji_from_db(self, emoji_id: int): ...
 
-                raise
+    @overload
+    async def _delete_emoji_from_db(
+        self,
+        emoji_id: int,
+        *,
+        session: SQLSession | None = None,
+    ): ...
 
-            if close_after:
-                session.commit()
-                session.close()
+    @sql_command
+    async def _delete_emoji_from_db(
+        self,
+        emoji_id: int,
+        *,
+        session: SQLSession,
+    ):
+        logger.debug("Deleting emoji with ID %s from database...", emoji_id)
 
-            logger.debug("Emoji with ID %s deleted from database.", emoji_id)
+        await sql_retry(
+            lambda: session.execute(
+                SQLDelete(DBEmoji).where(DBEmoji.id == str(emoji_id))
+            )
+        )
 
+        logger.debug("Emoji with ID %s deleted from database.", emoji_id)
+
+    @overload
+    async def load_server_emoji(self):
+        """Load all emoji in all servers the bot is connected to into the hash map.
+
+        Raises
+        ------
+        HTTPResponseError
+            HTTP request to fetch image returned a status other than 200.
+        InvalidURL
+            URL generated from emoji was not valid.
+        RuntimeError
+            Session connection failed.
+        ServerTimeoutError
+            Connection to server timed out.
+        """
+        ...
+
+    @overload
+    async def load_server_emoji(self, server_id: int):
+        """Load all emoji in a server into the hash map.
+
+        Parameters
+        ----------
+        server_id : int
+            The ID of the server to load.
+
+        Raises
+        ------
+        ValueError
+            The server ID passed as argument does not belong to a server the bot is in.
+        HTTPResponseError
+            HTTP request to fetch image returned a status other than 200.
+        InvalidURL
+            URL generated from emoji was not valid.
+        RuntimeError
+            Session connection failed.
+        ServerTimeoutError
+            Connection to server timed out.
+        """
+        ...
+
+    @overload
+    async def load_server_emoji(
+        self,
+        server_id: int | None = None,
+        *,
+        session: SQLSession | None = None,
+    ): ...
+
+    @sql_command
     @beartype
-    async def load_server_emoji(self, server_id: int | None = None):
-        """Load all emoji in a server (or in all servers the bot is connected to) into the hash map.
+    async def load_server_emoji(
+        self,
+        server_id: int | None = None,
+        *,
+        session: SQLSession,
+    ):
+        """Load all emoji in a server or in all servers the bot is connected to into the hash map.
 
-        #### Args:
-            - `server_id`: The ID of the server to load. Defaults to None, in which case will load the emoji from all servers the bot is connected to.
+        Parameters
+        ----------
+        server_id : int | None, optional
+            The ID of the server to load. Defaults to None, in which case will load the emoji from all servers the bot is connected to.
+        session : :class:`~sqlalchemy.orm.Session` | None, optional
+            An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
 
-        #### Raises:
-            - `ValueError`: The server ID passed as argument does not belong to a server the bot is in.
-            - `HTTPResponseError`: HTTP request to fetch image returned a status other than 200.
-            - `InvalidURL`: URL generated from emoji was not valid.
-            - `RuntimeError`: Session connection failed.
-            - `ServerTimeoutError`: Connection to server timed out.
+        Raises
+        ------
+        ValueError
+            The server ID passed as argument does not belong to a server the bot is in.
+        HTTPResponseError
+            HTTP request to fetch image returned a status other than 200.
+        InvalidURL
+            URL generated from emoji was not valid.
+        RuntimeError
+            Session connection failed.
+        ServerTimeoutError
+            Connection to server timed out.
         """
         if server_id:
             server = globals.client.get_guild(server_id)
             if not server:
                 raise ValueError("Bot is not in server.")
 
-            servers: Sequence[discord.Guild] = [server]
+            servers: "Sequence[discord.Guild]" = [server]
             logger.info("Loading emoji from server %s into hash map...", server.name)
             ending_info_message = "Emoji from server %s loaded."
         else:
@@ -484,14 +595,19 @@ class EmojiHashMap:
             ending_info_message = "Emoji from all available servers loaded."
 
         async def update_emoji(
-            server_id: int | str, is_internal: bool, emoji: discord.Emoji
+            server_id: int | str,
+            is_internal: bool,
+            emoji: discord.Emoji,
         ):
             await self.delete_emoji(emoji.id)
 
             image = await globals.get_image_from_URL(emoji.url)
             image_hash = globals.hash_image(image)
             self._add_emoji_to_map(
-                emoji.id, image_hash, accessible=True, is_internal=is_internal
+                emoji.id,
+                image_hash,
+                accessible=True,
+                is_internal=is_internal,
             )
 
             return await self.upsert_emoji(
@@ -503,37 +619,24 @@ class EmojiHashMap:
                 accessible=True,
             )
 
-        session = None
-        try:
-            with SQLSession(engine) as session:
-                for server in servers:
-                    logger.debug("Loading server %s...", server.name)
+        for server in servers:
+            logger.debug("Loading server %s...", server.name)
 
-                    update_emoji_async: list[Coroutine[Any, Any, UpdateBase]] = []
+            update_emoji_async: list["Coroutine[Any, Any, UpdateBase]"] = []
 
-                    is_internal = (
-                        globals.emoji_server is not None
-                        and server.id == globals.emoji_server.id
-                    )
-                    for emoji in server.emojis:
-                        update_emoji_async.append(
-                            update_emoji(server.id, is_internal, emoji)
-                        )
+            is_internal = (
+                globals.emoji_server is not None
+                and server.id == globals.emoji_server.id
+            )
+            for emoji in server.emojis:
+                update_emoji_async.append(update_emoji(server.id, is_internal, emoji))
 
-                    # I'll gather the requests one server at a time
-                    upserts = await asyncio.gather(*update_emoji_async)
-                    for upsert in upserts:
-                        session.execute(upsert)
+            # I'll gather the requests one server at a time
+            upserts = await asyncio.gather(*update_emoji_async)
+            for upsert in upserts:
+                session.execute(upsert)
 
-                    logger.debug("Server %s loaded.", server.name)
-
-                session.commit()
-        except Exception:
-            if session:
-                session.rollback()
-                session.close()
-
-            raise
+            logger.debug("Server %s loaded.", server.name)
 
         logger.info(ending_info_message)
 
@@ -550,22 +653,41 @@ class EmojiHashMap:
     ) -> discord.Emoji | None:
         """Try to create an emoji in the emoji server and, if successful, return it.
 
-        #### Args:
-            - `emoji_to_copy`: The emoji we are trying to copy into our emoji server. Defaults to None, in which case `emoji_to_copy_name` and either `emoji_to_copy_id` or `emoji_image` are used instead.
-            - `emoji_to_copy_id`: The ID of the missing emoji. Defaults to None, in which case either `emoji_to_copy` or `emoji_image` is used instead.
-            - `emoji_image`: An image to be directly loaded into the server. Defaults to None, in which case either `emoji_to_copy` or `emoji_to_copy_id` is used instead.
-            - `emoji_image_hash`: The hash of `emoji_image`. Defaults to none, in which case it will be calculated from `emoji_image`.
-            - `emoji_to_copy_name`: The name of a missing emoji, optionally preceded by an `"a:"` in case it's animated. Defaults to None, but must be included if either `emoji_to_copy_id` or `emoji_image` is.
-            - `session`: A connection to the database. Defaults to None, in which case a new one will be created for the DB operations.
+        Parameters
+        ----------
+        emoji_to_copy : :class:`~discord.PartialEmoji` | None, optional
+            The emoji to copy into the emoji server. Defaults to None, in which case `emoji_to_copy_name` and either `emoji_to_copy_id` or `emoji_image` are used instead.
+        emoji_to_copy_id : str | int | None, optional
+            The ID of the missing emoji. Defaults to None, in which case `emoji_image` is used instead. Only used if `emoji_to_copy` is None.
+        emoji_image : bytes | None, optional
+            An image to be directly loaded into the server. Defaults to None. Only used if `emoji_to_copy` and `emoji_to_copy_id` are None.
+        emoji_image_hash : str | None, optional
+            The hash of `emoji_image`. Defaults to None, in which case it will be calculated from `emoji_image`.
+        emoji_to_copy_name : str | None, optional
+            The name of a missing emoji, optionally preceded by an "a:" in case it's animated. Defaults to None, but must be included if either `emoji_to_copy_id` or `emoji_image` is.
+        session : :class:`~sqlalchemy.orm.Session` | None, optional
+            An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
 
-        #### Raises:
-            - `ArgumentError`: The number of arguments passed is incorrect.
-            - `ValueError`: `emoji_to_copy` argument was passed and had type `PartialEmoji` but it was not a custom emoji, or `emoji_to_copy_id` argument was passed and had type `str` but it was not a valid numerical ID.
-            - `Forbidden`: Emoji server permissions not set correctly.
-            - `HTTPResponseError`: HTTP request to fetch emoji image returned a status other than 200.
-            - `InvalidURL`: URL generated from emoji ID was not valid.
-            - `RuntimeError`: Session connection to the server to fetch image from URL failed.
-            - `ServerTimeoutError`: Connection to server to fetch image from URL timed out.
+        Returns
+        -------
+        :class:`~discord.Emoji` | None
+
+        Raises
+        ------
+        ArgumentError
+            The number of arguments passed is incorrect.
+        ValueError
+            `emoji_to_copy` argument was passed and had type `PartialEmoji` but it was not a custom emoji, or `emoji_to_copy_id` argument was passed and had type `str` but it was not a valid numerical ID.
+        :class:`~discord.Forbidden`
+            Emoji server permissions not set correctly.
+        HTTPResponseError
+            HTTP request to fetch emoji image returned a status other than 200.
+        InvalidURL
+            URL generated from emoji ID was not valid.
+        RuntimeError
+            Session connection to the server to fetch image from URL failed.
+        ServerTimeoutError
+            Connection to server to fetch image from URL timed out.
         """
         if not globals.emoji_server:
             return None
@@ -577,12 +699,15 @@ class EmojiHashMap:
                 emoji_to_copy if emoji_to_copy else emoji_to_copy_id,
             )
 
-            emoji_to_copy_id, emoji_to_copy_name, _, emoji_to_copy_url = (
-                globals.get_emoji_information(
-                    emoji_to_copy,
-                    emoji_to_copy_id,
-                    emoji_to_copy_name,
-                )
+            (
+                emoji_to_copy_id,
+                emoji_to_copy_name,
+                _,
+                emoji_to_copy_url,
+            ) = await globals.get_emoji_information(
+                emoji_to_copy,
+                emoji_to_copy_id,
+                emoji_to_copy_name,
             )
 
             emoji_image = await globals.get_image_from_URL(emoji_to_copy_url)
@@ -631,29 +756,61 @@ class EmojiHashMap:
                 logger.warning("Emoji server permissions not set correctly.")
                 raise
 
+        logger.debug("Emoji copied into server. Inserting into database...")
+        return await self._copy_emoji_into_db(
+            emoji_image_hash,
+            emoji_to_delete_id,
+            emoji,
+            emoji_server_id,
+            session=session,
+        )
+
+    @overload
+    async def _copy_emoji_into_db(
+        self,
+        emoji_image_hash: str,
+        emoji_to_delete_id: int | None,
+        emoji: discord.Emoji,
+        emoji_server_id: int,
+    ) -> discord.Emoji | None: ...
+
+    @overload
+    async def _copy_emoji_into_db(
+        self,
+        emoji_image_hash: str,
+        emoji_to_delete_id: int | None,
+        emoji: discord.Emoji,
+        emoji_server_id: int,
+        *,
+        session: SQLSession | None,
+    ) -> discord.Emoji | None: ...
+
+    @sql_command
+    async def _copy_emoji_into_db(
+        self,
+        emoji_image_hash: str,
+        emoji_to_delete_id: int | None,
+        emoji: discord.Emoji,
+        emoji_server_id: int,
+        *,
+        session: SQLSession,
+    ) -> discord.Emoji | None:
         # Copied the emoji, going to update my table
-        if not session:
-            session = SQLSession(engine)
-            close_after = True
-        else:
-            close_after = False
+        if emoji_to_delete_id is not None:
+            logger.debug(
+                "Deleting an emoji from database that was deleted from the server..."
+            )
+            try:
+                await self.delete_emoji(emoji_to_delete_id, session=session)
+            except Exception as e:
+                logger.error(
+                    "An error occurred when trying to delete an emoji from the hash map while running copy_emoji_into_server(): %s",
+                    e,
+                )
+                raise
+            logger.debug("Deleted.")
 
         try:
-            if emoji_to_delete_id is not None:
-                try:
-                    await self.delete_emoji(emoji_to_delete_id, session=session)
-                except Exception as e:
-                    logger.error(
-                        "An error occurred when trying to delete an emoji from the hash map while running copy_emoji_into_server(): %s",
-                        e,
-                    )
-                    if session:
-                        session.rollback()
-                        if close_after:
-                            session.close()
-
-                    raise
-
             await self.add_emoji(
                 emoji=emoji,
                 emoji_server_id=emoji_server_id,
@@ -661,41 +818,12 @@ class EmojiHashMap:
                 is_internal=True,
                 session=session,
             )
-
-            if emoji_to_copy:
-                await self.map_emoji(
-                    external_emoji=emoji_to_copy,
-                    internal_emoji=emoji,
-                    image_hash=emoji_image_hash,
-                    session=session,
-                )
-            elif emoji_to_copy_id:
-                await self.map_emoji(
-                    external_emoji_id=emoji_to_copy_id,
-                    external_emoji_name=emoji_to_copy_name,
-                    internal_emoji=emoji,
-                    image_hash=emoji_image_hash,
-                    session=session,
-                )
-
-            session.commit()
         except Exception as e:
-            if session:
-                session.rollback()
-                if close_after:
-                    session.close()
-
-            if isinstance(e, SQLError):
-                logger.warning(
-                    "An SQL error occurred while trying to copy an emoji into the emoji server: %s",
-                    e,
-                )
-            else:
-                logger.error(
-                    "An SQL error occurred while trying to copy an emoji into the emoji server: %s",
-                    e,
-                )
-                raise
+            logger.error(
+                "An SQL error occurred while trying to copy an emoji into the emoji server: %s",
+                e,
+            )
+            raise
 
         logger.debug("%s added to emoji server.", emoji)
         return emoji
@@ -711,28 +839,51 @@ class EmojiHashMap:
         image_hash: str | None = None,
         session: SQLSession | None = None,
     ) -> bool:
-        """Create a mapping between external and internal emoji, recording it locally and saving it in the emoji table.
+        """Attempt to create a mapping between external and internal emoji, recording it locally and saving it in the emoji table. Return True if creating the map succeeded and False otherwise.
 
-        #### Args:
-            - `external_emoji`: The custom emoji that is not present in any servers the bot is in. Defaults to None.
-            - `external_emoji_id`: The ID of the external emoji. Defaults to None.
-            - `external_emoji_name`: The name of the external emoji. Defaults to None.
-            - `internal_emoji`: An emoji the bot has in its emoji server.
-            - `image_hash`: The hash of the image associated with this emoji. Defaults to None, in which case will use the hash associated with `internal_emoji`.
-            - `session`: A connection to the database. Defaults to None, in which case a new one will be created.
+        Parameters
+        ----------
+        external_emoji : :class:`~discord.PartialEmoji` | None, optional
+            The custom emoji that is not present in any servers the bot is in. Defaults to None, in which case `external_emoji_id` will be used to fetch it instead.
+        external_emoji_id : int | str | None, optional
+            The ID of a custom emoji. Defaults to None. Only used if `external_emoji` is not present.
+        external_emoji_name : str | None, optional
+            The name of the emoji. Defaults to None, in which case the client will try to find an emoji with ID `external_emoji_id`. If it's included, it must start with the string "a:" if the emoji animated. Only used if `external_emoji` is not present.
+        internal_emoji : :class:`~discord.Emoji`
+            An emoji the bot has in its emoji server.
+        image_hash : str | None, optional
+            The hash of the image associated with this emoji. Defaults to None, in which case will use the hash associated with `internal_emoji`.
+        session : :class:`~sqlalchemy.orm.Session` | None, optional
+            An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
 
-        #### Raises:
-            - `ValueError`: Incorrect number of arguments passed.
-            - `SQLError`: SQL statement inferred from arguments was invalid or database connection failed.
-            - `HTTPResponseError`: HTTP request to fetch image returned a status other than 200.
-            - `InvalidURL`: URL generated from emoji was not valid.
-            - `RuntimeError`: Session connection failed.
-            - `ServerTimeoutError`: Connection to server timed out.
+        Returns
+        -------
+        bool
+
+        Raises
+        ------
+        ValueError
+            Incorrect number of arguments passed.
+        `sqlalchemy.exc.StatementError`
+            SQL statement inferred from arguments was invalid or database connection failed.
+        HTTPResponseError
+            HTTP request to fetch image returned a status other than 200.
+        InvalidURL
+            URL generated from emoji was not valid.
+        RuntimeError
+            Session connection failed.
+        ServerTimeoutError
+            Connection to server timed out.
         """
-        external_emoji_id, external_emoji_name, external_emoji_animated, _ = (
-            globals.get_emoji_information(
-                external_emoji, external_emoji_id, external_emoji_name
-            )
+        (
+            external_emoji_id,
+            external_emoji_name,
+            external_emoji_animated,
+            _,
+        ) = await globals.get_emoji_information(
+            external_emoji,
+            external_emoji_id,
+            external_emoji_name,
         )
 
         full_emoji = globals.client.get_emoji(external_emoji_id)
@@ -741,11 +892,7 @@ class EmojiHashMap:
         else:
             external_emoji_server_id = None
 
-        close_after = False
         try:
-            if not session:
-                session = SQLSession(engine)
-                close_after = True
             if not image_hash:
                 if partial_or_full_emoji := (external_emoji or full_emoji):
                     # Get the hash of the external emoji's image if we have access to it
@@ -755,7 +902,7 @@ class EmojiHashMap:
 
                 image_hash = globals.hash_image(image)
 
-            external_emoji_accessible = not not full_emoji
+            external_emoji_accessible = full_emoji.is_usable() if full_emoji else False
             await self.add_emoji(
                 emoji_id=external_emoji_id,
                 emoji_name=external_emoji_name,
@@ -765,16 +912,9 @@ class EmojiHashMap:
                 accessible=external_emoji_accessible,
                 session=session,
             )
-        except Exception:
-            if close_after and session:
-                session.rollback()
-                session.close()
-
-            raise
-
-        if close_after:
-            session.commit()
-            session.close()
+        except Exception as e:
+            logger.error(e)
+            return False
 
         return True
 
@@ -782,38 +922,96 @@ class EmojiHashMap:
     def get_matches(
         self,
         emoji: discord.PartialEmoji | int | str,
-    ) -> frozenset[int] | None: ...
+        *,
+        only_accessible: bool = False,
+    ) -> frozenset[int] | None:
+        """Return a frozenset with the emoji IDs of emoji available to the bot that match the emoji passed as argument, if there are any.
+
+        Parameters
+        ----------
+        emoji : :class:`~discord.PartialEmoji` | int | str
+            The emoji to find matches for or ID of same.
+        only_accessible : bool, optional
+            If set to True will return only emoji that are accessible by the bot. Defaults to False.
+
+        Returns
+        -------
+        frozenset[int] | None
+        """
+        ...
 
     @overload
     def get_matches(
         self,
         emoji: discord.PartialEmoji | int | str,
         *,
-        return_str: Literal[False],
-    ) -> frozenset[int] | None: ...
+        only_accessible: bool = False,
+        return_str: "Literal[False]",
+    ) -> frozenset[int] | None:
+        """Return a frozenset with the emoji IDs of emoji available to the bot that match the emoji passed as argument, if there are any.
+
+        Parameters
+        ----------
+        emoji : :class:`~discord.PartialEmoji` | int | str
+            The emoji to find matches for or ID of same.
+        only_accessible : bool, optional
+            If set to True will return only emoji that are accessible by the bot. Defaults to False.
+        return_str : bool, optional
+            If set to True will return a frozenset of stringified IDs. Defaults to False.
+
+        Returns
+        -------
+        frozenset[int] | None
+        """
+        ...
 
     @overload
     def get_matches(
         self,
         emoji: discord.PartialEmoji | int | str,
         *,
-        return_str: Literal[True],
-    ) -> frozenset[str] | None: ...
+        only_accessible: bool = False,
+        return_str: "Literal[True]",
+    ) -> frozenset[str] | None:
+        """Return a frozenset with the emoji IDs, converted to strings, of emoji available to the bot that match the emoji passed as argument, if there are any.
+
+        Parameters
+        ----------
+        emoji : :class:`~discord.PartialEmoji` | int | str
+            The emoji to find matches for or ID of same.
+        only_accessible : bool, optional
+            If set to True will return only emoji that are accessible by the bot. Defaults to False.
+        return_str : bool, optional
+            If set to True will return a frozenset of stringified IDs. Defaults to False.
+
+        Returns
+        -------
+        frozenset[str] | None
+        """
+        ...
 
     @beartype
     def get_matches(
         self,
         emoji: discord.PartialEmoji | int | str,
         *,
-        only_accessible: bool | None = None,
-        return_str: bool | None = False,
+        only_accessible: bool = False,
+        return_str: bool = False,
     ) -> frozenset[int] | frozenset[str] | None:
-        """Return a frozenset with the emoji IDs of emoji available to the bot that match the emoji passed as argument.
+        """Return a frozenset with the emoji IDs of emoji available to the bot that match the emoji passed as argument, if there are any.
 
-        #### Args:
-            - `emoji`: The emoji to find matches for or ID of same.
-            - `only_accessible`: If set to True will return only emoji that are accessible by the bot. Defaults to False.
-            - `return_str`: If set to True will return a frozenset of stringified IDs. Defaults to False.
+        Parameters
+        ----------
+        emoji : :class:`~discord.PartialEmoji` | int | str
+            The emoji to find matches for or ID of same.
+        only_accessible : bool, optional
+            If set to True will return only emoji that are accessible by the bot. Defaults to False.
+        return_str : bool, optional
+            If set to True will return a frozenset of stringified IDs. Defaults to False.
+
+        Returns
+        -------
+        frozenset[int] | frozenset[str] | None
         """
         logger.debug("Fetching matches for emoji %s.", emoji)
 
@@ -842,6 +1040,10 @@ class EmojiHashMap:
         else:
             hash_to_emoji = self._hash_to_emoji.get(image_hash)
         if not hash_to_emoji:
+            logger.debug(
+                "Hash for emoji with ID %s was found but couldn't be mapped to available emoji.",
+                emoji_id,
+            )
             return None
 
         if not return_str:
@@ -855,8 +1057,14 @@ class EmojiHashMap:
     def get_internal_equivalent(self, emoji_id: int) -> int | None:
         """Return the ID of an internal emoji matching the one passed, if available.
 
-        #### Args:
-            - `emoji_id`: The ID of the emoji to check.
+        Parameters
+        ----------
+        emoji_id : int
+            The ID of the emoji to check.
+
+        Returns
+        -------
+        int | None
         """
         logger.debug("Fetching internal equivalent to emoji with ID %s.", emoji_id)
 
@@ -864,6 +1072,68 @@ class EmojiHashMap:
             return None
 
         return self._hash_to_internal_emoji.get(image_hash)
+
+    @overload
+    def get_accessible_emoji(
+        self,
+        emoji_id: int,
+    ) -> discord.Emoji | None:
+        """Return an emoji matching the ID passed. First tries to return the one matching the ID itself, then an internal equivalent, and finally any accessible ones from other servers.
+
+        Parameters
+        ----------
+        emoji_id : int
+            The ID of the emoji to get.
+
+        Returns
+        -------
+        :class:`~discord.Emoji` | None
+        """
+        ...
+
+    @overload
+    def get_accessible_emoji(
+        self,
+        emoji_id: int,
+        *,
+        skip_self: "Literal[False]",
+    ) -> discord.Emoji | None:
+        """Return an emoji matching the ID passed. First tries to return the one matching the ID itself, then an internal equivalent, and finally any accessible ones from other servers.
+
+        Parameters
+        ----------
+        emoji_id : int
+            The ID of the emoji to get.
+        skip_self : bool, optional
+            Whether the function should ignore the attempt to get an emoji associated with the ID itself and skip straight to looking for an internal equivalent. Defaults to False.
+
+        Returns
+        -------
+        :class:`~discord.Emoji` | None
+        """
+        ...
+
+    @overload
+    def get_accessible_emoji(
+        self,
+        emoji_id: int,
+        *,
+        skip_self: "Literal[True]",
+    ) -> discord.Emoji | None:
+        """Return an emoji matching the ID passed. First tries to find an internal equivalent to the emoji, and if it can it tries to look for any accessible ones from other servers.
+
+        Parameters
+        ----------
+        emoji_id : int
+            The ID of the emoji to get.
+        skip_self : bool, optional
+            Whether the function should ignore the attempt to get an emoji associated with the ID itself and skip straight to looking for an internal equivalent. Defaults to False.
+
+        Returns
+        -------
+        :class:`~discord.Emoji` | None
+        """
+        ...
 
     @beartype
     def get_accessible_emoji(
@@ -874,9 +1144,16 @@ class EmojiHashMap:
     ) -> discord.Emoji | None:
         """Return an emoji matching the ID passed. First tries to return the one matching the ID itself, then an internal equivalent, and finally any accessible ones.
 
-        #### Args:
-            - `emoji_id`: The ID of the emoji to get.
-            - `skip_self`: Whether the function should ignore the attempt to get an emoji associated with the ID itself. Defaults to False.
+        Parameters
+        ----------
+        emoji_id : int
+            The ID of the emoji to get.
+        skip_self : bool, optional
+            Whether the function should ignore the attempt to get an emoji associated with the ID itself and skip straight to looking for an internal equivalent. Defaults to False.
+
+        Returns
+        -------
+        :class:`~discord.Emoji` | None
         """
         logger.debug(
             "Fetching accessible emoji matching ID %s with skip_self = %s.",
@@ -896,12 +1173,12 @@ class EmojiHashMap:
         ):
             return emoji
 
-        if (
-            (matching_emoji_ids := self.get_matches(emoji_id))
-            and (matching_emoji_id := set(matching_emoji_ids).pop())
-            and (emoji := globals.client.get_emoji(matching_emoji_id))
-        ):
-            return emoji
+        if matching_emoji_ids := self.get_matches(emoji_id):
+            for matching_emoji_id in matching_emoji_ids:
+                if (
+                    emoji := globals.client.get_emoji(matching_emoji_id)
+                ) and emoji.is_usable():
+                    return emoji
 
         return None
 
@@ -911,7 +1188,26 @@ class EmojiHashMap:
         *,
         emoji: discord.PartialEmoji | discord.Emoji,
         session: SQLSession | None = None,
-    ) -> str: ...
+    ) -> str:
+        """Return the hash of an emoji. Will ensure the emoji is in the hash map by adding it if it's not.
+
+        Parameters
+        ----------
+        emoji : :class:`~discord.PartialEmoji` | :class:`~discord.Emoji`
+            The emoji to get a hash for.
+        session : :class:`~sqlalchemy.orm.Session` | None, optional
+            An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
+
+        Returns
+        -------
+        str
+
+        Raises
+        ------
+        ValueError
+            `emoji` had type `PartialEmoji` but it was not a custom emoji.
+        """
+        ...
 
     @overload
     async def get_hash(
@@ -919,7 +1215,34 @@ class EmojiHashMap:
         *,
         emoji_id: int | str,
         session: SQLSession | None = None,
-    ) -> str | None: ...
+    ) -> str | None:
+        """Return the hash of an emoji. If an emoji with this ID can't be found in our existing hash map nor fetched from the client, returns None; otherwise will ensure the emoji is in the hash map by adding it if it's not.
+
+        Parameters
+        ----------
+        emoji_id : int | str
+            The ID of the emoji to get a hash for.
+        session : :class:`~sqlalchemy.orm.Session` | None, optional
+            An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
+
+        Returns
+        -------
+        str | None
+
+        Raises
+        ------
+        ValueError
+            `emoji_id` had type `str` but it was not a valid numerical ID.
+        HTTPResponseError
+            HTTP request to fetch image returned a status other than 200.
+        InvalidURL
+            URL generated from emoji was not valid.
+        RuntimeError
+            Session connection failed.
+        ServerTimeoutError
+            Connection to server timed out.
+        """
+        ...
 
     @overload
     async def get_hash(
@@ -929,7 +1252,34 @@ class EmojiHashMap:
         emoji_id: int | str,
         emoji_name: None,
         session: SQLSession | None = None,
-    ) -> str | None: ...
+    ) -> str | None:
+        """Return the hash of an emoji. If an emoji with this ID can't be found in our existing hash map nor fetched from the client, returns None; otherwise will ensure the emoji is in the hash map by adding it if it's not.
+
+        Parameters
+        ----------
+        emoji_id : int | str
+            The ID of the emoji to get a hash for.
+        session : :class:`~sqlalchemy.orm.Session` | None, optional
+            An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
+
+        Returns
+        -------
+        str | None
+
+        Raises
+        ------
+        ValueError
+            `emoji_id` had type `str` but it was not a valid numerical ID.
+        HTTPResponseError
+            HTTP request to fetch image returned a status other than 200.
+        InvalidURL
+            URL generated from emoji was not valid.
+        RuntimeError
+            Session connection failed.
+        ServerTimeoutError
+            Connection to server timed out.
+        """
+        ...
 
     @overload
     async def get_hash(
@@ -938,7 +1288,28 @@ class EmojiHashMap:
         emoji_id: int | str,
         emoji_name: str,
         session: SQLSession | None = None,
-    ) -> str: ...
+    ) -> str:
+        """Return the hash of an emoji. Will ensure the emoji is in the hash map by adding it if it's not.
+
+        Parameters
+        ----------
+        emoji_id : int | str
+            The ID of the emoji to get a hash for.
+        emoji_name : str
+            The name of the emoji. It must start with the string "a:" if the emoji animated.
+        session : :class:`~sqlalchemy.orm.Session` | None, optional
+            An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
+
+        Returns
+        -------
+        str
+
+        Raises
+        ------
+        ValueError
+            `emoji_id` had type `str` but it was not a valid numerical ID.
+        """
+        ...
 
     @beartype
     async def get_hash(
@@ -951,60 +1322,55 @@ class EmojiHashMap:
     ) -> str | None:
         """Return the hash of an emoji.
 
-        If only `emoji_id` is passed and the emoji can't be found in our existing hash map, returns None; otherwise will ensure the emoji is in the hash map.
+        If only `emoji_id` is passed and the emoji can't be found in our existing hash map nor inferred from the ID itself, returns None; otherwise will ensure the emoji is in the hash map by adding it if it's not.
 
-        #### Args:
-            - `emoji`: The emoji to get a hash for. Defaults to None, in which case `emoji_id` is used instead.
-            - `emoji_id`: The ID of the emoji to get a hash for. Defaults to None, in which case `emoji` is used instead.
-            - `emoji_name`: The name of the emoji. Defaults to None, but must be included if `emoji_id` is. If it starts with `"a:"` the emoji will be marked as animated.
-            - `session`: A connection to the database. Defaults to None, in which case a new one will be created for any necessary DB operations.
+        Parameters
+        ----------
+        emoji : :class:`~discord.PartialEmoji` | :class:`~discord.Emoji` | None, optional
+            The emoji to get a hash for. Defaults to None, in which case `emoji_id` is used instead.
+        emoji_id : int | str | None, optional
+            The ID of the emoji to get a hash for. Defaults to None. Only used if `emoji` isn't present.
+        emoji_name : str | None, optional
+            The name of the emoji. Defaults to None, in which case the client will try to find an emoji with ID `emoji_id`. If it's included, it must start with the string "a:" if the emoji animated. Only used if `emoji` is not present.
+        session : :class:`~sqlalchemy.orm.Session` | None, optional
+            An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
 
-        #### Raises:
-            - `ArgumentError`: The number of arguments passed is incorrect.
-            - `ValueError`: `emoji` argument was passed and had type `PartialEmoji` but it was not a custom emoji, or `emoji_id` argument was passed and had type `str` but it was not a valid numerical ID.
-            - `HTTPResponseError`: HTTP request to fetch image returned a status other than 200.
-            - `InvalidURL`: URL generated from emoji was not valid.
-            - `RuntimeError`: Session connection failed.
-            - `ServerTimeoutError`: Connection to server timed out.
+        Returns
+        -------
+        str | None
+
+        Raises
+        ------
+        ValueError
+            `emoji` argument was passed and had type `PartialEmoji` but it was not a custom emoji, or `emoji_id` argument was passed and had type `str` but it was not a valid numerical ID.
+        HTTPResponseError
+            HTTP request to fetch image returned a status other than 200.
+        InvalidURL
+            URL generated from emoji was not valid.
+        RuntimeError
+            Session connection failed.
+        ServerTimeoutError
+            Connection to server timed out.
         """
         logger.debug("Getting hash for emoji %s.", emoji if emoji else emoji_id)
 
-        if not emoji and emoji_id and not emoji_name:
-            return self._emoji_to_hash.get(int(emoji_id))
+        if (
+            (not emoji)
+            and emoji_id
+            and (not emoji_name)
+            and (emoji_hash := self._emoji_to_hash.get(int(emoji_id)))
+        ):
+            return emoji_hash
 
-        return await self.ensure_hash_map(
-            emoji=emoji,
-            emoji_id=emoji_id,
-            emoji_name=emoji_name,
-            session=session,
-        )
-
-    @overload
-    async def ensure_hash_map(
-        self,
-        *,
-        emoji: discord.Emoji | discord.PartialEmoji,
-        session: SQLSession | None = None,
-    ) -> str: ...
-
-    @overload
-    async def ensure_hash_map(
-        self,
-        *,
-        emoji_id: int | str,
-        emoji_name: str,
-        session: SQLSession | None = None,
-    ) -> str: ...
-
-    @overload
-    async def ensure_hash_map(
-        self,
-        *,
-        emoji: discord.Emoji | discord.PartialEmoji | None = None,
-        emoji_id: int | str | None = None,
-        emoji_name: str | None = None,
-        session: SQLSession | None = None,
-    ) -> str: ...
+        try:
+            return await self.ensure_hash_map(
+                emoji=emoji,
+                emoji_id=emoji_id,
+                emoji_name=emoji_name,
+                session=session,
+            )
+        except ArgumentError:
+            return None
 
     @beartype
     async def ensure_hash_map(
@@ -1017,40 +1383,120 @@ class EmojiHashMap:
     ) -> str:
         """Check that the emoji is in the hash map and, if not, add it to the map and to the database, then return the hash.
 
-        #### Args:
-            - `emoji`: A Discord emoji. Defaults to None, in which case the values below will be used instead.
-            - `emoji_id`: The ID of an emoji. Defaults to None, in which case the value above will be used instead.
-            - `emoji_name`: The name of the emoji. Defaults to None, but must be included if `emoji_id` is. If it starts with `"a:"` the emoji will be marked as animated.
-            - `session`: A connection to the database. Defaults to None, in which case a new one will be created for the DB operations.
+        Parameters
+        ----------
+        emoji : :class:`~discord.PartialEmoji` | :class:`~discord.Emoji` | None, optional
+            The emoji to get a hash for. Defaults to None, in which case `emoji_id` is used instead.
+        emoji_id : int | str | None, optional
+            The ID of the emoji to get a hash for. Defaults to None. Only used if `emoji` isn't present.
+        emoji_name : str | None, optional
+            The name of the emoji. Defaults to None, in which case the client will try to find an emoji with ID `emoji_id`. If it's included, it must start with the string "a:" if the emoji animated. Only used if `emoji` is not present.
+        session : :class:`~sqlalchemy.orm.Session` | None, optional
+            An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
 
-        #### Raises:
-            - `ArgumentError`: The number of arguments passed is incorrect.
-            - `ValueError`: `emoji` argument was passed and had type `PartialEmoji` but it was not a custom emoji, or `emoji_id` argument was passed and had type `str` but it was not a valid numerical ID.
-            - `HTTPResponseError`: HTTP request to fetch image returned a status other than 200.
-            - `InvalidURL`: URL generated from emoji was not valid.
-            - `RuntimeError`: Session connection failed.
-            - `ServerTimeoutError`: Connection to server timed out.
+        Returns
+        -------
+        str
+
+        Raises
+        ------
+        ArgumentError
+            The number of arguments passed is incorrect.
+        ValueError
+            `emoji` argument was passed and had type `PartialEmoji` but it was not a custom emoji, or `emoji_id` argument was passed and had type `str` but it was not a valid numerical ID.
+        HTTPResponseError
+            HTTP request to fetch image returned a status other than 200.
+        InvalidURL
+            URL generated from emoji was not valid.
+        RuntimeError
+            Session connection failed.
+        ServerTimeoutError
+            Connection to server timed out.
         """
         logger.debug(
             "Ensuring that emoji %s is in hash map.", emoji if emoji else emoji_id
         )
 
-        emoji_id, emoji_name, _, _ = globals.get_emoji_information(
-            emoji, emoji_id, emoji_name
+        emoji_id, emoji_name, _, _ = await globals.get_emoji_information(
+            emoji,
+            emoji_id,
+            emoji_name,
         )
 
         if already_existing_hash := self._emoji_to_hash.get(emoji_id):
             return already_existing_hash
 
+        if (emoji := globals.client.get_emoji(emoji_id)) and emoji.is_usable():
+            accessible = True
+        else:
+            accessible = False
+
         _, image_hash = await self.add_emoji(
             emoji=emoji,
             emoji_id=emoji_id,
             emoji_name=emoji_name,
+            accessible=accessible,
             update_db=True,
             session=session,
         )
 
         return image_hash
+
+    @beartype
+    async def get_mapped_emoji_id(
+        self,
+        emoji: discord.PartialEmoji | discord.Emoji | str,
+        session: SQLSession | None = None,
+    ) -> str:
+        """Return a string containing the ID of the accessible version of an emoji, if one exists:
+        - non-custom/default emoji will have their names returned;
+        - if the emoji is, itself, accessible, its ID is returned;
+        - if the bot has a registered emoji server and an emoji matching this one is in the server, its ID is returned;
+        - if there exists some other emoji in a server the bot is in that matches that emoji, its ID is returned;
+        - if the bot has a registered emoji server, it will try to copy this emoji into it and then return the ID of the copy;
+        - otherwise, just the name of the emoji is returned.
+
+        Parameters
+        ----------
+        emoji : :class:`~discord.PartialEmoji` | :class:`~discord.Emoji` | str
+            The emoji to get the ID of.
+        session : :class:`~sqlalchemy.orm.Session` | None, optional
+            An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
+
+        Returns
+        -------
+        str
+        """
+        if isinstance(emoji, str):
+            return emoji
+
+        if not emoji.id:
+            # Non-custom emoji
+            return str(emoji)
+
+        # Custom emoji
+        if mapped_emoji := self.get_accessible_emoji(emoji.id):
+            # If there is an emoji I have access to that matches this one, return it
+            return str(mapped_emoji)
+        elif globals.emoji_server:
+            # Try to copy this emoji into my emoji server
+            if isinstance(emoji, discord.PartialEmoji):
+                copied_emoji = await self.copy_emoji_into_server(
+                    emoji_to_copy=emoji,
+                    session=session,
+                )
+            else:
+                copied_emoji = await self.copy_emoji_into_server(
+                    emoji_to_copy_id=emoji.id,
+                    emoji_to_copy_name=emoji.name,
+                    session=session,
+                )
+
+            if copied_emoji:
+                return str(copied_emoji)
+
+        # Failed to copy the emoji
+        return str(emoji)
 
 
 map: EmojiHashMap

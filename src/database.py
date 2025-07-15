@@ -1,24 +1,37 @@
-from typing import Any, Callable, Iterable
+import inspect
+from functools import wraps
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Coroutine,
+    Iterable,
+    ParamSpec,
+    TypeVar,
+    overload,
+)
 
 from beartype import beartype
-from sqlalchemy import (
-    Boolean,
-    Integer,
-    String,
-    UniqueConstraint,
-    UpdateBase,
-    create_engine,
-)
+from sqlalchemy import Boolean, Integer
 from sqlalchemy import Select as SQLSelect
+from sqlalchemy import String, UniqueConstraint
 from sqlalchemy import Update as SQLUpdate
+from sqlalchemy import UpdateBase, create_engine
 from sqlalchemy import insert as other_db_insert
 from sqlalchemy.dialects import mysql, postgresql, sqlite
 from sqlalchemy.exc import StatementError as SQLError
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.orm import DeclarativeBase, Mapped
 from sqlalchemy.orm import Session as SQLSession
+from sqlalchemy.orm import mapped_column, sessionmaker
 
-from globals import T, run_retries, settings
+from globals import run_retries, settings
 from validations import logger
+
+if TYPE_CHECKING:
+    from typing import cast
+
+T = TypeVar("T", bound=Any)
+P = ParamSpec("P")
 
 
 class DBBase(DeclarativeBase):
@@ -33,12 +46,14 @@ class DBBridge(DBBase):
     """
     An SQLAlchemy ORM class representing a database table tracking existing bridges between channels and/or threads.
 
-    #### Columns
+    Columns
+    -------
     - `id (INT)`: The id number of a bridge, has `PRIMARY KEY` and `AUTO_INCREMENT`.
     - `source (VARCHAR(32))`: The ID of the bridge's source channel or thread.
     - `target (VARCHAR(32))`: The ID of the bridge's target channel or thread.
 
-    #### Constraints
+    Constraints
+    -----------
     - `unique_source_target (UNIQUE(source, target))`: A combination of source and target channel or thread IDs has to be unique.
     """
 
@@ -56,7 +71,8 @@ class DBWebhook(DBBase):
     """
     An SQLAlchemy ORM class representing a database table tracking webhooks managed by the bot in each channel.
 
-    #### Columns
+    Columns
+    -------
     - `channel (VARCHAR(32))`: The ID of the bridge's target channel or thread. Has `PRIMARY KEY`.
     - `webhook (VARCHAR(32))`: The ID of the webhook attached to the target channel which bridges messages to it.
     """
@@ -71,7 +87,8 @@ class DBMessageMap(DBBase):
     """
     An SQLAlchemy ORM class representing a database table listing the mappings between bridged messages.
 
-    #### Columns
+    Columns
+    -------
     - `id (INT)`: The id number of a mapping, has `PRIMARY KEY` and `AUTO_INCREMENT`.
     - `source_message (VARCHAR(32))`: The ID of the message in the original channel.
     - `source_channel (VARCHAR(32))`: The ID of the channel or thread that message was sent to.
@@ -98,7 +115,8 @@ class DBReactionMap(DBBase):
     """
     An SQLAlchemy ORM class representing a database table listing the mappings between bridged reactions.
 
-    #### Columns
+    Columns
+    -------
     - `id (INT)`: The id number of a mapping, has `PRIMARY KEY` and `AUTO_INCREMENT`.
     - `source_emoji (VARCHAR(30))`: The ID of the emoji in the source message.
     - `source_message (VARCHAR(32))`: The ID of the message in the original channel.
@@ -108,7 +126,8 @@ class DBReactionMap(DBBase):
     - `target_emoji_id (VARCHAR(32))`: The ID of the emoji in the target message.
     - `target_emoji_name (VARCHAR(32))`: The name of the emoji in the target message.
 
-    #### Constraints
+    Constraints
+    -----------
     - `unique_emoji_source_target (UNIQUE(source_emoji, source_message, target_message))`: A combination of source emoji, source message, and target message has to be unique.
     """
 
@@ -136,7 +155,8 @@ class DBAutoBridgeThreadChannels(DBBase):
     """
     An SQLAlchemy ORM class representing a database table listing all channels that will automatically bridge newly-created threads.
 
-    #### Columns
+    Columns
+    -------
     - `id (INT)`: The id number of an entry, has `PRIMARY KEY` and `AUTO_INCREMENT`.
     - `channel (VARCHAR(32))`: The ID of the channel that has auto-bridge-threads enabled.
     """
@@ -151,7 +171,8 @@ class DBEmoji(DBBase):
     """
     An SQLAlchemy ORM class representing a database table storing information about emoji.
 
-    #### Columns
+    Columns
+    -------
     - `id (VARCHAR(32))`: The emoji ID, has `PRIMARY KEY`.
     - `name (VARCHAR(32))`: The name of the emoji.
     - `server_id (VARCHAR(32))`: The ID of the server this emoji belongs to.
@@ -174,12 +195,14 @@ class DBAppWhitelist(DBBase):
     """
     An SQLAlchemy ORM class representing a database table storing IDs for applications/bots that are whitelisted for bridging messages in a given channel.
 
-    #### Columns
+    Columns
+    -------
     - `id (INT)`: The id number of an entry, has `PRIMARY KEY` and `AUTO_INCREMENT`.
     - `channel (VARCHAR(32))`: The ID of a source channel.
     - `application (VARCHAR(32))`: The ID of the application whose messages should be allowed through from that channel.
 
-    #### Constraints
+    Constraints
+    -----------
     - `unique_channel_app (UNIQUE(channel, application))`: A combination of channel and application IDs has to be unique.
     """
 
@@ -201,17 +224,29 @@ async def sql_upsert(
     ignored_cols: Iterable[str] | None = None,
     **kwargs: Any,
 ) -> UpdateBase:
-    """Return an `UpdateBase` for inserting values into a table if a set of indices is not duplicated or updating them if it is.
+    """Return an :class:`~sqlalchemy.UpdateBase` for inserting values into a table if a set of indices is not duplicated or updating them if it is.
 
-    #### Args:
-        - `table`: The table to insert into.
-        - `indices`: A list with the names of the indices (i.e. the columns whose uniqueness will be checked).
-        - `ignored_cols`: A list with the names of columns whose values should not be updated but which aren't, themselves, unique indices.
-        - `kwargs`: Named arguments for the values to insert or update. The values in `indices` must be a [proper subset](https://en.wikipedia.org/wiki/Subset) of the keys in `kwargs` (i.e. all `indices` should be in `kwargs.keys()` but there should be at least one key in `kwargs` that isn't in `indices`).
+    Parameters
+    ----------
+    table : :class:`~sqlalchemy.sql._typing._DMLTableArgument`
+        The table to insert into.
+    indices : Iterable[str]
+        A list with the names of the indices (i.e. the columns whose uniqueness will be checked).
+    ignored_cols : Iterable[str] | None, optional
+        A list with the names of columns whose values should not be updated but which aren't, themselves, unique indices. Defaults to None.
+    **kwargs : Any
+        Named arguments for the values to insert or update. The values in `indices` must be a [proper subset](https://en.wikipedia.org/wiki/Subset) of the keys in `kwargs` (i.e. all `indices` should be in `kwargs.keys()` but there should be at least one key in `kwargs` that isn't in `indices`).
 
-    #### Raises:
-        - `ValueError`: `indices` is not a proper subset of `kwargs.keys()`.
-        - `SQLError`: SQL statement inferred from arguments was invalid or database connection failed. This error can only be raised if the database dialect is not MySQL, PostgreSQL, nor SQLite.
+    Returns
+    -------
+    :class:`~sqlalchemy.UpdateBase`
+
+    Raises
+    ------
+    ValueError
+        `indices` is not a proper subset of `kwargs.keys()`.
+    :class:`~sqlalchemy.exc.StatementError`
+        SQL statement inferred from arguments was invalid or database connection failed. This error can only be raised if the database dialect is not MySQL, PostgreSQL, nor SQLite.
     """
     indices = set(indices)
     insert_values = kwargs
@@ -248,34 +283,25 @@ async def sql_upsert(
         )
     else:
         # I'll do a manual update in this case
-        session = None
-        try:
-            with SQLSession(engine) as session:
-                index_values = [
-                    getattr(table, idx) == insert_values[idx] for idx in indices
-                ]
-                upsert: UpdateBase
+        with Session() as session:
+            index_values = [
+                getattr(table, idx) == insert_values[idx] for idx in indices
+            ]
+            upsert: UpdateBase
 
-                def select_existing(session: SQLSession):
-                    select_table: SQLSelect[tuple[Any]] = SQLSelect(table).where(
-                        *index_values
-                    )
-                    return session.execute(select_table).first()
+            def select_existing(session: SQLSession):
+                select_table: SQLSelect[tuple[Any]] = SQLSelect(table).where(
+                    *index_values
+                )
+                return session.execute(select_table).first()
 
-                if await sql_retry(lambda: select_existing(session)):
-                    # Values with those keys do exist, so I update
-                    upsert = (
-                        SQLUpdate(table).where(*index_values).values(**update_values)
-                    )
-                else:
-                    upsert = other_db_insert(table).values(**insert_values)
+            if await sql_retry(lambda: select_existing(session)):
+                # Values with those keys do exist, so I update
+                upsert = SQLUpdate(table).where(*index_values).values(**update_values)
+            else:
+                upsert = other_db_insert(table).values(**insert_values)
 
-            return upsert
-        except Exception:
-            if session:
-                session.rollback()
-                session.close()
-            raise
+        return upsert
 
 
 @beartype
@@ -285,15 +311,25 @@ async def sql_insert_ignore_duplicate(
     indices: Iterable[str],
     **kwargs: Any,
 ) -> UpdateBase:
-    """Return an `UpdateBase` for inserting values into a table if a set of indices is not duplicated.
+    """Return an :class:`~sqlalchemy.UpdateBase` for inserting values into a table if a set of indices is not duplicated.
 
-    #### Args:
-        - `table`: The table to insert into.
-        - `indices`: A list with the names of the indices (i.e. the columns whose uniqueness will be checked).
-        - `kwargs`: Named arguments for the values to insert or update. The values in `indices` must be a [proper subset](https://en.wikipedia.org/wiki/Subset) of the keys in `kwargs` (i.e. all `indices` should be in `kwargs.keys()` but there should be at least one key in `kwargs` that isn't in `indices`).
+    Parameters
+    ----------
+    table : :class:`~sqlalchemy.sql._typing._DMLTableArgument`
+        The table to insert into.
+    indices : Iterable[str]
+        A list with the names of the indices (i.e. the columns whose uniqueness will be checked).
+    **kwargs : Any
+        Named arguments for the values to insert or update. The values in `indices` must be a [proper subset](https://en.wikipedia.org/wiki/Subset) of the keys in `kwargs` (i.e. all `indices` should be in `kwargs.keys()` but there should be at least one key in `kwargs` that isn't in `indices`).
 
-    #### Raises:
-        - `SQLError`: SQL statement inferred from arguments was invalid or database connection failed. This error can only be raised if the database dialect is not MySQL, PostgreSQL, nor SQLite.
+    Returns
+    -------
+    :class:`~sqlalchemy.UpdateBase`
+
+    Raises
+    ------
+    :class:`~sqlalchemy.exc.StatementError`
+        SQL statement inferred from arguments was invalid or database connection failed. This error can only be raised if the database dialect is not MySQL, PostgreSQL, nor SQLite.
     """
     indices = set(indices)
     insert_values = kwargs
@@ -316,35 +352,28 @@ async def sql_insert_ignore_duplicate(
         return insert.values(**insert_values).on_conflict_do_nothing()
     else:
         # I'll do a manual update in this case
-        session = None
-        try:
-            with SQLSession(engine) as session:
-                index_values = [
-                    getattr(table, idx) == insert_values[idx] for idx in indices
-                ]
-                insert_unknown: UpdateBase
+        with Session() as session:
+            index_values = [
+                getattr(table, idx) == insert_values[idx] for idx in indices
+            ]
+            insert_unknown: UpdateBase
 
-                def select_existing(session: SQLSession):
-                    select_table: SQLSelect[tuple[Any]] = SQLSelect(table).where(
-                        *index_values
-                    )
-                    return session.execute(select_table).first()
+            def select_existing(session: SQLSession):
+                select_table: SQLSelect[tuple[Any]] = SQLSelect(table).where(
+                    *index_values
+                )
+                return session.execute(select_table).first()
 
-                if await sql_retry(lambda: select_existing(session)):
-                    # Values with those keys do exist, so I do nothing
-                    random_index = indices.pop()
-                    insert_unknown = SQLUpdate(table).values(
-                        **{random_index: getattr(table, random_index)}
-                    )
-                else:
-                    insert_unknown = other_db_insert(table).values(**insert_values)
+            if await sql_retry(lambda: select_existing(session)):
+                # Values with those keys do exist, so I do nothing
+                random_index = indices.pop()
+                insert_unknown = SQLUpdate(table).values(
+                    **{random_index: getattr(table, random_index)}
+                )
+            else:
+                insert_unknown = other_db_insert(table).values(**insert_values)
 
-            return insert_unknown
-        except Exception:
-            if session:
-                session.rollback()
-                session.close()
-            raise
+        return insert_unknown
 
 
 @beartype
@@ -353,17 +382,134 @@ async def sql_retry(
     num_retries: int = 5,
     time_to_wait: float | int = 10,
 ) -> T:
-    """Run an SQL function and retry it every time an SQLError occurs up to a certain maximum number of tries. If it succeeds, return its result; otherwise, raise the error.
+    """Run an SQL function and retry it every time an :class:`~sqlalchemy.exc.StatementError` occurs up to a certain maximum number of tries. If it succeeds, return its result; otherwise, raise the error.
 
-    #### Args:
-        - `fun`: The function to run.
-        - `num_retries`: The number of times to try the function again.
-        - `time_to_wait`: How long to wait between retries.
+    Parameters
+    ----------
+    fun : Callable[..., T]
+        The function to run.
+    num_retries : int, optional
+        The number of times to try the function again. If set to 0 or less, will be set to 1.
+    time_to_wait : float | int, optional
+        Time in seconds to wait between retries; only used if `num_retries` is greater than 1. If set to 0 or less, will set `num_retries` to 1. Defaults to 5.
 
-    #### Returns:
-        - `T`: The result of calling `fun()`.
+    Returns
+    -------
+    T
     """
     return await run_retries(fun, num_retries, time_to_wait, SQLError)
+
+
+@overload
+def sql_command(
+    commit_results: Callable[P, Coroutine[Any, Any, T]],
+) -> Callable[P, Coroutine[Any, Any, T]]:
+    """Decorator that checks whether the :class:`~sqlalchemy.orm.Session`-typed argument of a function exists and is valid, and runs the function with it if so. Otherwise, it create a Python context manager with the session and calls the function within it.
+
+    Using the decorator with no arguments will commit the results of running the function to the database and will assume that the name of the argument to the function that should contain the session is "session".
+    """
+    ...
+
+
+@overload
+def sql_command(commit_results: Callable[P, T]) -> Callable[P, T]:
+    """Decorator that checks whether the :class:`~sqlalchemy.orm.Session`-typed argument of a function exists and is valid, and runs the function with it if so. Otherwise, it create a Python context manager with the session and calls the function within it.
+
+    Using the decorator with no arguments will commit the results of running the function to the database and will assume that the name of the argument to the function that should contain the session is "session".
+    """
+    pass
+
+
+@overload
+def sql_command(
+    commit_results: bool = True,
+    session_keyword: str = "session",
+) -> (
+    Callable[[Callable[P, Coroutine[Any, Any, T]]], Callable[P, Coroutine[Any, Any, T]]]
+    | Callable[[Callable[P, T]], Callable[P, T]]
+):
+    """Decorator that checks whether the :class:`~sqlalchemy.orm.Session`-typed argument of a function exists and is valid, and runs the function with it if so. Otherwise, it create a Python context manager with the session and calls the function within it.
+
+    Parameters
+    ----------
+    commit_results : bool, optional
+        Whether to commit the results of the session to the database, or roll them back in case of an error. Defaults to True.
+    session_keyword : str, optional
+        The name of the argument that is meant to store the session in the function. Defaults to "session".
+    """
+    ...
+
+
+def sql_command(
+    commit_results: Callable[P, T] | Callable[P, Coroutine[Any, Any, T]] | bool = True,
+    session_keyword: str = "session",
+) -> (
+    Callable[[Callable[P, T]], Callable[P, T]]
+    | Callable[
+        [Callable[P, Coroutine[Any, Any, T]]],
+        Callable[P, Coroutine[Any, Any, T]],
+    ]
+    | Callable[P, Coroutine[Any, Any, T]]
+    | Callable[P, T]
+):
+    if callable(commit_results):
+        calling_function = commit_results
+        commit_results = True
+    else:
+        calling_function = None
+
+    @overload
+    def decorator(func: Callable[P, T]) -> Callable[P, T]: ...
+
+    @overload
+    def decorator(
+        func: Callable[P, Coroutine[Any, Any, T]],
+    ) -> Callable[P, Coroutine[Any, Any, T]]: ...
+
+    def decorator(
+        func: Callable[P, T] | Callable[P, Coroutine[Any, Any, T]],
+    ) -> Callable[P, T] | Callable[P, Coroutine[Any, Any, T]]:
+        if inspect.iscoroutinefunction(func):
+            if TYPE_CHECKING:
+                func = cast(Callable[P, Coroutine[Any, Any, T]], func)
+
+            @wraps(func)
+            async def wrapper_func_async(*args, **kwargs) -> T:
+                if isinstance(kwargs.get(session_keyword), SQLSession):
+                    return await func(*args, **kwargs)
+
+                with Session() as session:
+                    kwargs[session_keyword] = session
+                    if commit_results:
+                        with session.begin():
+                            return await func(*args, **kwargs)
+                    return await func(*args, **kwargs)
+
+            wrapper_func = wrapper_func_async
+        else:
+            if TYPE_CHECKING:
+                func = cast(Callable[P, T], func)
+
+            @wraps(func)
+            def wrapper_func_sync(*args, **kwargs) -> T:
+                if isinstance(kwargs.get(session_keyword), SQLSession):
+                    return func(*args, **kwargs)
+
+                with Session() as session:
+                    kwargs[session_keyword] = session
+                    if commit_results:
+                        with session.begin():
+                            return func(*args, **kwargs)
+                    return func(*args, **kwargs)
+
+            wrapper_func = wrapper_func_sync
+
+        return wrapper_func
+
+    if calling_function is not None:
+        return decorator(calling_function)
+    else:
+        return decorator
 
 
 # Create the engine connecting to the database
@@ -373,6 +519,7 @@ engine = create_engine(
     pool_pre_ping=True,
     pool_recycle=3600,
 )
+Session = sessionmaker(engine)
 logger.info("Created.")
 
 # Create all tables represented by the above classes, if they haven't already been created
