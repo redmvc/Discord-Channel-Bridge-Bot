@@ -3,8 +3,10 @@ import traceback
 from types import TracebackType
 from typing import Any
 
-import test_cases.channel_bridging  # noqa: F401
-import test_cases.thread_bridging  # noqa: F401
+import test_cases.auto_bridge_threads  # noqa: F401
+import test_cases.bridge_thread  # noqa: F401
+import test_cases.creating_bridges  # noqa: F401
+import test_cases.demolishing_bridges  # noqa: F401
 import test_runner
 import tester_bot
 from tester_bot import start_client as start_tester_bot
