@@ -59,7 +59,8 @@ def log_expectation(
     message: str,
     type: Literal["success", "failure"],
     *,
-    print_to_console: bool = True,
+    print_success_to_console: bool = False,
+    print_failure_to_console: bool = True,
 ):
     """Log an expectation and optionally print it to console.
 
@@ -69,20 +70,23 @@ def log_expectation(
         The message to be logged.
     type : Literal["success", "failure"]
         Whether it's a success or a failure. Will add emoji to the start of the message depending on which.
-    print_to_console : bool, optional
-        Whether to also print the message to console. Defaults to True.
+    print_success_to_console : bool, optional
+        Whether to also print a success message to console. Defaults to False.
+    print_failure_to_console : bool, optional
+        Whether to also print a failure message to console. Defaults to True.
     """
     if type == "failure":
         message = f"FAILURE: {message}"
         logger.error(message)
         message = f"❌ {message}"
+        if print_failure_to_console:
+            print(message)
     else:
         message = f"SUCCESS: {message}"
         logger.info(message)
         message = f"✅ {message}"
-
-    if print_to_console:
-        print(message)
+        if print_success_to_console:
+            print(message)
 
 
 async def give_manage_webhook_perms(
