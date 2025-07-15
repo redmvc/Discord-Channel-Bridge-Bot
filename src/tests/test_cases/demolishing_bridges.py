@@ -155,13 +155,13 @@ async def works(
     # Send message from channel_1
     content = "message from channel 1"
     await channel_1.send(content)
-    _, f = await expect("no_new_message", in_channel=channel_2, timeout=5, heartbeat=5)
+    _, f = await expect("no_new_message", in_channel=channel_2, timeout=5)
     failure_messages += f
 
     # Send message from channel_2
     content = "message from channel 2"
     await channel_2.send(content)
-    _, f = await expect("no_new_message", in_channel=channel_1, timeout=5, heartbeat=5)
+    _, f = await expect("no_new_message", in_channel=channel_1, timeout=5)
     failure_messages += f
 
     return failure_messages
@@ -226,8 +226,8 @@ async def works_when_demolishing_all(
         thread_1.send("message from thread 1"),
     )
     expectations = await asyncio.gather(
-        expect("no_new_message", in_channel=channel_2, timeout=5, heartbeat=5),
-        expect("no_new_message", in_channel=thread_2, timeout=5, heartbeat=5),
+        expect("no_new_message", in_channel=channel_2, timeout=5),
+        expect("no_new_message", in_channel=thread_2, timeout=5),
     )
     for _, f in expectations:
         failure_messages += f
@@ -238,8 +238,8 @@ async def works_when_demolishing_all(
         thread_2.send("message from thread 2"),
     )
     expectations = await asyncio.gather(
-        expect("no_new_message", in_channel=channel_1, timeout=5, heartbeat=5),
-        expect("no_new_message", in_channel=thread_1, timeout=5, heartbeat=5),
+        expect("no_new_message", in_channel=channel_1, timeout=5),
+        expect("no_new_message", in_channel=thread_1, timeout=5),
     )
     for _, f in expectations:
         failure_messages += f

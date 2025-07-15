@@ -213,7 +213,6 @@ async def between_channels_works(
         "no_new_message",
         in_channel=channel_1,
         timeout=5,
-        heartbeat=5,
     )
     failure_messages += f
 
@@ -255,7 +254,6 @@ async def between_channels_works(
         "no_new_message",
         in_channel=channel_2,
         timeout=5,
-        heartbeat=5,
     )
     failure_messages += f
 
@@ -515,7 +513,6 @@ async def works_down_chains(
             "no_new_message",
             in_channel=channel_1,
             timeout=5,
-            heartbeat=5,
         ),
         expect(
             "next_message",
@@ -531,7 +528,6 @@ async def works_down_chains(
             "no_new_message",
             in_channel=channel_4,
             timeout=5,
-            heartbeat=5,
         ),
     )
     for _, f in expectations:
@@ -542,13 +538,11 @@ async def works_down_chains(
             "no_new_message",
             in_channel=channel_2,
             timeout=5,
-            heartbeat=5,
         ),
         expect(
             "no_new_message",
             in_channel=channel_3,
             timeout=5,
-            heartbeat=5,
         ),
     )
     for _, f in expectations:
@@ -567,7 +561,6 @@ async def works_down_chains(
             "no_new_message",
             in_channel=channel_2,
             timeout=5,
-            heartbeat=5,
         ),
         expect(
             "next_message",
@@ -578,7 +571,6 @@ async def works_down_chains(
             "no_new_message",
             in_channel=channel_4,
             timeout=5,
-            heartbeat=5,
         ),
     )
     for _, f in expectations:
@@ -589,13 +581,11 @@ async def works_down_chains(
             "no_new_message",
             in_channel=channel_1,
             timeout=5,
-            heartbeat=5,
         ),
         expect(
             "no_new_message",
             in_channel=channel_3,
             timeout=5,
-            heartbeat=5,
         ),
     )
     for _, f in expectations:
@@ -609,25 +599,21 @@ async def works_down_chains(
             "no_new_message",
             in_channel=channel_1,
             timeout=5,
-            heartbeat=5,
         ),
         expect(
             "no_new_message",
             in_channel=channel_2,
             timeout=5,
-            heartbeat=5,
         ),
         expect(
             "no_new_message",
             in_channel=channel_3,
             timeout=5,
-            heartbeat=5,
         ),
         expect(
             "no_new_message",
             in_channel=channel_4,
             timeout=5,
-            heartbeat=5,
         ),
     )
     for _, f in expectations:
@@ -656,7 +642,6 @@ async def works_down_chains(
             "no_new_message",
             in_channel=channel_4,
             timeout=5,
-            heartbeat=5,
         ),
     )
     for _, f in expectations:
@@ -667,19 +652,16 @@ async def works_down_chains(
             "no_new_message",
             in_channel=channel_1,
             timeout=5,
-            heartbeat=5,
         ),
         expect(
             "no_new_message",
             in_channel=channel_2,
             timeout=5,
-            heartbeat=5,
         ),
         expect(
             "no_new_message",
             in_channel=channel_3,
             timeout=5,
-            heartbeat=5,
         ),
     )
     for _, f in expectations:
