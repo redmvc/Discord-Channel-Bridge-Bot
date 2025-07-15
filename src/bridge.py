@@ -706,22 +706,28 @@ class Bridges:
                 bridges_to_demolish = [(source_id, target_id)]
                 if not one_sided:
                     bridges_to_demolish.append((target_id, source_id))
-            else:
+            elif outbound_bridges_from_source:
                 bridges_to_demolish = [
-                    (source_id, tid) for tid in self._outbound_bridges[source_id].keys()
+                    (source_id, tid) for tid in outbound_bridges_from_source.keys()
                 ]
-        else:
-            assert target_id
+            else:
+                bridges_to_demolish = []
+        elif target_id and inbound_bridges_to_target:
             bridges_to_demolish = [
-                (sid, target_id) for sid in self._inbound_bridges[target_id].keys()
+                (sid, target_id) for sid in inbound_bridges_to_target.keys()
             ]
+        else:
+            bridges_to_demolish = []
 
         # First we delete the Bridges from memory, and webhooks if necessary
         webhooks_deleted: set[str] = set()
         for sid, tid in bridges_to_demolish:
             if from_source := self._outbound_bridges.get(sid):
                 if from_source.get(tid):
-                    del self._outbound_bridges[sid][tid]
+                    try:
+                        del self._outbound_bridges[sid][tid]
+                    except Exception:
+                        pass
                 else:
                     logger.debug(
                         "Tried to demolish bridge from channel with ID %s to channel with ID %s but it was not in the list of outbound bridges.",
@@ -729,8 +735,13 @@ class Bridges:
                         tid,
                     )
 
-                if len(self._outbound_bridges[sid]) == 0:
-                    del self._outbound_bridges[sid]
+                if (bridges_from_source := self._outbound_bridges.get(sid)) and (
+                    len(bridges_from_source) == 0
+                ):
+                    try:
+                        del self._outbound_bridges[sid]
+                    except Exception:
+                        pass
             else:
                 logger.debug(
                     "Tried to demolish bridge from channel with ID %s but it was not in the list of outbound bridges.",
@@ -739,7 +750,10 @@ class Bridges:
 
             if to_target := self._inbound_bridges.get(tid):
                 if to_target.get(sid):
-                    del self._inbound_bridges[tid][sid]
+                    try:
+                        del self._inbound_bridges[tid][sid]
+                    except Exception:
+                        pass
                 else:
                     logger.debug(
                         "Tried to demolish bridge to channel with ID %s from channel with ID %s but it was not in the list of inbound bridges.",
@@ -747,8 +761,13 @@ class Bridges:
                         sid,
                     )
 
-                if len(self._inbound_bridges[tid]) == 0:
-                    del self._inbound_bridges[tid]
+                if (bridges_to_target := self._inbound_bridges.get(tid)) and (
+                    len(bridges_to_target) == 0
+                ):
+                    try:
+                        del self._inbound_bridges[tid]
+                    except Exception:
+                        pass
                     if deleted_webhook_id := await self.webhooks.delete_channel(tid):
                         webhooks_deleted.add(str(deleted_webhook_id))
             else:
