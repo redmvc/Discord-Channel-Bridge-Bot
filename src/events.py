@@ -1,7 +1,9 @@
 import asyncio
 import inspect
 import re
+import sys
 from copy import deepcopy
+from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple, TypedDict, overload
 
 import discord
@@ -31,6 +33,13 @@ from validations import ChannelTypeError, logger
 
 if TYPE_CHECKING:
     from typing import Any, Coroutine, Literal, NotRequired
+
+    from tests.tester_bot import process_tester_bot_command
+else:
+    path_to_tests = Path(__file__).parent.joinpath("tests")
+    if path_to_tests.is_dir():
+        sys.path.append(str(path_to_tests))
+        from tester_bot import process_tester_bot_command
 
 
 class ThreadSplat(TypedDict, total=False):
@@ -307,8 +316,9 @@ async def on_message(message: discord.Message):
 
         author_id = message.author.id
         application_id = message.application_id
-        message_from_self = (author_id == globals.client.application_id) or (
-            application_id and (application_id == globals.client.application_id)
+        client_application_id = globals.client.application_id
+        message_from_self = (author_id == client_application_id) or (
+            application_id and (application_id == client_application_id)
         )
         message_from_non_whitelisted_app = application_id and (
             (
@@ -336,6 +346,18 @@ async def on_message(message: discord.Message):
         ):
             del globals.message_lock[message_id]
             return
+
+        if (
+            (test_app := globals.test_app)
+            and (
+                ((test_app_id := test_app.id) == application_id)
+                or (test_app_id == author_id)
+            )
+            and message.content.strip().startswith("/")
+        ):
+            # Test app sending a slash command
+            if await process_tester_bot_command(message, globals.test_app):
+                return
 
         await bridge_message_helper(message)
 

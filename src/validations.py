@@ -1,21 +1,86 @@
 import inspect
 import logging
-from typing import Any, TypeVar
+from typing import Any, Literal, TypeVar
 
 import discord
 
 T = TypeVar("T", bound=Any)
 
 # Objects to log events
-logging.basicConfig(
-    filename="logs.log",
-    format="%(asctime)s %(levelname)s: %(message)s",
-    filemode="w",
-)
-logger = logging.getLogger()
-logger.setLevel(logging.INFO)
+formatter = logging.Formatter("%(asctime)s %(levelname)s %(message)s")
+_existing_loggers: list[str] = []
 
 
+def setup_logger(
+    name: str,
+    log_file: str,
+    level: (
+        Literal[
+            "CRITICAL",
+            "FATAL",
+            "ERROR",
+            "WARNING",
+            "WARN",
+            "INFO",
+            "DEBUG",
+            "NOTSET",
+        ]
+        | int
+    ) = logging.INFO,
+) -> logging.Logger:
+    """Create a logger. This function allows for the creation of multiple simultaneous loggers writing to multiple files.
+
+    Parameters
+    ----------
+    name : str
+        The name of the logger to be created. Must not conflict with existing loggers.
+    log_file : str
+        The log file to write to.
+    level : Literal["CRITICAL", "FATAL", "ERROR", "WARNING", "WARN", "INFO", "DEBUG", "NOTSET"] | int, optional
+        The error level to log. If set to an integer, it must be an existing level from the logging package. Defaults to `~logging.INFO`.
+
+    Returns
+    -------
+    :class:`~logging.Logger`
+
+    Raises
+    ------
+    ValueError
+        A logger with this name already exists, or the logging level does not match an existing level.
+    """
+    if name in _existing_loggers:
+        raise ValueError(f"A logger named '{name}' has already been registered.")
+    if isinstance(level, int) and (
+        level
+        not in [
+            logging.CRITICAL,
+            logging.FATAL,
+            logging.ERROR,
+            logging.WARNING,
+            logging.WARN,
+            logging.INFO,
+            logging.DEBUG,
+            logging.NOTSET,
+        ]
+    ):
+        raise ValueError(f"Level {level} is not a valid logging level.")
+
+    handler = logging.FileHandler(log_file, mode="w")
+    handler.setFormatter(formatter)
+
+    logger = logging.getLogger(name)
+    logger.setLevel(level)
+    logger.addHandler(handler)
+
+    _existing_loggers.append(name)
+
+    return logger
+
+
+logger = setup_logger("bridge_bot_logger", "logs.log", logging.INFO)
+
+
+# Error classes
 class ChannelTypeError(ValueError):
     pass
 

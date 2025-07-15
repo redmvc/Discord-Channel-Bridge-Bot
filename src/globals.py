@@ -26,7 +26,7 @@ if TYPE_CHECKING:
                     "db_dialect": "...",
                     ...
                 },
-                "testing": {
+                "development": {
                     "app_token": "...",
                     "db_dialect": "...",
                     ...
@@ -103,6 +103,9 @@ auto_bridge_thread_channels: set[int] = set()
 # Server which can be used to store unknown emoji for mirroring reactions
 emoji_server: discord.Guild | None = None
 
+# User referring to a bot for unit tests, should only be set by the testing procedures
+test_app: discord.User | None = None
+
 # Dictionary listing all apps whitelisted per channel
 per_channel_whitelist: dict[int, set[int]] = {}
 
@@ -128,13 +131,19 @@ CH = TypeVar("CH", bound=DiscordChannel)
 
 
 @overload
-async def get_channel_from_id(channel_or_id: int) -> DiscordChannel | None:
+async def get_channel_from_id(
+    channel_or_id: int,
+    *,
+    bot_client: discord.Client | None = None,
+) -> DiscordChannel | None:
     """Return a channel with the ID passed as argument, or None if it couldn't be found.
 
     Parameters
     ----------
     channel_or_id : int
         The ID of a channel.
+    bot_client : :class:`~discord.Client` | None, optional
+        The client of the bot from whose perspective to fetch the channel. Defaults to None, in which case the Bridge Bot's client will be used.
 
     Returns
     -------
@@ -159,6 +168,7 @@ async def get_channel_from_id(
     channel_or_id: int,
     *,
     ensure_text_or_thread: "Literal[False]",
+    bot_client: discord.Client | None = None,
 ) -> DiscordChannel | None:
     """Return a channel with the ID passed as argument, or None if it couldn't be found.
 
@@ -168,6 +178,8 @@ async def get_channel_from_id(
         The ID of a channel.
     ensure_text_or_thread : bool, optional
         Whether to assert that the channel is either a Discord text channel or a Thread before returning. Defaults to False.
+    bot_client : :class:`~discord.Client` | None, optional
+        The client of the bot from whose perspective to fetch the channel. Defaults to None, in which case the Bridge Bot's client will be used.
 
     Returns
     -------
@@ -192,6 +204,7 @@ async def get_channel_from_id(
     channel_or_id: int,
     *,
     ensure_text_or_thread: "Literal[True]",
+    bot_client: discord.Client | None = None,
 ) -> discord.TextChannel | discord.Thread:
     """Return the TextChannel or Thread with the ID passed as argument, or None if it couldn't be found.
 
@@ -201,6 +214,8 @@ async def get_channel_from_id(
         The ID of a channel.
     ensure_text_or_thread : bool, optional
         Whether to assert that the channel is either a Discord text channel or a Thread before returning. Defaults to False.
+    bot_client : :class:`~discord.Client` | None, optional
+        The client of the bot from whose perspective to fetch the channel. Defaults to None, in which case the Bridge Bot's client will be used.
 
     Returns
     -------
@@ -223,13 +238,19 @@ async def get_channel_from_id(
 
 
 @overload
-async def get_channel_from_id(channel_or_id: CH) -> CH:
+async def get_channel_from_id(
+    channel_or_id: CH,
+    *,
+    bot_client: discord.Client | None = None,
+) -> CH:
     """Return the channel passed as argument.
 
     Parameters
     ----------
     channel_or_id : :class:`~discord.abc.GuildChannel` | :class:`~discord.abc.PrivateChannel` | :class:`~discord.Thread` | :class:`~discord.PartialMessageable`
         A Discord channel.
+    bot_client : :class:`~discord.Client` | None, optional
+        The client of the bot from whose perspective to fetch the channel. Defaults to None, in which case the Bridge Bot's client will be used.
 
     Returns
     -------
@@ -243,6 +264,7 @@ async def get_channel_from_id(
     channel_or_id: CH,
     *,
     ensure_text_or_thread: "Literal[False]",
+    bot_client: discord.Client | None = None,
 ) -> CH:
     """Return the channel passed as argument.
 
@@ -252,6 +274,8 @@ async def get_channel_from_id(
         A Discord channel.
     ensure_text_or_thread : bool, optional
         Whether to assert that the channel is either a Discord text channel or a Thread before returning. Defaults to False.
+    bot_client : :class:`~discord.Client` | None, optional
+        The client of the bot from whose perspective to fetch the channel. Defaults to None, in which case the Bridge Bot's client will be used.
 
     Returns
     -------
@@ -265,6 +289,7 @@ async def get_channel_from_id(
     channel_or_id: DiscordChannel,
     *,
     ensure_text_or_thread: "Literal[True]",
+    bot_client: discord.Client | None = None,
 ) -> discord.TextChannel | discord.Thread:
     """Return the channel passed as argument.
 
@@ -274,6 +299,8 @@ async def get_channel_from_id(
         A Discord channel.
     ensure_text_or_thread : bool, optional
         Whether to assert that the channel is either a Discord text channel or a Thread before returning. Defaults to False.
+    bot_client : :class:`~discord.Client` | None, optional
+        The client of the bot from whose perspective to fetch the channel. Defaults to None, in which case the Bridge Bot's client will be used.
 
     Returns
     -------
@@ -292,6 +319,7 @@ async def get_channel_from_id(
     channel_or_id: DiscordChannel | int,
     *,
     ensure_text_or_thread: bool = False,
+    bot_client: discord.Client | None = None,
 ) -> DiscordChannel | None:
     """If the argument is a channel, return it unchanged; otherwise, return a channel with the ID passed as argument, or None if it couldn't be found.
 
@@ -301,6 +329,8 @@ async def get_channel_from_id(
         Either a Discord channel or an ID of same.
     ensure_text_or_thread : bool, optional
         Whether to assert that the channel is either a Discord text channel or a Thread before returning. Defaults to False.
+    bot_client : :class:`~discord.Client` | None, optional
+        The client of the bot from whose perspective to fetch the channel. Defaults to None, in which case the Bridge Bot's client will be used. If this argument is not None and `channel_or_id` is a channel, will get the channel's ID and then try to fetch it from `bot_client`'s perspective.
 
     Returns
     -------
@@ -319,11 +349,16 @@ async def get_channel_from_id(
     :class:`~discord.Forbidden`
         The client does not not have permission to fetch the channel with that ID.
     """
+    if (bot_client is not None) and not isinstance(channel_or_id, int):
+        channel_or_id = channel_or_id.id
+    global client
+    bot_client = bot_client or client
+
     if isinstance(channel_or_id, int):
-        channel = client.get_channel(channel_or_id)
+        channel = bot_client.get_channel(channel_or_id)
         if not channel:
             try:
-                channel = await client.fetch_channel(channel_or_id)
+                channel = await bot_client.fetch_channel(channel_or_id)
             except Exception:
                 channel = None
     else:
@@ -493,14 +528,44 @@ async def get_channel_member(
     :class:`~discord.Forbidden`
         The client does not not have access to the server the channel is in.
     """
-    channel_member = channel.guild.get_member(member_id)
-    if not channel_member:
+    return await get_server_member(channel.guild, member_id)
+
+
+@beartype
+async def get_server_member(
+    server: discord.Guild,
+    member_id: int,
+) -> discord.Member | None:
+    """Return a server's member by their ID, or None if they can't be found.
+
+    Parameters
+    ----------
+    server : :class:`~discord.abc.GuildChannel` | :class:`~discord.Thread`
+        A Discord server.
+    member_id : int
+        The ID of the server member.
+
+    Returns
+    -------
+    :class:`~discord.Member` | None
+
+    Raises
+    ------
+    :class:`~discord.HTTPException`
+        Fetching the member failed.
+    :class:`~discord.NotFound`
+        The member could not be found.
+    :class:`~discord.Forbidden`
+        The client does not not have access to the server the channel is in.
+    """
+    server_member = server.get_member(member_id)
+    if not server_member:
         try:
-            channel_member = await channel.guild.fetch_member(member_id)
+            server_member = await server.fetch_member(member_id)
         except Exception:
             return None
 
-    return channel_member
+    return server_member
 
 
 @beartype
