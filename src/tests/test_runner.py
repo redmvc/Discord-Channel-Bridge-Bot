@@ -620,8 +620,6 @@ class TestRunner:
 
                     if failure_messages:
                         test_case_had_failures = True
-                    else:
-                        print("✅")
 
                 if not test_case_had_failures:
                     log_expectation(
