@@ -4,6 +4,7 @@ from abc import ABC
 from collections import defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
+from re import finditer
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -52,6 +53,59 @@ test_function_type = Callable[
 CoroT = TypeVar("CoroT", bound=test_function_type)
 
 failures: dict[str, list[str]] = {}
+
+
+@beartype
+def camel_case_split(
+    string: str,
+    *,
+    join_str: str = " ",
+    lowercase_after_first: bool = True,
+    other_split_strs: list[str] = ["_"],
+) -> str:
+    """Split `string` along CamelCase divisions then return a string joining the result using `join_str`.
+
+    Parameters
+    ----------
+    string : str
+        The string to split and reijoin.
+    join_str : str, optional
+        Which string to use to join the split string. Defaults to " ".
+    lowercase_after_first : bool, optional
+        Whether to lowercase every word other than the first one. Defaults to True.
+    other_split_strs : list[str], optional
+        Other strings to split the string along. Defaults to a list containing only "_".
+
+    Returns
+    -------
+    str
+
+    Examples
+    --------
+    >>> camel_case_split("CamelCase_withUnderscore")
+    'Camel case with underscore'
+    >>> camel_case_split("CamelCase_withUnderscore*and*Asterisk", join_str=" & ", lowercase_after_first=False, other_split_strs=["_", "*"])
+    'Camel & Case & with & Underscore & and & Asterisk'
+    """
+    matches = finditer(".+?(?:(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])|$)", string)
+    split_str = [m.group(0) for m in matches]
+
+    if lowercase_after_first or other_split_strs:
+        for i, s in enumerate(split_str):
+            if lowercase_after_first:
+                s = s.lower()
+
+            for split_char in other_split_strs:
+                s = join_str.join(s.split(split_char))
+
+            split_str[i] = s
+
+        if lowercase_after_first:
+            split_str[0] = string[0] + (
+                split_str[0][1:] if (len(split_str[0]) > 1) else ""
+            )
+
+    return join_str.join(split_str)
 
 
 @beartype
@@ -537,11 +591,14 @@ class TestRunner:
             logger.info("")
             print("\nRunning tests.\n")
             for test_case in self.test_cases:
-                logger.info(f"Starting test case {type(test_case).__name__}.")
-                print(f"Starting test case {type(test_case).__name__}.")
+                test_case_name = type(test_case).__name__
+                logger.info(f'Starting test case "{test_case_name}".')
+                print(f"{camel_case_split(test_case_name)}...")
+                test_case_had_failures = False
                 for test in test_case.tests:
-                    logger.info(f"Starting test {test.__name__}.")
-                    print(f"Starting test {test.__name__}.")
+                    test_name = test.__name__
+                    logger.info(f'Starting test "{test_name}".')
+                    print(f"...{camel_case_split(test_name)}.")
 
                     tester_bot.received_messages = defaultdict(lambda: [])
                     try:
@@ -552,15 +609,26 @@ class TestRunner:
                             testing_channels,
                         )
                         if failure_messages:
-                            failures[test.__name__] = failure_messages
+                            failures[test_name] = failure_messages
                     except Exception as e:
-                        failure_message = [
+                        failure_messages = [
                             f"An error occurred while running the test: {e}"
                         ]
-                        failures[test.__name__] = failure_message
-                        log_expectation(failure_message[0], "failure")
+                        failures[test_name] = failure_messages
+                        log_expectation(failure_messages[0], "failure")
                     logger.info("")
-                    print("")
+
+                    if failure_messages:
+                        test_case_had_failures = True
+                    else:
+                        print("✅")
+
+                if not test_case_had_failures:
+                    log_expectation(
+                        f'All "{camel_case_split(test_case_name)}" tests passed!',
+                        "success",
+                        print_success_to_console=True,
+                    )
                 logger.info("")
                 print("")
 
