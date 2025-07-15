@@ -466,6 +466,7 @@ class FakeMessage:
         )
 
 
+@beartype
 async def process_tester_bot_command(
     message: discord.Message | FakeMessage,
     tester_bot_user: discord.User,

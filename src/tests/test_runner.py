@@ -89,6 +89,7 @@ def log_expectation(
             print(message)
 
 
+@beartype
 async def give_manage_webhook_perms(
     tester_bot: discord.Client,
     testing_server: discord.Guild,
@@ -105,6 +106,7 @@ async def give_manage_webhook_perms(
     await _give_or_remove_manage_webhook_perms(tester_bot, testing_server, give=True)
 
 
+@beartype
 async def remove_manage_webhook_perms(
     tester_bot: discord.Client,
     testing_server: discord.Guild,
