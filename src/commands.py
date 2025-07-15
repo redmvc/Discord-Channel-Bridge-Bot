@@ -612,7 +612,6 @@ async def bridge_thread_helper(
 
 
 @sql_command
-@beartype
 async def bridge_thread_helper(
     thread_to_bridge: discord.Thread,
     user_id: int,
