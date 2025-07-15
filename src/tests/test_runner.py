@@ -704,10 +704,19 @@ class MessageExpectation(Expectation, total=False):
     not_be_a_reply_to: "NotRequired[discord.Message]"
     be_from: "NotRequired[int | discord.User | discord.Member | discord.Client]"
     not_be_from: "NotRequired[int | discord.User | discord.Member | discord.Client]"
+    have_embed: "NotRequired[EmbedExpectation]"
+    have_embeds: "NotRequired[list[EmbedExpectation]]"
 
 
 class ExistingMessageExpectation(MessageExpectation, total=False):
     be_in_channel: "NotRequired[int | discord.TextChannel | discord.Thread]"
+
+
+class EmbedExpectation(TypedDict, total=False):
+    whose_description_equals: "NotRequired[str]"
+    whose_description_contains: "NotRequired[str]"
+    whose_url_equals: "NotRequired[str]"
+    whose_url_contains: "NotRequired[str]"
 
 
 @overload
@@ -727,7 +736,7 @@ async def expect(
     in_channel : int | :class:`~discord.TextChannel` | :class:`~discord.Thread`
         A channel in which a message should be expected, or ID of same.
     to : list[:class:`~MessageExpectation`] | :class:`~MessageExpectation`
-        A list of things to expect of that message. The valid expectations are: "contain", "not_contain", "equal", "not_equal", "be_a_reply_to", "not_be_a_reply_to", "be_from", and "not_be_from".
+        A list of things to expect of that message. The valid expectations are: "contain", "not_contain", "equal", "not_equal", "be_a_reply_to", "not_be_a_reply_to", "be_from", "not_be_from", "have_embed", and "have_embeds".
     timeout : float | int, optional
         How long to wait, in seconds, for the message to arrive. If set to less than 1, will be set to 1. Defaults to 10.
     heartbeat : float | int, optional
@@ -755,7 +764,7 @@ async def expect(
     in_channel : int | :class:`~discord.TextChannel` | :class:`~discord.Thread` | None, optional
         A channel in which the message should be expected. Equivalent to setting the "be_in_channel" expectation in `to`.
     to : list[:class:`~MessageExpectation`] | :class:`~MessageExpectation`
-        A list of things to expect of that message. The valid expectations are: "contain", "not_contain", "equal", "not_equal", "be_a_reply_to", "not_be_a_reply_to", "be_from", "not_be_from", and "be_in_channel".
+        A list of things to expect of that message. The valid expectations are: "contain", "not_contain", "equal", "not_equal", "be_a_reply_to", "not_be_a_reply_to", "be_from", "not_be_from", "have_embed", "have_embeds", and "be_in_channel".
 
     Returns
     -------
@@ -1017,6 +1026,91 @@ async def expect(
                 else:
                     failure_messages.append(message)
                     log_expectation(message, "failure")
+
+            continue
+
+        if expectation in ("have_embed", "have_embeds"):
+            if expectation == "have_embed":
+                value = [value]
+
+            if TYPE_CHECKING:
+                value = cast(list[EmbedExpectation], value)
+
+            embeds = obj.embeds
+            if len(embeds) < len(value):
+                message = f"expected message to have at least {len(value)} embeds but it had {len(embeds)} embeds instead"
+                failure_messages.append(message)
+                log_expectation(message, "failure")
+                continue
+
+            for idx, embed_expectation in enumerate(value):
+                embed = embeds[idx]
+
+                if description_must_contain := embed_expectation.get(
+                    "whose_description_contains"
+                ):
+                    message = f"expected description of embed #{idx} to contain text\n    {description_must_contain}"
+                    if not embed.description:
+                        message = f"{message}\n  but it was empty instead"
+                        result = "failure"
+                    elif description_must_contain not in embed.description:
+                        message = f"{message}\n  was instead:\n    {embed.description}"
+                        result = "failure"
+                    else:
+                        result = "success"
+
+                    if result == "failure":
+                        failure_messages.append(message)
+                    log_expectation(message, result)
+                elif description_must_equal := embed_expectation.get(
+                    "whose_description_equals"
+                ):
+                    message = f"expected description of embed #{idx} to equal\n    {description_must_equal}"
+                    if not embed.description:
+                        message = f"{message}\n  but it was empty instead"
+                        result = "failure"
+                    elif description_must_equal != embed.description:
+                        message = f"{message}\n  was instead:\n    {embed.description}"
+                        result = "failure"
+                    else:
+                        result = "success"
+
+                    if result == "failure":
+                        failure_messages.append(message)
+                    log_expectation(message, result)
+
+                if url_must_contain := embed_expectation.get("whose_url_contains"):
+                    message = (
+                        f"expected URL of embed #{idx} to contain '{url_must_contain}'"
+                    )
+                    if not embed.url:
+                        message = f"{message} but embed had no URL"
+                        result = "failure"
+                    elif url_must_contain != embed.url:
+                        message = f"{message} but it was instead '{embed.url}'"
+                        result = "failure"
+                    else:
+                        result = "success"
+
+                    if result == "failure":
+                        failure_messages.append(message)
+                    log_expectation(message, result)
+                elif url_must_equal := embed_expectation.get("whose_url_equals"):
+                    message = (
+                        f"expected URL of embed #{idx} to equal '{url_must_equal}'"
+                    )
+                    if not embed.url:
+                        message = f"{message} but embed had no URL"
+                        result = "failure"
+                    elif url_must_equal != embed.url:
+                        message = f"{message} but it was instead '{embed.url}'"
+                        result = "failure"
+                    else:
+                        result = "success"
+
+                    if result == "failure":
+                        failure_messages.append(message)
+                    log_expectation(message, result)
 
             continue
 
