@@ -599,6 +599,7 @@ class TestRunner:
                     test_name = test.__name__
                     logger.info(f'Starting test "{test_name}".')
                     print(f"...{camel_case_split(test_name)}.")
+                    full_test_name = f"{camel_case_split(test_case_name)} {camel_case_split(test_name)}."
 
                     tester_bot.received_messages = defaultdict(lambda: [])
                     try:
@@ -609,12 +610,12 @@ class TestRunner:
                             testing_channels,
                         )
                         if failure_messages:
-                            failures[test_name] = failure_messages
+                            failures[full_test_name] = failure_messages
                     except Exception as e:
                         failure_messages = [
                             f"An error occurred while running the test: {e}"
                         ]
-                        failures[test_name] = failure_messages
+                        failures[full_test_name] = failure_messages
                         log_expectation(failure_messages[0], "failure")
                     logger.info("")
 
