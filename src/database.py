@@ -1,4 +1,15 @@
-from typing import Any, Callable, Iterable
+import inspect
+from functools import wraps
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Coroutine,
+    Iterable,
+    ParamSpec,
+    TypeVar,
+    overload,
+)
 
 from beartype import beartype
 from sqlalchemy import Boolean, Integer
@@ -11,10 +22,16 @@ from sqlalchemy.dialects import mysql, postgresql, sqlite
 from sqlalchemy.exc import StatementError as SQLError
 from sqlalchemy.orm import DeclarativeBase, Mapped
 from sqlalchemy.orm import Session as SQLSession
-from sqlalchemy.orm import mapped_column
+from sqlalchemy.orm import mapped_column, sessionmaker
 
-from globals import T, run_retries, settings
+from globals import run_retries, settings
 from validations import logger
+
+if TYPE_CHECKING:
+    from typing import cast
+
+T = TypeVar("T", bound=Any)
+P = ParamSpec("P")
 
 
 class DBBase(DeclarativeBase):
@@ -266,34 +283,25 @@ async def sql_upsert(
         )
     else:
         # I'll do a manual update in this case
-        session = None
-        try:
-            with SQLSession(engine) as session:
-                index_values = [
-                    getattr(table, idx) == insert_values[idx] for idx in indices
-                ]
-                upsert: UpdateBase
+        with Session() as session:
+            index_values = [
+                getattr(table, idx) == insert_values[idx] for idx in indices
+            ]
+            upsert: UpdateBase
 
-                def select_existing(session: SQLSession):
-                    select_table: SQLSelect[tuple[Any]] = SQLSelect(table).where(
-                        *index_values
-                    )
-                    return session.execute(select_table).first()
+            def select_existing(session: SQLSession):
+                select_table: SQLSelect[tuple[Any]] = SQLSelect(table).where(
+                    *index_values
+                )
+                return session.execute(select_table).first()
 
-                if await sql_retry(lambda: select_existing(session)):
-                    # Values with those keys do exist, so I update
-                    upsert = (
-                        SQLUpdate(table).where(*index_values).values(**update_values)
-                    )
-                else:
-                    upsert = other_db_insert(table).values(**insert_values)
+            if await sql_retry(lambda: select_existing(session)):
+                # Values with those keys do exist, so I update
+                upsert = SQLUpdate(table).where(*index_values).values(**update_values)
+            else:
+                upsert = other_db_insert(table).values(**insert_values)
 
-            return upsert
-        except Exception:
-            if session:
-                session.rollback()
-                session.close()
-            raise
+        return upsert
 
 
 @beartype
@@ -344,35 +352,28 @@ async def sql_insert_ignore_duplicate(
         return insert.values(**insert_values).on_conflict_do_nothing()
     else:
         # I'll do a manual update in this case
-        session = None
-        try:
-            with SQLSession(engine) as session:
-                index_values = [
-                    getattr(table, idx) == insert_values[idx] for idx in indices
-                ]
-                insert_unknown: UpdateBase
+        with Session() as session:
+            index_values = [
+                getattr(table, idx) == insert_values[idx] for idx in indices
+            ]
+            insert_unknown: UpdateBase
 
-                def select_existing(session: SQLSession):
-                    select_table: SQLSelect[tuple[Any]] = SQLSelect(table).where(
-                        *index_values
-                    )
-                    return session.execute(select_table).first()
+            def select_existing(session: SQLSession):
+                select_table: SQLSelect[tuple[Any]] = SQLSelect(table).where(
+                    *index_values
+                )
+                return session.execute(select_table).first()
 
-                if await sql_retry(lambda: select_existing(session)):
-                    # Values with those keys do exist, so I do nothing
-                    random_index = indices.pop()
-                    insert_unknown = SQLUpdate(table).values(
-                        **{random_index: getattr(table, random_index)}
-                    )
-                else:
-                    insert_unknown = other_db_insert(table).values(**insert_values)
+            if await sql_retry(lambda: select_existing(session)):
+                # Values with those keys do exist, so I do nothing
+                random_index = indices.pop()
+                insert_unknown = SQLUpdate(table).values(
+                    **{random_index: getattr(table, random_index)}
+                )
+            else:
+                insert_unknown = other_db_insert(table).values(**insert_values)
 
-            return insert_unknown
-        except Exception:
-            if session:
-                session.rollback()
-                session.close()
-            raise
+        return insert_unknown
 
 
 @beartype
@@ -399,6 +400,118 @@ async def sql_retry(
     return await run_retries(fun, num_retries, time_to_wait, SQLError)
 
 
+@overload
+def sql_command(
+    commit_results: Callable[P, Coroutine[Any, Any, T]],
+) -> Callable[P, Coroutine[Any, Any, T]]:
+    """Decorator that checks whether the :class:`~sqlalchemy.orm.Session`-typed argument of a function exists and is valid, and runs the function with it if so. Otherwise, it create a Python context manager with the session and calls the function within it.
+
+    Using the decorator with no arguments will commit the results of running the function to the database and will assume that the name of the argument to the function that should contain the session is "session".
+    """
+    ...
+
+
+@overload
+def sql_command(commit_results: Callable[P, T]) -> Callable[P, T]:
+    """Decorator that checks whether the :class:`~sqlalchemy.orm.Session`-typed argument of a function exists and is valid, and runs the function with it if so. Otherwise, it create a Python context manager with the session and calls the function within it.
+
+    Using the decorator with no arguments will commit the results of running the function to the database and will assume that the name of the argument to the function that should contain the session is "session".
+    """
+    pass
+
+
+@overload
+def sql_command(
+    commit_results: bool = True,
+    session_keyword: str = "session",
+) -> (
+    Callable[[Callable[P, Coroutine[Any, Any, T]]], Callable[P, Coroutine[Any, Any, T]]]
+    | Callable[[Callable[P, T]], Callable[P, T]]
+):
+    """Decorator that checks whether the :class:`~sqlalchemy.orm.Session`-typed argument of a function exists and is valid, and runs the function with it if so. Otherwise, it create a Python context manager with the session and calls the function within it.
+
+    Parameters
+    ----------
+    commit_results : bool, optional
+        Whether to commit the results of the session to the database, or roll them back in case of an error. Defaults to True.
+    session_keyword : str, optional
+        The name of the argument that is meant to store the session in the function. Defaults to "session".
+    """
+    ...
+
+
+def sql_command(
+    commit_results: Callable[P, T] | Callable[P, Coroutine[Any, Any, T]] | bool = True,
+    session_keyword: str = "session",
+) -> (
+    Callable[[Callable[P, T]], Callable[P, T]]
+    | Callable[
+        [Callable[P, Coroutine[Any, Any, T]]],
+        Callable[P, Coroutine[Any, Any, T]],
+    ]
+    | Callable[P, Coroutine[Any, Any, T]]
+    | Callable[P, T]
+):
+    if callable(commit_results):
+        calling_function = commit_results
+        commit_results = True
+    else:
+        calling_function = None
+
+    @overload
+    def decorator(func: Callable[P, T]) -> Callable[P, T]: ...
+
+    @overload
+    def decorator(
+        func: Callable[P, Coroutine[Any, Any, T]],
+    ) -> Callable[P, Coroutine[Any, Any, T]]: ...
+
+    def decorator(
+        func: Callable[P, T] | Callable[P, Coroutine[Any, Any, T]],
+    ) -> Callable[P, T] | Callable[P, Coroutine[Any, Any, T]]:
+        if inspect.iscoroutinefunction(func):
+            if TYPE_CHECKING:
+                func = cast(Callable[P, Coroutine[Any, Any, T]], func)
+
+            @wraps(func)
+            async def wrapper_func_async(*args, **kwargs) -> T:
+                if isinstance(kwargs.get(session_keyword), SQLSession):
+                    return await func(*args, **kwargs)
+
+                with Session() as session:
+                    kwargs[session_keyword] = session
+                    if commit_results:
+                        with session.begin():
+                            return await func(*args, **kwargs)
+                    return await func(*args, **kwargs)
+
+            wrapper_func = wrapper_func_async
+        else:
+            if TYPE_CHECKING:
+                func = cast(Callable[P, T], func)
+
+            @wraps(func)
+            def wrapper_func_sync(*args, **kwargs) -> T:
+                if isinstance(kwargs.get(session_keyword), SQLSession):
+                    return func(*args, **kwargs)
+
+                with Session() as session:
+                    kwargs[session_keyword] = session
+                    if commit_results:
+                        with session.begin():
+                            return func(*args, **kwargs)
+                    return func(*args, **kwargs)
+
+            wrapper_func = wrapper_func_sync
+
+        return wrapper_func
+
+    if calling_function is not None:
+        return decorator(calling_function)
+    else:
+        return decorator
+
+
 # Create the engine connecting to the database
 logger.info("Creating engine to connect to database...")
 engine = create_engine(
@@ -406,6 +519,7 @@ engine = create_engine(
     pool_pre_ping=True,
     pool_recycle=3600,
 )
+Session = sessionmaker(engine)
 logger.info("Created.")
 
 # Create all tables represented by the above classes, if they haven't already been created

@@ -3,7 +3,7 @@ import inspect
 import io
 import json
 from hashlib import md5
-from typing import TYPE_CHECKING, Any, Callable, TypeVar, cast, overload
+from typing import TYPE_CHECKING, Any, AsyncIterator, Callable, TypeVar, cast, overload
 
 import aiohttp
 import discord
@@ -566,6 +566,32 @@ async def get_server_member(
             return None
 
     return server_member
+
+
+@beartype
+async def get_users_from_iterator(
+    user_iterator: AsyncIterator[discord.Member | discord.User],
+) -> set[int]:
+    """Run an asynchronous for loop on an iterator of users and return a set with the ID of every user that is not the bot itself in that iterator.
+
+    Parameters
+    ----------
+    user_iterator : :class:`~typing.AsyncIterator`[:class:`~discord.Member`  |  :class:`~discord.User`]
+        The asynchronous iterator.
+
+    Returns
+    -------
+    set[int]
+    """
+    user_ids: set[int] = set()
+    if client.user:
+        bot_user_id = client.user.id
+    else:
+        bot_user_id = None
+    async for user in user_iterator:
+        if user.id != bot_user_id:
+            user_ids.add(user.id)
+    return user_ids
 
 
 @beartype

@@ -26,7 +26,7 @@ from database import (
     DBAutoBridgeThreadChannels,
     DBMessageMap,
     DBReactionMap,
-    engine,
+    sql_command,
     sql_retry,
 )
 from validations import ChannelTypeError, logger
@@ -48,6 +48,7 @@ class ThreadSplat(TypedDict, total=False):
     thread: discord.Thread
 
 
+@globals.client.event
 async def on_ready():
     """This function is called when the client is done preparing the data received from Discord. Usually after login is successful and the Client.guilds and co. are filled up.
 
@@ -69,9 +70,12 @@ async def on_ready():
 
     await setup_bot()
 
+    globals.is_connected = True
+    globals.is_ready = True
     logger.info("Bot is ready.")
 
 
+@overload
 async def setup_bot():
     """Load the data registered in the database into memory.
 
@@ -86,91 +90,114 @@ async def setup_bot():
     :class:`~discord.Forbidden`
         You do not have permissions to create or delete webhooks for some of the channels in existing Bridges.
     """
-    session = None
+    ...
+
+
+@overload
+async def setup_bot(*, session: SQLSession | None = None): ...
+
+
+@sql_command
+async def setup_bot(*, session: SQLSession):
+    """Load the data registered in the database into memory.
+
+    Parameters
+    ----------
+    session : :class:`~sqlalchemy.orm.Session` | None, optional
+        An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
+
+    Raises
+    ------
+    ChannelTypeError
+        The source or target channels of some existing Bridge are not text channels nor threads off a text channel.
+    WebhookChannelError
+        Webhook of some existing Bridge is not attached to Bridge's target channel.
+    :class:`~discord.HTTPException`
+        Deleting an existing webhook or creating a new one failed.
+    :class:`~discord.Forbidden`
+        You do not have permissions to create or delete webhooks for some of the channels in existing Bridges.
+    """
     try:
-        with SQLSession(engine) as session:
-            await bridges.load_from_database(session)
+        # -----
+        logger.info("Loading bridges from database...")
+        await bridges.load_from_database()
+        logger.info("Bridges loaded.")
 
-            # Try to identify hashed emoji
-            emoji_hash_map.map = emoji_hash_map.EmojiHashMap(session)
+        # -----
+        logger.info("Loading emoji hash map from database...")
+        emoji_hash_map.map = emoji_hash_map.EmojiHashMap()
+        logger.info("Emoji hash map loaded.")
 
-            # Try to find all apps whitelisted per channel
-            logger.info("Loading whitelisted apps...")
-            select_whitelisted_apps: SQLSelect[tuple[DBAppWhitelist]] = SQLSelect(
-                DBAppWhitelist
+        # -----
+        logger.info("Loading whitelisted apps...")
+        select_whitelisted_apps: SQLSelect[tuple[DBAppWhitelist]] = SQLSelect(
+            DBAppWhitelist
+        )
+        whitelisted_apps_query_result: ScalarResult[DBAppWhitelist] = session.scalars(
+            select_whitelisted_apps
+        )
+        accessible_channels: set[int] = set()
+        inaccessible_channels: set[int] = set()
+        for whitelisted_app in whitelisted_apps_query_result:
+            channel_id = int(whitelisted_app.channel)
+            if channel_id in inaccessible_channels:
+                continue
+
+            logger.debug(
+                "Adding app with ID %s to whitelist associated with channel with ID %s.",
+                whitelisted_app.application,
+                channel_id,
             )
-            whitelisted_apps_query_result: ScalarResult[DBAppWhitelist] = (
-                session.scalars(select_whitelisted_apps)
-            )
-            accessible_channels: set[int] = set()
-            inaccessible_channels: set[int] = set()
-            for whitelisted_app in whitelisted_apps_query_result:
-                channel_id = int(whitelisted_app.channel)
-                if channel_id in inaccessible_channels:
+
+            if channel_id not in accessible_channels:
+                channel = await globals.get_channel_from_id(channel_id)
+
+                if channel:
+                    accessible_channels.add(channel_id)
+                else:
+                    logger.debug(
+                        "Channel with ID %s not found when loading list of whitelisted apps.",
+                        channel_id,
+                    )
+                    inaccessible_channels.add(channel_id)
                     continue
 
-                logger.debug(
-                    "Adding app with ID %s to whitelist associated with channel with ID %s.",
-                    whitelisted_app.application,
-                    channel_id,
-                )
+            if not globals.per_channel_whitelist.get(channel_id):
+                globals.per_channel_whitelist[channel_id] = set()
 
-                if channel_id not in accessible_channels:
-                    channel = await globals.get_channel_from_id(channel_id)
-
-                    if channel:
-                        accessible_channels.add(channel_id)
-                    else:
-                        logger.debug(
-                            "Channel with ID %s not found when loading list of whitelisted apps.",
-                            channel_id,
-                        )
-                        inaccessible_channels.add(channel_id)
-                        continue
-
-                if not globals.per_channel_whitelist.get(channel_id):
-                    globals.per_channel_whitelist[channel_id] = set()
-
-                globals.per_channel_whitelist[channel_id].add(
-                    int(whitelisted_app.application)
-                )
-
-            if len(inaccessible_channels) > 0:
-                delete_inaccessible_channels = SQLDelete(DBAppWhitelist).where(
-                    DBAppWhitelist.channel.in_(inaccessible_channels)
-                )
-                session.execute(delete_inaccessible_channels)
-
-            logger.info("Whitelists loaded.")
-            session.commit()
-
-            # Identify all automatically-thread-bridging channels
-            logger.info("Loading automatically-thread-bridging channels...")
-            select_auto_bridge_thread_channels: SQLSelect[
-                tuple[DBAutoBridgeThreadChannels]
-            ] = SQLSelect(DBAutoBridgeThreadChannels)
-            auto_thread_query_result: ScalarResult[DBAutoBridgeThreadChannels] = (
-                session.scalars(select_auto_bridge_thread_channels)
+            globals.per_channel_whitelist[channel_id].add(
+                int(whitelisted_app.application)
             )
-            globals.auto_bridge_thread_channels = (
-                globals.auto_bridge_thread_channels.union(
-                    {
-                        int(auto_bridge_thread_channel.channel)
-                        for auto_bridge_thread_channel in auto_thread_query_result
-                    }
-                )
+
+        if len(inaccessible_channels) > 0:
+            delete_inaccessible_channels = SQLDelete(DBAppWhitelist).where(
+                DBAppWhitelist.channel.in_(inaccessible_channels)
             )
-            logger.info("Auto-thread-bridging channels loaded.")
+            session.execute(delete_inaccessible_channels)
+
+        logger.info("Whitelists loaded.")
+
+        # -----
+        logger.info("Loading automatically-thread-bridging channels...")
+        select_auto_bridge_thread_channels: SQLSelect[
+            tuple[DBAutoBridgeThreadChannels]
+        ] = SQLSelect(DBAutoBridgeThreadChannels)
+        auto_thread_query_result: ScalarResult[DBAutoBridgeThreadChannels] = (
+            session.scalars(select_auto_bridge_thread_channels)
+        )
+        globals.auto_bridge_thread_channels = globals.auto_bridge_thread_channels.union(
+            {
+                int(auto_bridge_thread_channel.channel)
+                for auto_bridge_thread_channel in auto_thread_query_result
+            }
+        )
+        logger.info("Auto-thread-bridging channels loaded.")
     except Exception as e:
-        if session:
-            session.rollback()
-            session.close()
-
         await globals.client.close()
         logger.error("An error occurred when performing bot startup procedures: %s", e)
         raise
 
-    # Finally I'll check whether I have a registered emoji server and save it if so
+    # -----
     logger.info("Loading emoji server...")
     emoji_server_id_str = globals.settings.get("emoji_server_id")
     try:
@@ -233,10 +260,8 @@ async def setup_bot():
         print("Bot is not connected to any servers.")
         logger.info("Bot is not connected to any servers.")
 
-    globals.is_connected = True
-    globals.is_ready = True
 
-
+@globals.client.event
 async def on_typing(
     channel: discord.abc.Messageable,
     user: discord.User | discord.Member,
@@ -280,6 +305,7 @@ async def on_typing(
         await asyncio.gather(*channels_typing)
 
 
+@globals.client.event
 async def on_message(message: discord.Message):
     """This function is called when a Message is created and sent. Requires :class:`~discord.Intents.messages` to be enabled.
 
@@ -359,19 +385,24 @@ async def on_message(message: discord.Message):
             if await process_tester_bot_command(message, globals.test_app):
                 return
 
-        await bridge_message_helper(message)
+        message_channel_id = message.channel.id
+        if not bridges.get_outbound_bridges(message_channel_id):
+            del globals.message_lock[message_id]
+            return
+
+        await bridge_message_helper(message, message_channel_id)
 
 
-@beartype
-async def bridge_message_helper(message: discord.Message):
+@overload
+async def bridge_message_helper(message: discord.Message, message_channel_id: int):
     """Mirror a message to all of its outbound bridge targets.
-
-    This function is called when a Message is created and sent. Requires :class:`~discord.Intents.messages` to be enabled.
 
     Parameters
     ----------
     message : :class:`~discord.Message`
         The message to bridge.
+    message_channel_id : int
+        The ID of the channel the message is in.
 
     Raises
     ------
@@ -384,11 +415,48 @@ async def bridge_message_helper(message: discord.Message):
     ValueError
         The length of embeds was invalid, there was no token associated with one of the webhooks or ephemeral was passed with the improper webhook type or there was no state attached with one of the webhooks when giving it a view.
     """
-    message_channel_id = message.channel.id
-    outbound_bridges = bridges.get_outbound_bridges(message_channel_id)
-    if not outbound_bridges:
-        return
+    ...
 
+
+@overload
+async def bridge_message_helper(
+    message: discord.Message,
+    message_channel_id: int,
+    *,
+    session: SQLSession | None,
+): ...
+
+
+@sql_command
+@beartype
+async def bridge_message_helper(
+    message: discord.Message,
+    message_channel_id: int,
+    *,
+    session: SQLSession,
+):
+    """Mirror a message to all of its outbound bridge targets.
+
+    Parameters
+    ----------
+    message : :class:`~discord.Message`
+        The message to bridge.
+    message_channel_id : int
+        The ID of the channel the message is in.
+    session : :class:`~sqlalchemy.orm.Session` | None, optional
+        An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
+
+    Raises
+    ------
+    :class:`~discord.HTTPException`
+        Sending a message failed.
+    :class:`~discord.NotFound`
+        One of the webhooks was not found.
+    :class:`~discord.Forbidden`
+        The authorization token for one of the webhooks is incorrect.
+    ValueError
+        The length of embeds was invalid, there was no token associated with one of the webhooks or ephemeral was passed with the improper webhook type or there was no state attached with one of the webhooks when giving it a view.
+    """
     logger.debug(
         "Bridging message with ID %s from channel with ID %s.",
         message.id,
@@ -409,268 +477,254 @@ async def bridge_message_helper(message: discord.Message):
         )
         return
 
-    session = None
     try:
-        with SQLSession(engine) as session:
-            # Check whether this message is a reference to another message, i.e. if it's a reply or a forward
-            message_reference = message.reference
-            original_message = message
-            original_message_channel = message.channel
-            if message_reference:
-                resolved_message_reference = message_reference.resolved
-                message_reference_id = message_reference.message_id
+        # Check whether this message is a reference to another message, i.e. if it's a reply or a forward
+        message_reference = message.reference
+        original_message = message
+        original_message_channel = message.channel
+        if message_reference:
+            resolved_message_reference = message_reference.resolved
+            message_reference_id = message_reference.message_id
 
-                if isinstance(resolved_message_reference, discord.Message):
-                    # Original message is cached and I can just fetch it
-                    original_message = resolved_message_reference
-                    original_message_channel = original_message.channel
-                elif message_reference_id:
-                    # Try to find the original message, if it's not resolved
-                    original_message_channel = await globals.get_channel_from_id(
-                        message_reference.channel_id
-                    )
-                    if isinstance(
-                        original_message_channel,
-                        (discord.TextChannel, discord.Thread),
-                    ):
-                        # I have access to the channel of the original message being forwarded
-                        try:
-                            # Try to find the original message
-                            original_message = (
-                                await original_message_channel.fetch_message(
-                                    message_reference_id
-                                )
-                            )
-                        except Exception:
-                            pass
-                    else:
-                        original_message_channel = message.channel
-            else:
-                resolved_message_reference = None
-                message_reference_id = None
-
-            if (
-                not message.message_snapshots
-                or len(message.message_snapshots) == 0
-                or not message_reference
-            ):
-                # Regular message with content (probably)
-                logger.debug(
-                    "Message with ID %s doesn't have snapshots, is probably not forwarded.",
-                    message.id,
+            if isinstance(resolved_message_reference, discord.Message):
+                # Original message is cached and I can just fetch it
+                original_message = resolved_message_reference
+                original_message_channel = original_message.channel
+            elif message_reference_id:
+                # Try to find the original message, if it's not resolved
+                original_message_channel = await globals.get_channel_from_id(
+                    message_reference.channel_id
                 )
-
-                forwarded_message = None
-                forwarded_message_channel_is_nsfw = False
-
-                message_content = await replace_missing_emoji(message.content, session)
-                message_attachments = message.attachments
-                message_embeds = message.embeds
-            else:
-                # There is a message snapshot, so this message was forwarded
-                logger.debug(
-                    "Message with ID %s has snapshots, is forwarded.", message.id
-                )
-
-                forwarded_message = original_message
-                original_message_channel_parent = original_message_channel
-                if isinstance(original_message_channel, discord.Thread) and (
-                    possible_parent := original_message_channel.parent
+                if isinstance(
+                    original_message_channel,
+                    (discord.TextChannel, discord.Thread),
                 ):
-                    original_message_channel_parent = possible_parent
-                forwarded_message_channel_is_nsfw = (
-                    isinstance(
-                        original_message_channel_parent,
-                        discord.TextChannel
-                        | discord.VoiceChannel
-                        | discord.StageChannel
-                        | discord.ForumChannel
-                        | discord.CategoryChannel,
-                    )
-                    and original_message_channel_parent.nsfw
-                )
-
-                message_content = ""
-                message_attachments = []
-                message_embeds = []
-
-            bridged_reply_to: dict[int, int] = {}
-            replied_to_author = None
-            replied_to_content = None
-            reply_has_ping = False
-            if message.type == discord.MessageType.reply:
-                # This message is a reply to another message, so we should try to link to its match on the other side of bridges
-                # bridged_reply_to will be a dict whose keys are channel IDs and whose values are the IDs of messages matching the
-                # message I'm replying to in those channels
-                message_is_reply = True
-
-                if original_message.id != message.id:
-                    replied_to_message = original_message
-                else:
-                    replied_to_message = resolved_message_reference
-                if isinstance(replied_to_message, discord.Message):
-                    replied_to_content = await replace_missing_emoji(
-                        globals.truncate(
-                            discord.utils.remove_markdown(
-                                replied_to_message.clean_content
-                            ),
-                            50,
-                        ),
-                        session,
-                    )
-                    replied_to_author = replied_to_message.author
-
-                    # identify if this reply "pinged" the target, to know whether to add the @ symbol UI
-                    reply_has_ping = any(
-                        x.id == replied_to_author.id for x in message.mentions
-                    )
-
-                # First, check whether the message replied to was itself bridged from a different channel
-                select_message_map: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
-                    DBMessageMap
-                ).where(DBMessageMap.target_message == str(message_reference_id))
-                local_replied_to_message_map: DBMessageMap | None = await sql_retry(
-                    lambda: session.scalars(select_message_map).first()
-                )
-                if isinstance(local_replied_to_message_map, DBMessageMap):
-                    # So the message replied to was bridged from elsewhere
-                    reply_source_channel_id = int(
-                        local_replied_to_message_map.source_channel
-                    )
-                    source_replied_to_id = int(
-                        local_replied_to_message_map.source_message
-                    )
-                    bridged_reply_to[reply_source_channel_id] = source_replied_to_id
-
+                    # I have access to the channel of the original message being forwarded
                     try:
-                        # Try to find the author of the original message
-                        reply_source_channel = await globals.get_channel_from_id(
-                            reply_source_channel_id,
-                            ensure_text_or_thread=True,
+                        # Try to find the original message
+                        original_message = await original_message_channel.fetch_message(
+                            message_reference_id
                         )
-                        source_replied_to = await reply_source_channel.fetch_message(
-                            source_replied_to_id
-                        )
-
-                        replied_to_author = source_replied_to.author
                     except Exception:
                         pass
                 else:
-                    source_replied_to_id = message_reference_id
+                    original_message_channel = message.channel
+        else:
+            resolved_message_reference = None
+            message_reference_id = None
 
-                # Now find all other bridged versions of the message we're replying to
-                select_bridged_reply_to: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
-                    DBMessageMap
-                ).where(DBMessageMap.source_message == str(source_replied_to_id))
-                query_result: ScalarResult[DBMessageMap] = await sql_retry(
-                    lambda: session.scalars(select_bridged_reply_to)
+        if (
+            not message.message_snapshots
+            or len(message.message_snapshots) == 0
+            or not message_reference
+        ):
+            # Regular message with content (probably)
+            logger.debug(
+                "Message with ID %s doesn't have snapshots, is probably not forwarded.",
+                message.id,
+            )
+
+            forwarded_message = None
+            forwarded_message_channel_is_nsfw = False
+
+            message_content = await replace_missing_emoji(
+                message.content,
+                session=session,
+            )
+            message_attachments = message.attachments
+            message_embeds = message.embeds
+        else:
+            # There is a message snapshot, so this message was forwarded
+            logger.debug("Message with ID %s has snapshots, is forwarded.", message.id)
+
+            forwarded_message = original_message
+            original_message_channel_parent = original_message_channel
+            if isinstance(original_message_channel, discord.Thread) and (
+                possible_parent := original_message_channel.parent
+            ):
+                original_message_channel_parent = possible_parent
+            forwarded_message_channel_is_nsfw = (
+                isinstance(
+                    original_message_channel_parent,
+                    discord.TextChannel
+                    | discord.VoiceChannel
+                    | discord.StageChannel
+                    | discord.ForumChannel
+                    | discord.CategoryChannel,
                 )
-                for message_map in query_result:
-                    bridged_reply_to[int(message_map.target_channel)] = int(
-                        message_map.target_message
-                    )
+                and original_message_channel_parent.nsfw
+            )
+
+            message_content = ""
+            message_attachments = []
+            message_embeds = []
+
+        bridged_reply_to: dict[int, int] = {}
+        replied_to_author = None
+        replied_to_content = None
+        reply_has_ping = False
+        if message.type == discord.MessageType.reply:
+            # This message is a reply to another message, so we should try to link to its match on the other side of bridges
+            # bridged_reply_to will be a dict whose keys are channel IDs and whose values are the IDs of messages matching the
+            # message I'm replying to in those channels
+            message_is_reply = True
+
+            if original_message.id != message.id:
+                replied_to_message = original_message
             else:
-                message_is_reply = False
+                replied_to_message = resolved_message_reference
+            if isinstance(replied_to_message, discord.Message):
+                replied_to_content = await replace_missing_emoji(
+                    globals.truncate(
+                        discord.utils.remove_markdown(replied_to_message.clean_content),
+                        50,
+                    ),
+                    session=session,
+                )
+                replied_to_author = replied_to_message.author
 
-            # Check who, if anyone, is pinged in the message
-            people_to_ping = {m.id for m in message.mentions}
-            # Remove everyone who was already successfully pinged in the message in the original channel
-            message_channel = await globals.get_channel_parent(message.channel)
-            people_to_ping.difference_update(
-                {member.id for member in message_channel.members}
-            )
-
-            # Send a message out to each target webhook
-            async_bridged_messages: list[
-                "Coroutine[Any, Any, list[BridgedMessage] | None]"
-            ] = []
-            for target_id, webhook in reachable_channels.items():
-                if not webhook:
-                    continue
-
-                webhook_channel = webhook.channel
-                if not isinstance(webhook_channel, discord.TextChannel):
-                    continue
-
-                target_channel = await globals.get_channel_from_id(
-                    target_id,
-                    ensure_text_or_thread=True,
+                # identify if this reply "pinged" the target, to know whether to add the @ symbol UI
+                reply_has_ping = any(
+                    x.id == replied_to_author.id for x in message.mentions
                 )
 
-                thread_splat: ThreadSplat = {}
-                if target_id != webhook_channel.id:
-                    # The target channel is not the same as the webhook's channel, so it should be a thread
-                    if not isinstance(target_channel, discord.Thread):
-                        logger.warning(
-                            "Target channel for bridging (ID %s) does not match its associated webhook (ID %s).",
-                            target_id,
-                            webhook_channel.id,
-                        )
-                        continue
-                    thread_splat = {"thread": target_channel}
+            # First, check whether the message replied to was itself bridged from a different channel
+            select_message_map: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
+                DBMessageMap
+            ).where(DBMessageMap.target_message == str(message_reference_id))
+            local_replied_to_message_map: DBMessageMap | None = await sql_retry(
+                lambda: session.scalars(select_message_map).first()
+            )
+            if isinstance(local_replied_to_message_map, DBMessageMap):
+                # So the message replied to was bridged from elsewhere
+                reply_source_channel_id = int(
+                    local_replied_to_message_map.source_channel
+                )
+                source_replied_to_id = int(local_replied_to_message_map.source_message)
+                bridged_reply_to[reply_source_channel_id] = source_replied_to_id
 
-                # Create an async version of bridging this message to gather at the end
-                async_bridged_messages.append(
-                    bridge_message_to_target_channel(
-                        message,
-                        message_content,
-                        message_attachments,
-                        deepcopy(message_embeds),
-                        deepcopy(people_to_ping),
-                        target_channel,
-                        webhook,
-                        webhook_channel,
-                        message_is_reply,
-                        replied_to_author,
-                        replied_to_content,
-                        bridged_reply_to.get(target_id),
-                        reply_has_ping,
-                        forwarded_message,
-                        forwarded_message_channel_is_nsfw,
-                        thread_splat,
-                        session,
+                try:
+                    # Try to find the author of the original message
+                    reply_source_channel = await globals.get_channel_from_id(
+                        reply_source_channel_id,
+                        ensure_text_or_thread=True,
                     )
-                )
-                people_to_ping.difference_update(
-                    {member.id for member in webhook_channel.members}
-                )
+                    source_replied_to = await reply_source_channel.fetch_message(
+                        source_replied_to_id
+                    )
 
-            if len(async_bridged_messages) == 0:
-                return
+                    replied_to_author = source_replied_to.author
+                except Exception:
+                    pass
+            else:
+                source_replied_to_id = message_reference_id
 
-            # Insert references to the linked messages into the message_mappings table
-            bridged_messages: list[BridgedMessage] = [
-                bridged_message
-                for bridged_message_list in (
-                    await asyncio.gather(*async_bridged_messages)
+            # Now find all other bridged versions of the message we're replying to
+            select_bridged_reply_to: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
+                DBMessageMap
+            ).where(DBMessageMap.source_message == str(source_replied_to_id))
+            query_result: ScalarResult[DBMessageMap] = await sql_retry(
+                lambda: session.scalars(select_bridged_reply_to)
+            )
+            for message_map in query_result:
+                bridged_reply_to[int(message_map.target_channel)] = int(
+                    message_map.target_message
                 )
-                if bridged_message_list
-                for bridged_message in bridged_message_list
-            ]
-            source_message_id_str = str(message.id)
-            source_channel_id_str = str(message_channel_id)
-            await sql_retry(
-                lambda: session.add_all(
-                    [
-                        DBMessageMap(
-                            source_message=source_message_id_str,
-                            source_channel=source_channel_id_str,
-                            target_message=bridged_message.id,
-                            target_channel=bridged_message.channel_id,
-                            forward_header_message=bridged_message.forwarded_header_id,
-                            target_message_order=bridged_message.message_order,
-                            webhook=bridged_message.webhook_id,
-                        )
-                        for bridged_message in bridged_messages
-                    ]
+        else:
+            message_is_reply = False
+
+        # Check who, if anyone, is pinged in the message
+        people_to_ping = {m.id for m in message.mentions}
+        # Remove everyone who was already successfully pinged in the message in the original channel
+        message_channel = await globals.get_channel_parent(message.channel)
+        people_to_ping.difference_update(
+            {member.id for member in message_channel.members}
+        )
+
+        # Send a message out to each target webhook
+        async_bridged_messages: list[
+            "Coroutine[Any, Any, list[BridgedMessage] | None]"
+        ] = []
+        for target_id, webhook in reachable_channels.items():
+            if not webhook:
+                continue
+
+            webhook_channel = webhook.channel
+            if not isinstance(webhook_channel, discord.TextChannel):
+                continue
+
+            target_channel = await globals.get_channel_from_id(
+                target_id,
+                ensure_text_or_thread=True,
+            )
+
+            thread_splat: ThreadSplat = {}
+            if target_id != webhook_channel.id:
+                # The target channel is not the same as the webhook's channel, so it should be a thread
+                if not isinstance(target_channel, discord.Thread):
+                    logger.warning(
+                        "Target channel for bridging (ID %s) does not match its associated webhook (ID %s).",
+                        target_id,
+                        webhook_channel.id,
+                    )
+                    continue
+                thread_splat = {"thread": target_channel}
+
+            # Create an async version of bridging this message to gather at the end
+            async_bridged_messages.append(
+                bridge_message_to_target_channel(
+                    message,
+                    message_content,
+                    message_attachments,
+                    deepcopy(message_embeds),
+                    deepcopy(people_to_ping),
+                    target_channel,
+                    webhook,
+                    webhook_channel,
+                    message_is_reply,
+                    replied_to_author,
+                    replied_to_content,
+                    bridged_reply_to.get(target_id),
+                    reply_has_ping,
+                    forwarded_message,
+                    forwarded_message_channel_is_nsfw,
+                    thread_splat,
+                    session,
                 )
             )
-            session.commit()
-    except Exception as e:
-        if session:
-            session.rollback()
-            session.close()
+            people_to_ping.difference_update(
+                {member.id for member in webhook_channel.members}
+            )
 
+        if len(async_bridged_messages) == 0:
+            return
+
+        # Insert references to the linked messages into the message_mappings table
+        bridged_messages: list[BridgedMessage] = [
+            bridged_message
+            for bridged_message_list in (await asyncio.gather(*async_bridged_messages))
+            if bridged_message_list
+            for bridged_message in bridged_message_list
+        ]
+        source_message_id_str = str(message.id)
+        source_channel_id_str = str(message_channel_id)
+        await sql_retry(
+            lambda: session.add_all(
+                [
+                    DBMessageMap(
+                        source_message=source_message_id_str,
+                        source_channel=source_channel_id_str,
+                        target_message=bridged_message.id,
+                        target_channel=bridged_message.channel_id,
+                        forward_header_message=bridged_message.forwarded_header_id,
+                        target_message_order=bridged_message.message_order,
+                        webhook=bridged_message.webhook_id,
+                    )
+                    for bridged_message in bridged_messages
+                ]
+            )
+        )
+    except Exception as e:
         if isinstance(e, SQLError):
             logger.warning(
                 "Ran into an SQL error while trying to bridge a message: %s", e
@@ -697,7 +751,7 @@ class ReplyEmbedDict(TypedDict, total=False):
     type: "Literal['rich']"
     description: str
     url: "NotRequired[str]"
-    thumbnail: "NotRequired[ReplyEmbedThumbnailDict]"
+    thumbnail: "NotRequired['ReplyEmbedThumbnailDict']"
 
 
 class ReplyEmbedThumbnailDict(TypedDict):
@@ -884,7 +938,7 @@ async def _bridge_message_to_target_channel(
                             ),
                             50,
                         ),
-                        session,
+                        session=session,
                     )
             except discord.HTTPException:
                 reply_error_msg = "The message being replied to could not be loaded."
@@ -1056,7 +1110,8 @@ async def _bridge_message_to_target_channel(
 
         try:
             await bridges.demolish_bridges(
-                target_channel=target_channel, session=session
+                target_channel=target_channel,
+                session=session,
             )
         except Exception as e:
             logger.error(
@@ -1067,6 +1122,7 @@ async def _bridge_message_to_target_channel(
         return None
 
 
+@globals.client.event
 async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
     """This function is called when a message is edited. Unlike `on_message_edit()`, this is called regardless of the state of the internal message cache.
 
@@ -1117,7 +1173,7 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
         )
 
 
-@beartype
+@overload
 async def edit_message_helper(
     *,
     message_content: str,
@@ -1150,6 +1206,58 @@ async def edit_message_helper(
     ValueError
         The length of embeds was invalid, there was no token associated with a webhook or a webhook had no state.
     """
+    ...
+
+
+@overload
+async def edit_message_helper(
+    *,
+    message_content: str,
+    embeds: list[discord.Embed],
+    message_id: int,
+    channel_id: int,
+    message_is_reply: bool,
+    session: SQLSession | None,
+): ...
+
+
+@sql_command(commit_results=False)
+@beartype
+async def edit_message_helper(
+    *,
+    message_content: str,
+    embeds: list[discord.Embed],
+    message_id: int,
+    channel_id: int,
+    message_is_reply: bool,
+    session: SQLSession,
+):
+    """Edit bridged versions of a message, if possible.
+
+    Parameters
+    ----------
+    message_content : str
+        The updated contents of the message.
+    embeds : list[:class:`~discord.Embed`]
+        The updated embeds of the message.
+    message_id : int
+        The message ID.
+    channel_id : int
+        The ID of the channel the message being edited is in.
+    message_is_reply : bool
+        Whether the message being edited is a reply.
+    session : :class:`~sqlalchemy.orm.Session` | None, optional
+        An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
+
+    Raises
+    ------
+    :class:`~discord.HTTPException`
+        Editing a message failed.
+    :class:`~discord.Forbidden`
+        Tried to edit a message that is not the Bridge's.
+    ValueError
+        The length of embeds was invalid, there was no token associated with a webhook or a webhook had no state.
+    """
     logger.debug("Bridging edit to message with ID %s.", message_id)
 
     # Get all channels reachable from this one via an unbroken sequence of outbound bridges as well as their webhooks
@@ -1162,153 +1270,151 @@ async def edit_message_helper(
     # Find all messages matching this one
     try:
         async_message_edits: list["Coroutine[Any, Any, None]"] = []
-        with SQLSession(engine) as session:
-            # Ensure that the message has emoji I have access to
-            message_content = await replace_missing_emoji(message_content, session)
 
-            for bridged_channel_id, webhook in reachable_channels.items():
-                # Iterate through the target channels and edit the bridged messages
-                bridged_channel = await globals.get_channel_from_id(bridged_channel_id)
-                if not isinstance(
-                    bridged_channel,
-                    (discord.TextChannel, discord.Thread),
-                ):
+        # Ensure that the message has emoji I have access to
+        message_content = await replace_missing_emoji(message_content, session=session)
+
+        for bridged_channel_id, webhook in reachable_channels.items():
+            # Iterate through the target channels and edit the bridged messages
+            bridged_channel = await globals.get_channel_from_id(bridged_channel_id)
+            if not isinstance(
+                bridged_channel,
+                (discord.TextChannel, discord.Thread),
+            ):
+                continue
+
+            thread_splat: ThreadSplat = {}
+            if isinstance(bridged_channel, discord.Thread):
+                if not isinstance(bridged_channel.parent, discord.TextChannel):
                     continue
+                thread_splat = {"thread": bridged_channel}
 
-                thread_splat: ThreadSplat = {}
-                if isinstance(bridged_channel, discord.Thread):
-                    if not isinstance(bridged_channel.parent, discord.TextChannel):
-                        continue
-                    thread_splat = {"thread": bridged_channel}
-
-                target_channel = webhook.channel
-                channel_specific_message_content = message_content
-                channel_specific_embeds = deepcopy(embeds)
-                if isinstance(target_channel, discord.TextChannel):
-                    # Replace Discord links in the message and embed text
-                    channel_specific_message_content = await replace_discord_links(
-                        channel_specific_message_content,
+            target_channel = webhook.channel
+            channel_specific_message_content = message_content
+            channel_specific_embeds = deepcopy(embeds)
+            if isinstance(target_channel, discord.TextChannel):
+                # Replace Discord links in the message and embed text
+                channel_specific_message_content = await replace_discord_links(
+                    channel_specific_message_content,
+                    target_channel,
+                    session,
+                )
+                for embed in channel_specific_embeds:
+                    embed.description = await replace_discord_links(
+                        embed.description,
                         target_channel,
                         session,
                     )
-                    for embed in channel_specific_embeds:
-                        embed.description = await replace_discord_links(
-                            embed.description,
-                            target_channel,
-                            session,
-                        )
-                        embed.title = await replace_discord_links(
-                            embed.title,
-                            target_channel,
-                            session,
-                        )
-
-                # Find all bridged messages associated with this one (there might be multiple if the original message was split due to length)
-                select_message_map: SQLSelect[tuple[DBMessageMap]] = (
-                    SQLSelect(DBMessageMap)
-                    .where(
-                        sql_and(
-                            DBMessageMap.source_message == message_id,
-                            DBMessageMap.target_channel == str(bridged_channel_id),
-                        )
+                    embed.title = await replace_discord_links(
+                        embed.title,
+                        target_channel,
+                        session,
                     )
-                    .order_by(DBMessageMap.target_message_order)
-                )
-                bridged_messages: ScalarResult[DBMessageMap] = await sql_retry(
-                    lambda: session.scalars(select_message_map)
-                )
 
-                for message_row in bridged_messages:
-                    if not message_row.webhook:
+            # Find all bridged messages associated with this one (there might be multiple if the original message was split due to length)
+            select_message_map: SQLSelect[tuple[DBMessageMap]] = (
+                SQLSelect(DBMessageMap)
+                .where(
+                    sql_and(
+                        DBMessageMap.source_message == message_id,
+                        DBMessageMap.target_channel == str(bridged_channel_id),
+                    )
+                )
+                .order_by(DBMessageMap.target_message_order)
+            )
+            bridged_messages: ScalarResult[DBMessageMap] = await sql_retry(
+                lambda: session.scalars(select_message_map)
+            )
+
+            for message_row in bridged_messages:
+                if not message_row.webhook:
+                    break
+
+                # The webhook returned by the call to get_reachable_channels() may not be the same as the one used to post the message
+                if (message_webhook_id := int(message_row.webhook)) != webhook.id:
+                    try:
+                        webhook = await globals.client.fetch_webhook(message_webhook_id)
+                    except Exception:
                         break
 
-                    # The webhook returned by the call to get_reachable_channels() may not be the same as the one used to post the message
-                    if (message_webhook_id := int(message_row.webhook)) != webhook.id:
+                if len(channel_specific_message_content) > 0:
+                    truncated_content = channel_specific_message_content[:2000]
+                    channel_specific_message_content = channel_specific_message_content[
+                        2000:
+                    ]
+                else:
+                    truncated_content = "-# (The original message was longer than 2000 characters but has been edited to be shorter.)"
+
+                try:
+
+                    async def edit_message(
+                        message_row: DBMessageMap,
+                        channel_specific_embeds: list[discord.Embed],
+                        bridged_channel: discord.TextChannel | discord.Thread,
+                        content: str,
+                        webhook: discord.Webhook,
+                        thread_splat: ThreadSplat,
+                        attach_embeds: bool,
+                    ):
                         try:
-                            webhook = await globals.client.fetch_webhook(
-                                message_webhook_id
+                            bridged_message_id = int(message_row.target_message)
+                            if message_is_reply and attach_embeds:
+                                # The message being edited is a reply, I need to keep its embed
+                                bridged_message_embeds = (
+                                    await bridged_channel.fetch_message(
+                                        bridged_message_id
+                                    )
+                                ).embeds
+                                if len(bridged_message_embeds) > 0:
+                                    reply_embed = bridged_message_embeds[-1]
+                                    channel_specific_embeds += [reply_embed]
+                            await webhook.edit_message(
+                                message_id=bridged_message_id,
+                                content=content,
+                                embeds=(
+                                    channel_specific_embeds
+                                    if attach_embeds
+                                    else []  # Only attach embeds on the last message
+                                ),
+                                **thread_splat,
                             )
-                        except Exception:
-                            break
-
-                    if len(channel_specific_message_content) > 0:
-                        truncated_content = channel_specific_message_content[:2000]
-                        channel_specific_message_content = (
-                            channel_specific_message_content[2000:]
-                        )
-                    else:
-                        truncated_content = "-# (The original message was longer than 2000 characters but has been edited to be shorter.)"
-
-                    try:
-
-                        async def edit_message(
-                            message_row: DBMessageMap,
-                            channel_specific_embeds: list[discord.Embed],
-                            bridged_channel: discord.TextChannel | discord.Thread,
-                            content: str,
-                            webhook: discord.Webhook,
-                            thread_splat: ThreadSplat,
-                            attach_embeds: bool,
-                        ):
+                        except discord.NotFound:
+                            # Webhook is gone, delete this bridge
+                            logger.warning(
+                                "Webhook in %s:%s (ID: %s) not found, demolishing bridges to this channel and its threads.",
+                                bridged_channel.guild.name,
+                                bridged_channel.name,
+                                bridged_channel.id,
+                            )
                             try:
-                                bridged_message_id = int(message_row.target_message)
-                                if message_is_reply and attach_embeds:
-                                    # The message being edited is a reply, I need to keep its embed
-                                    bridged_message_embeds = (
-                                        await bridged_channel.fetch_message(
-                                            bridged_message_id
-                                        )
-                                    ).embeds
-                                    if len(bridged_message_embeds) > 0:
-                                        reply_embed = bridged_message_embeds[-1]
-                                        channel_specific_embeds += [reply_embed]
-                                await webhook.edit_message(
-                                    message_id=bridged_message_id,
-                                    content=content,
-                                    embeds=(
-                                        channel_specific_embeds
-                                        if attach_embeds
-                                        else []  # Only attach embeds on the last message
-                                    ),
-                                    **thread_splat,
+                                await bridges.demolish_bridges(
+                                    target_channel=bridged_channel,
+                                    session=session,
                                 )
-                            except discord.NotFound:
-                                # Webhook is gone, delete this bridge
-                                logger.warning(
-                                    "Webhook in %s:%s (ID: %s) not found, demolishing bridges to this channel and its threads.",
-                                    bridged_channel.guild.name,
-                                    bridged_channel.name,
-                                    bridged_channel.id,
+                            except Exception as e:
+                                logger.error(
+                                    "Exception occurred when trying to demolish an invalid bridge after bridging a message edit: %s",
+                                    e,
                                 )
-                                try:
-                                    await bridges.demolish_bridges(
-                                        target_channel=bridged_channel,
-                                        session=session,
-                                    )
-                                except Exception as e:
-                                    logger.error(
-                                        "Exception occurred when trying to demolish an invalid bridge after bridging a message edit: %s",
-                                        e,
-                                    )
 
-                        async_message_edits.append(
-                            edit_message(
-                                message_row,
-                                channel_specific_embeds,
-                                bridged_channel,
-                                truncated_content,
-                                webhook,
-                                thread_splat,
-                                len(channel_specific_message_content) == 0,
-                            )
+                    async_message_edits.append(
+                        edit_message(
+                            message_row,
+                            channel_specific_embeds,
+                            bridged_channel,
+                            truncated_content,
+                            webhook,
+                            thread_splat,
+                            len(channel_specific_message_content) == 0,
                         )
-                    except discord.HTTPException as e:
-                        logger.warning(
-                            "Ran into a Discord exception while trying to edit a message across a bridge:\n"
-                            + str(e)
-                        )
+                    )
+                except discord.HTTPException as e:
+                    logger.warning(
+                        "Ran into a Discord exception while trying to edit a message across a bridge:\n"
+                        + str(e)
+                    )
 
-            await asyncio.gather(*async_message_edits)
+        await asyncio.gather(*async_message_edits)
     except Exception as e:
         if isinstance(e, SQLError):
             logger.warning(
@@ -1324,10 +1430,47 @@ async def edit_message_helper(
     logger.debug("Successfully bridged edit to message with ID %s.", message_id)
 
 
+@overload
+async def replace_missing_emoji(message_content: str) -> str:
+    """Return a version of the contents of a message that replaces any instances of an emoji that the bot can't find with matching ones, if possible.
+
+    Parameters
+    ----------
+    message_content : str
+        The content of the message to process.
+
+    Returns
+    -------
+    str
+
+    Raises
+    ------
+    :class:`~discord.HTTPResponseError`
+        HTTP request to fetch image returned a status other than 200.
+    :class:`~discord.InvalidURL`
+        URL generated from emoji was not valid.
+    :class:`~discord.RuntimeError`
+        Session connection failed.
+    :class:`~discord.ServerTimeoutError`
+        Connection to server timed out.
+    """
+    ...
+
+
+@overload
+async def replace_missing_emoji(
+    message_content: str,
+    *,
+    session: SQLSession | None = None,
+) -> str: ...
+
+
+@sql_command
 @beartype
 async def replace_missing_emoji(
     message_content: str,
-    session: SQLSession | None = None,
+    *,
+    session: SQLSession,
 ) -> str:
     """Return a version of the contents of a message that replaces any instances of an emoji that the bot can't find with matching ones, if possible.
 
@@ -1363,12 +1506,6 @@ async def replace_missing_emoji(
     if len(message_emoji) == 0:
         # Message has no emoji
         return message_content
-
-    if not session:
-        session = SQLSession(engine)
-        close_after = True
-    else:
-        close_after = False
 
     emoji_to_replace: dict[str, str] = {}
     for emoji_name, emoji_id_str in message_emoji:
@@ -1406,9 +1543,6 @@ async def replace_missing_emoji(
                 emoji_to_replace[f"<{emoji_name}:{emoji_id_str}>"] = str(emoji)
         except Exception:
             pass
-
-    if close_after:
-        session.close()
 
     for missing_emoji_str, new_emoji_str in emoji_to_replace.items():
         message_content = message_content.replace(missing_emoji_str, new_emoji_str)
@@ -1545,6 +1679,7 @@ async def replace_discord_links(
     return content
 
 
+@globals.client.event
 async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
     """This function is called when a message is deleted. Unlike `on_message_delete()`, this is called regardless of the message being in the internal message cache or not.
 
@@ -1585,7 +1720,7 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
         del globals.message_lock[message_id]
 
 
-@beartype
+@overload
 async def delete_message_helper(message_id: int, channel_id: int):
     """Delete bridged versions of a message, if possible.
 
@@ -1595,6 +1730,46 @@ async def delete_message_helper(message_id: int, channel_id: int):
         The message ID.
     channel_id : int
         The ID of the channel the message being deleted is in.
+
+    Raises
+    ------
+    :class:`~discord.HTTPException`
+        Deleting a message failed.
+    :class:`~discord.Forbidden`
+        Tried to delete a message that is not yours.
+    ValueError
+        A webhook does not have a token associated with it.
+    """
+    ...
+
+
+@overload
+async def delete_message_helper(
+    message_id: int,
+    channel_id: int,
+    *,
+    session: SQLSession | None,
+): ...
+
+
+@sql_command
+@beartype
+async def delete_message_helper(
+    message_id: int,
+    channel_id: int,
+    *,
+    session: SQLSession,
+):
+    """Delete bridged versions of a message, if possible.
+
+    Parameters
+    ----------
+    message_id : int
+        The message ID.
+    channel_id : int
+        The ID of the channel the message being deleted is in.
+    session : :class:`~sqlalchemy.orm.Session` | None, optional
+        An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
 
     Raises
     ------
@@ -1615,132 +1790,124 @@ async def delete_message_helper(message_id: int, channel_id: int):
     )
 
     # Find all messages matching this one
-    session = None
     try:
         async_message_deletes: list["Coroutine[Any, Any, None]"] = []
-        with SQLSession(engine) as session:
-            select_message_map: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
-                DBMessageMap
-            ).where(DBMessageMap.source_message == message_id)
-            bridged_messages: ScalarResult[DBMessageMap] = await sql_retry(
-                lambda: session.scalars(select_message_map)
-            )
-            for message_row in bridged_messages:
-                target_channel_id = int(message_row.target_channel)
-                if target_channel_id not in reachable_channels:
-                    continue
 
-                bridged_channel = await globals.get_channel_from_id(target_channel_id)
-                if not isinstance(
-                    bridged_channel,
-                    (discord.TextChannel, discord.Thread),
+        select_message_map: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
+            DBMessageMap
+        ).where(DBMessageMap.source_message == message_id)
+        bridged_messages: ScalarResult[DBMessageMap] = await sql_retry(
+            lambda: session.scalars(select_message_map)
+        )
+        for message_row in bridged_messages:
+            target_channel_id = int(message_row.target_channel)
+            if target_channel_id not in reachable_channels:
+                continue
+
+            bridged_channel = await globals.get_channel_from_id(target_channel_id)
+            if not isinstance(
+                bridged_channel,
+                (discord.TextChannel, discord.Thread),
+            ):
+                continue
+
+            thread_splat: ThreadSplat = {}
+            if isinstance(bridged_channel, discord.Thread):
+                if not isinstance(bridged_channel.parent, discord.TextChannel):
+                    continue
+                thread_splat = {"thread": bridged_channel}
+
+            try:
+
+                async def delete_message(
+                    message_row: DBMessageMap,
+                    target_channel_id: int,
+                    thread_splat: ThreadSplat,
+                    bridged_channel: discord.TextChannel | discord.Thread,
                 ):
-                    continue
-
-                thread_splat: ThreadSplat = {}
-                if isinstance(bridged_channel, discord.Thread):
-                    if not isinstance(bridged_channel.parent, discord.TextChannel):
-                        continue
-                    thread_splat = {"thread": bridged_channel}
-
-                try:
-
-                    async def delete_message(
-                        message_row: DBMessageMap,
-                        target_channel_id: int,
-                        thread_splat: ThreadSplat,
-                        bridged_channel: discord.TextChannel | discord.Thread,
-                    ):
-                        if message_row.webhook:
-                            # The webhook returned by the call to get_reachable_channels() may not be the same as the one used to post the message
-                            message_webhook_id = int(message_row.webhook)
-                            if (
-                                message_webhook_id
-                                == reachable_channels[target_channel_id].id
-                            ):
-                                webhook = reachable_channels[target_channel_id]
-                            else:
-                                try:
-                                    webhook = await globals.client.fetch_webhook(
-                                        message_webhook_id
-                                    )
-                                except Exception:
-                                    return
-
-                            try:
-                                await webhook.delete_message(
-                                    int(message_row.target_message),
-                                    **thread_splat,
-                                )
-                            except discord.NotFound:
-                                # Webhook is gone, delete this bridge
-                                logger.warning(
-                                    "Webhook in %s:%s (ID: %s) not found, demolishing bridges to this channel and its threads.",
-                                    bridged_channel.guild.name,
-                                    bridged_channel.name,
-                                    bridged_channel.id,
-                                )
-                                try:
-                                    await bridges.demolish_bridges(
-                                        target_channel=bridged_channel,
-                                        session=session,
-                                    )
-                                except Exception as e:
-                                    if not isinstance(e, discord.HTTPException):
-                                        logger.error(
-                                            "Exception occurred when trying to demolish an invalid bridge after bridging a message deletion: %s",
-                                            e,
-                                        )
-                                    raise
-                        elif message_row.forward_header_message:
-                            # If the message doesn't have a webhook, it's forwarded
-                            partial_target_channel = (
-                                globals.client.get_partial_messageable(
-                                    target_channel_id
-                                )
-                            )
-                            await partial_target_channel.get_partial_message(
-                                int(message_row.target_message)
-                            ).delete()
-                            await partial_target_channel.get_partial_message(
-                                int(message_row.forward_header_message)
-                            ).delete()
+                    if message_row.webhook:
+                        # The webhook returned by the call to get_reachable_channels() may not be the same as the one used to post the message
+                        message_webhook_id = int(message_row.webhook)
+                        if (
+                            message_webhook_id
+                            == reachable_channels[target_channel_id].id
+                        ):
+                            webhook = reachable_channels[target_channel_id]
                         else:
-                            # This should never happen
-                            return
+                            try:
+                                webhook = await globals.client.fetch_webhook(
+                                    message_webhook_id
+                                )
+                            except Exception:
+                                return
 
-                    async_message_deletes.append(
-                        delete_message(
-                            message_row,
-                            target_channel_id,
-                            thread_splat,
-                            bridged_channel,
+                        try:
+                            await webhook.delete_message(
+                                int(message_row.target_message),
+                                **thread_splat,
+                            )
+                        except discord.NotFound:
+                            # Webhook is gone, delete this bridge
+                            logger.warning(
+                                "Webhook in %s:%s (ID: %s) not found, demolishing bridges to this channel and its threads.",
+                                bridged_channel.guild.name,
+                                bridged_channel.name,
+                                bridged_channel.id,
+                            )
+                            try:
+                                await bridges.demolish_bridges(
+                                    target_channel=bridged_channel,
+                                    session=session,
+                                )
+                            except Exception as e:
+                                if not isinstance(e, discord.HTTPException):
+                                    logger.error(
+                                        "Exception occurred when trying to demolish an invalid bridge after bridging a message deletion: %s",
+                                        e,
+                                    )
+                                raise
+                    elif message_row.forward_header_message:
+                        # If the message doesn't have a webhook, it's forwarded
+                        partial_target_channel = globals.client.get_partial_messageable(
+                            target_channel_id
                         )
-                    )
-                except discord.HTTPException as e:
-                    logger.warning(
-                        "Ran into a Discord exception while trying to delete a message across a bridge: %s",
-                        e,
-                    )
+                        await partial_target_channel.get_partial_message(
+                            int(message_row.target_message)
+                        ).delete()
+                        await partial_target_channel.get_partial_message(
+                            int(message_row.forward_header_message)
+                        ).delete()
+                    else:
+                        # This should never happen
+                        return
 
-            # If the message was bridged, delete its row
-            # If it was a source of bridged messages, delete all rows of its bridged versions
-            await sql_retry(
-                lambda: session.execute(
-                    SQLDelete(DBMessageMap).where(
-                        sql_or(
-                            DBMessageMap.source_message == str(message_id),
-                            DBMessageMap.target_message == str(message_id),
-                        )
+                async_message_deletes.append(
+                    delete_message(
+                        message_row,
+                        target_channel_id,
+                        thread_splat,
+                        bridged_channel,
+                    )
+                )
+            except discord.HTTPException as e:
+                logger.warning(
+                    "Ran into a Discord exception while trying to delete a message across a bridge: %s",
+                    e,
+                )
+
+        # If the message was bridged, delete its row
+        # If it was a source of bridged messages, delete all rows of its bridged versions
+        await sql_retry(
+            lambda: session.execute(
+                SQLDelete(DBMessageMap).where(
+                    sql_or(
+                        DBMessageMap.source_message == str(message_id),
+                        DBMessageMap.target_message == str(message_id),
                     )
                 )
             )
-            session.commit()
+        )
     except Exception as e:
-        if session:
-            session.rollback()
-            session.close()
-
         if isinstance(e, SQLError):
             logger.warning(
                 "Ran into an SQL error while trying to delete a message: %s", e
@@ -1757,6 +1924,7 @@ async def delete_message_helper(message_id: int, channel_id: int):
     logger.debug("Successfully bridged deletion of message with ID %s.", message_id)
 
 
+@globals.client.event
 async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
     """This function is called when a message has a reaction added. Unlike `on_reaction_add()`, this is called regardless of the state of the internal message cache.
 
@@ -1795,6 +1963,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
     )
 
 
+@overload
 async def bridge_reaction_add(
     *,
     message_id: int,
@@ -1811,6 +1980,52 @@ async def bridge_reaction_add(
         The ID of the channel the message is in.
     emoji : :class:`~discord.PartialEmoji`
         The emoji being added to the message.
+
+    Raises
+    ------
+    :class:`~discord.HTTPResponseError`
+        HTTP request to fetch image returned a status other than 200.
+    :class:`~discord.InvalidURL`
+        URL generated from emoji was not valid.
+    :class:`~discord.RuntimeError`
+        Session connection failed.
+    :class:`~discord.ServerTimeoutError`
+        Connection to server timed out.
+    """
+    ...
+
+
+@overload
+async def bridge_reaction_add(
+    *,
+    message_id: int,
+    channel_id: int,
+    emoji: discord.PartialEmoji,
+    session: SQLSession | None,
+): ...
+
+
+@sql_command
+@beartype
+async def bridge_reaction_add(
+    *,
+    message_id: int,
+    channel_id: int,
+    emoji: discord.PartialEmoji,
+    session: SQLSession,
+):
+    """Bridge reactions added to a message, if possible.
+
+    Parameters
+    ----------
+    message_id : int
+        The ID of the message being reacted to.
+    channel_id : int
+        The ID of the channel the message is in.
+    emoji : :class:`~discord.PartialEmoji`
+        The emoji being added to the message.
+    session : :class:`~sqlalchemy.orm.Session` | None, optional
+        An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
 
     Raises
     ------
@@ -1879,7 +2094,6 @@ async def bridge_reaction_add(
     reachable_channel_ids = await bridges.get_reachable_channels(channel_id, "outbound")
 
     # Find and react to all messages matching this one
-    session = None
     try:
         # Create a function to add reactions to messages asynchronously and gather them all at the end
         source_message_id_str = str(message_id)
@@ -1964,127 +2178,55 @@ async def bridge_reaction_add(
                 target_emoji_name=bridged_emoji_name,
             )
 
-        with SQLSession(engine) as session:
-            # Let me check whether I've already reacted to bridged messages in some of these channels
-            select_reaction_map: SQLSelect[tuple[DBReactionMap]] = SQLSelect(
-                DBReactionMap
-            ).where(
-                DBReactionMap.source_message == source_message_id_str,
-                DBReactionMap.source_emoji == emoji_id_str,
-            )
-            already_bridged_reactions: ScalarResult[DBReactionMap] = await sql_retry(
-                lambda: session.scalars(select_reaction_map)
-            )
-            already_bridged_reaction_channels = {
-                int(bridged_reaction.target_channel)
-                for bridged_reaction in already_bridged_reactions
-            }
+        # Let me check whether I've already reacted to bridged messages in some of these channels
+        select_reaction_map: SQLSelect[tuple[DBReactionMap]] = SQLSelect(
+            DBReactionMap
+        ).where(
+            DBReactionMap.source_message == source_message_id_str,
+            DBReactionMap.source_emoji == emoji_id_str,
+        )
+        already_bridged_reactions: ScalarResult[DBReactionMap] = await sql_retry(
+            lambda: session.scalars(select_reaction_map)
+        )
+        already_bridged_reaction_channels = {
+            int(bridged_reaction.target_channel)
+            for bridged_reaction in already_bridged_reactions
+        }
 
-            reachable_channel_ids = (
-                reachable_channel_ids - already_bridged_reaction_channels
-            )
-            if len(reachable_channel_ids) == 0:
-                # I've already bridged this reaction to all reachable channels
+        reachable_channel_ids = (
+            reachable_channel_ids - already_bridged_reaction_channels
+        )
+        if len(reachable_channel_ids) == 0:
+            # I've already bridged this reaction to all reachable channels
+            return
+
+        # First, check whether this message is bridged, in which case I need to find its source
+        select_message_map: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
+            DBMessageMap
+        ).where(
+            DBMessageMap.target_message == source_message_id_str,
+        )
+        source_message_map: DBMessageMap | None = await sql_retry(
+            lambda: session.scalars(select_message_map).first()
+        )
+        if isinstance(source_message_map, DBMessageMap):
+            # This message was bridged, so find the original one, react to it, and then find any other bridged messages from it
+            try:
+                source_channel = await globals.get_channel_from_id(
+                    int(source_message_map.source_channel),
+                    ensure_text_or_thread=True,
+                )
+            except ChannelTypeError:
                 return
 
-            # First, check whether this message is bridged, in which case I need to find its source
-            select_message_map: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
-                DBMessageMap
-            ).where(
-                DBMessageMap.target_message == source_message_id_str,
-            )
-            source_message_map: DBMessageMap | None = await sql_retry(
-                lambda: session.scalars(select_message_map).first()
-            )
-            if isinstance(source_message_map, DBMessageMap):
-                # This message was bridged, so find the original one, react to it, and then find any other bridged messages from it
-                try:
-                    source_channel = await globals.get_channel_from_id(
-                        int(source_message_map.source_channel),
-                        ensure_text_or_thread=True,
-                    )
-                except ChannelTypeError:
-                    return
-
-                source_channel_id = source_channel.id
-                source_message_id = int(source_message_map.source_message)
-                if source_channel_id in reachable_channel_ids:
-                    try:
-                        async_add_reactions.append(
-                            add_reaction_helper(source_channel, source_message_id)
-                        )
-                        reachable_channel_ids.discard(source_channel_id)
-                    except discord.HTTPException as e:
-                        logger.warning(
-                            "Ran into a Discord exception while trying to add a reaction across a bridge: %s",
-                            e,
-                        )
-                    except Exception as e:
-                        logger.error(
-                            "Ran into an unknown error while trying to add a reaction across a bridge: %s",
-                            e,
-                        )
-                        raise
-            else:
-                # This message is (or might be) the source
-                source_message_id = message_id
-
-            # Bridge reactions to the last bridged message of a group of split bridged messages
-            max_message_subq = (
-                SQLSelect(
-                    DBMessageMap.target_channel,
-                    DBMessageMap.source_message,
-                    func.max(DBMessageMap.target_message_order).label("max_order"),
-                )
-                .where(DBMessageMap.source_message == str(source_message_id))
-                .group_by(DBMessageMap.target_channel, DBMessageMap.source_message)
-                .subquery()
-            )
-            select_message_map: SQLSelect[tuple[DBMessageMap]] = (
-                SQLSelect(DBMessageMap)
-                .where(
-                    DBMessageMap.target_channel.in_(
-                        [str(id) for id in reachable_channel_ids]
-                    ),
-                )
-                .join(
-                    max_message_subq,
-                    sql_and(
-                        (
-                            DBMessageMap.target_channel
-                            == max_message_subq.c.target_channel
-                        ),
-                        (
-                            DBMessageMap.target_message_order
-                            == max_message_subq.c.max_order
-                        ),
-                        (
-                            DBMessageMap.source_message
-                            == max_message_subq.c.source_message
-                        ),
-                    ),
-                )
-            )
-            bridged_messages_query_result: ScalarResult[DBMessageMap] = await sql_retry(
-                lambda: session.scalars(select_message_map)
-            )
-            for message_row in bridged_messages_query_result:
-                bridged_channel = await globals.get_channel_from_id(
-                    int(message_row.target_channel)
-                )
-                if not isinstance(
-                    bridged_channel,
-                    (discord.TextChannel, discord.Thread),
-                ):
-                    continue
-
+            source_channel_id = source_channel.id
+            source_message_id = int(source_message_map.source_message)
+            if source_channel_id in reachable_channel_ids:
                 try:
                     async_add_reactions.append(
-                        add_reaction_helper(
-                            bridged_channel,
-                            int(message_row.target_message),
-                        )
+                        add_reaction_helper(source_channel, source_message_id)
                     )
+                    reachable_channel_ids.discard(source_channel_id)
                 except discord.HTTPException as e:
                     logger.warning(
                         "Ran into a Discord exception while trying to add a reaction across a bridge: %s",
@@ -2095,16 +2237,73 @@ async def bridge_reaction_add(
                         "Ran into an unknown error while trying to add a reaction across a bridge: %s",
                         e,
                     )
-                    return
+                    raise
+        else:
+            # This message is (or might be) the source
+            source_message_id = message_id
 
-            reactions_added = await asyncio.gather(*async_add_reactions)
-            await sql_retry(lambda: session.add_all([r for r in reactions_added if r]))
-            session.commit()
+        # Bridge reactions to the last bridged message of a group of split bridged messages
+        max_message_subq = (
+            SQLSelect(
+                DBMessageMap.target_channel,
+                DBMessageMap.source_message,
+                func.max(DBMessageMap.target_message_order).label("max_order"),
+            )
+            .where(DBMessageMap.source_message == str(source_message_id))
+            .group_by(DBMessageMap.target_channel, DBMessageMap.source_message)
+            .subquery()
+        )
+        select_message_map: SQLSelect[tuple[DBMessageMap]] = (
+            SQLSelect(DBMessageMap)
+            .where(
+                DBMessageMap.target_channel.in_(
+                    [str(id) for id in reachable_channel_ids]
+                ),
+            )
+            .join(
+                max_message_subq,
+                sql_and(
+                    DBMessageMap.target_channel == max_message_subq.c.target_channel,
+                    DBMessageMap.target_message_order == max_message_subq.c.max_order,
+                    DBMessageMap.source_message == max_message_subq.c.source_message,
+                ),
+            )
+        )
+        bridged_messages_query_result: ScalarResult[DBMessageMap] = await sql_retry(
+            lambda: session.scalars(select_message_map)
+        )
+        for message_row in bridged_messages_query_result:
+            bridged_channel = await globals.get_channel_from_id(
+                int(message_row.target_channel)
+            )
+            if not isinstance(
+                bridged_channel,
+                (discord.TextChannel, discord.Thread),
+            ):
+                continue
+
+            try:
+                async_add_reactions.append(
+                    add_reaction_helper(
+                        bridged_channel,
+                        int(message_row.target_message),
+                    )
+                )
+            except discord.HTTPException as e:
+                logger.warning(
+                    "Ran into a Discord exception while trying to add a reaction across a bridge: %s",
+                    e,
+                )
+            except Exception as e:
+                logger.error(
+                    "Ran into an unknown error while trying to add a reaction across a bridge: %s",
+                    e,
+                )
+                return
+
+        reactions_added = await asyncio.gather(*async_add_reactions)
+        await sql_retry(lambda: session.add_all([r for r in reactions_added if r]))
     except Exception as e:
-        if session:
-            session.rollback()
-            session.close()
-
         if isinstance(e, SQLError):
             logger.warning(
                 "Ran into an SQL error while trying to add a reaction to a message: %s",
@@ -2121,6 +2320,7 @@ async def bridge_reaction_add(
     logger.debug("Reaction bridged.")
 
 
+@globals.client.event
 async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
     """This function is called when a message has a reaction removed. Unlike `on_reaction_remove()`, this is called regardless of the state of the internal message cache.
 
@@ -2170,26 +2370,6 @@ async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
                 # There is at least one user who reacted to this message other than me, so I don't need to do anything
                 return
 
-    await bridge_reaction_remove(
-        message_id=message_id,
-        emoji=emoji,
-    )
-
-
-async def bridge_reaction_remove(
-    *,
-    message_id: int,
-    emoji: discord.PartialEmoji,
-):
-    """Bridge reaction removal.
-
-    Parameters
-    ----------
-    message_id : int
-        The ID of the message a reaction is being removed from.
-    emoji : :class:`~discord.PartialEmoji`
-        The emoji being removed.
-    """
     logger.debug(
         "Bridging reaction removal of %s from message with ID %s.",
         emoji,
@@ -2206,6 +2386,7 @@ async def bridge_reaction_remove(
     )
 
 
+@globals.client.event
 async def on_raw_reaction_clear_emoji(payload: discord.RawReactionClearEmojiEvent):
     """This function is called when a message has a specific reaction removed it. Unlike `on_reaction_clear_emoji()`, this is called regardless of the state of the internal message cache.
 
@@ -2219,25 +2400,9 @@ async def on_raw_reaction_clear_emoji(payload: discord.RawReactionClearEmojiEven
     ):
         return
 
-    await bridge_reaction_clear_emoji(
-        message_id=payload.message_id, emoji=payload.emoji
-    )
+    message_id = payload.message_id
+    emoji = payload.emoji
 
-
-async def bridge_reaction_clear_emoji(
-    *,
-    message_id: int,
-    emoji: discord.PartialEmoji,
-):
-    """Bridge reaction removal.
-
-    Parameters
-    ----------
-    message_id : int
-        The ID of the message a reaction is being removed from.
-    emoji : :class:`~discord.PartialEmoji`
-        The emoji being removed.
-    """
     logger.debug(
         "Bridging reaction clear of %s from message with ID %s.",
         emoji,
@@ -2253,6 +2418,7 @@ async def bridge_reaction_clear_emoji(
     )
 
 
+@globals.client.event
 async def on_raw_reaction_clear(payload: discord.RawReactionClearEvent):
     """Bridge reaction removal, if necessary.
 
@@ -2306,11 +2472,22 @@ async def unreact(*, message_id: int, emoji_to_remove: discord.PartialEmoji):
     ...
 
 
+@overload
+async def unreact(
+    *,
+    message_id: int,
+    emoji_to_remove: discord.PartialEmoji | None,
+    session: SQLSession | None = None,
+): ...
+
+
+@sql_command
 @beartype
 async def unreact(
     *,
     message_id: int,
     emoji_to_remove: discord.PartialEmoji | None = None,
+    session: SQLSession,
 ):
     """Remove all reactions by the bot using a given emoji (or all emoji) from messages bridged from a given message (but not from the message itself).
 
@@ -2320,6 +2497,8 @@ async def unreact(
         The ID of the message a reaction is being removed from.
     emoji : :class:`~discord.PartialEmoji` | None, optional
         The emoji being removed. Defaults to None, in which case all of them will be.
+    session : :class:`~sqlalchemy.orm.Session` | None, optional
+        An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
     """
     if emoji_to_remove:
         removed_emoji_id = (
@@ -2333,154 +2512,143 @@ async def unreact(
         removed_emoji_id = None
         equivalent_emoji_ids = None
 
-    session = None
     try:
-        with SQLSession(engine) as session:
-            # First I find all of the messages that got this reaction bridged to them
-            conditions = [DBReactionMap.source_message == str(message_id)]
-            if removed_emoji_id:
-                conditions.append(DBReactionMap.source_emoji == removed_emoji_id)
+        # First I find all of the messages that got this reaction bridged to them
+        conditions = [DBReactionMap.source_message == str(message_id)]
+        if removed_emoji_id:
+            conditions.append(DBReactionMap.source_emoji == removed_emoji_id)
 
-            select_bridged_reactions: SQLSelect[tuple[DBReactionMap]] = SQLSelect(
-                DBReactionMap
-            ).where(*conditions)
-            bridged_reactions: ScalarResult[DBReactionMap] = await sql_retry(
-                lambda: session.scalars(select_bridged_reactions)
-            )
-            bridged_messages = {
+        select_bridged_reactions: SQLSelect[tuple[DBReactionMap]] = SQLSelect(
+            DBReactionMap
+        ).where(*conditions)
+        bridged_reactions: ScalarResult[DBReactionMap] = await sql_retry(
+            lambda: session.scalars(select_bridged_reactions)
+        )
+        bridged_messages = {
+            (
+                map.target_message,
+                map.target_channel,
+                map.target_emoji_id,
+                map.target_emoji_name,
                 (
-                    map.target_message,
-                    map.target_channel,
-                    map.target_emoji_id,
-                    map.target_emoji_name,
-                    (
-                        equivalent_emoji_ids
-                        or emoji_hash_map.map.get_matches(
-                            map.source_emoji,
-                            return_str=True,
-                        )
-                    ),
-                )
-                for map in bridged_reactions
-            }
-
-            if len(bridged_messages) == 0:
-                return
-
-            # Then I remove them from the database
-            await sql_retry(
-                lambda: session.execute(SQLDelete(DBReactionMap).where(*conditions))
+                    equivalent_emoji_ids
+                    or emoji_hash_map.map.get_matches(
+                        map.source_emoji,
+                        return_str=True,
+                    )
+                ),
             )
+            for map in bridged_reactions
+        }
 
-            # Next I find the messages that still have reactions of this type in them even after I removed the ones above
-            conditions = [
-                DBReactionMap.target_message.in_(
-                    [message_id for message_id, _, _, _, _ in bridged_messages]
-                )
-            ]
-            if equivalent_emoji_ids:
-                conditions.append(DBReactionMap.source_emoji.in_(equivalent_emoji_ids))
-            select_bridged_reactions: SQLSelect[tuple[DBReactionMap]] = SQLSelect(
-                DBReactionMap
-            ).where(*conditions)
-            remaining_reactions: ScalarResult[DBReactionMap] = await sql_retry(
-                lambda: session.scalars(select_bridged_reactions)
+        if len(bridged_messages) == 0:
+            return
+
+        # Then I remove them from the database
+        await sql_retry(
+            lambda: session.execute(SQLDelete(DBReactionMap).where(*conditions))
+        )
+
+        # Next I find the messages that still have reactions of this type in them even after I removed the ones above
+        conditions = [
+            DBReactionMap.target_message.in_(
+                [message_id for message_id, _, _, _, _ in bridged_messages]
             )
+        ]
+        if equivalent_emoji_ids:
+            conditions.append(DBReactionMap.source_emoji.in_(equivalent_emoji_ids))
+        select_bridged_reactions: SQLSelect[tuple[DBReactionMap]] = SQLSelect(
+            DBReactionMap
+        ).where(*conditions)
+        remaining_reactions: ScalarResult[DBReactionMap] = await sql_retry(
+            lambda: session.scalars(select_bridged_reactions)
+        )
 
-            # And I get rid of my reactions from the messages that aren't on that list
-            messages_to_remove_reaction_from = bridged_messages - {
+        # And I get rid of my reactions from the messages that aren't on that list
+        messages_to_remove_reaction_from = bridged_messages - {
+            (
+                map.target_message,
+                map.target_channel,
+                map.target_emoji_id,
+                map.target_emoji_name,
                 (
-                    map.target_message,
-                    map.target_channel,
-                    map.target_emoji_id,
-                    map.target_emoji_name,
-                    (
-                        equivalent_emoji_ids
-                        or emoji_hash_map.map.get_matches(
-                            map.source_emoji, return_str=True
-                        )
-                    ),
-                )
-                for map in remaining_reactions
-            }
+                    equivalent_emoji_ids
+                    or emoji_hash_map.map.get_matches(
+                        map.source_emoji,
+                        return_str=True,
+                    )
+                ),
+            )
+            for map in remaining_reactions
+        }
 
-            session.commit()
+        if len(messages_to_remove_reaction_from) == 0:
+            # I don't have to remove my reaction from any bridged messages
+            return
 
-            if len(messages_to_remove_reaction_from) == 0:
-                # I don't have to remove my reaction from any bridged messages
-                return
-
-            # There is at least one reaction in one target message that should no longer be there
-            def get_emoji_or_name(
-                target_emoji_id: str | None,
-                target_emoji_name: str | None,
-            ):
-                if target_emoji_name:
-                    if target_emoji_id:
-                        return f"{target_emoji_name}:{target_emoji_id}"
-                    else:
-                        return target_emoji_name
-                elif target_emoji_id:
-                    try:
-                        return globals.client.get_emoji(int(target_emoji_id))
-                    except ValueError:
-                        return None
+        # There is at least one reaction in one target message that should no longer be there
+        def get_emoji_or_name(
+            target_emoji_id: str | None,
+            target_emoji_name: str | None,
+        ):
+            if target_emoji_name:
+                if target_emoji_id:
+                    return f"{target_emoji_name}:{target_emoji_id}"
                 else:
+                    return target_emoji_name
+            elif target_emoji_id:
+                try:
+                    return globals.client.get_emoji(int(target_emoji_id))
+                except ValueError:
                     return None
+            else:
+                return None
 
-            async def remove_reactions_with_emoji(
-                target_channel_id: str,
-                target_message_id: str,
-                target_emoji_id: str | None,
-                target_emoji_name: str | None,
+        async def remove_reactions_with_emoji(
+            target_channel_id: str,
+            target_message_id: str,
+            target_emoji_id: str | None,
+            target_emoji_name: str | None,
+        ):
+            target_channel = await globals.get_channel_from_id(int(target_channel_id))
+            if not isinstance(
+                target_channel,
+                (discord.TextChannel, discord.Thread),
             ):
-                target_channel = await globals.get_channel_from_id(
-                    int(target_channel_id)
-                )
-                if not isinstance(
-                    target_channel,
-                    (discord.TextChannel, discord.Thread),
-                ):
-                    return
+                return
 
-                target_message = await target_channel.fetch_message(
-                    int(target_message_id)
-                )
+            target_message = await target_channel.fetch_message(int(target_message_id))
 
-                emoji_to_remove = get_emoji_or_name(target_emoji_id, target_emoji_name)
-                if emoji_to_remove:
-                    try:
-                        await target_message.remove_reaction(
-                            emoji_to_remove, target_channel.guild.me
-                        )
-                    except Exception:
-                        pass
+            emoji_to_remove = get_emoji_or_name(target_emoji_id, target_emoji_name)
+            if emoji_to_remove:
+                try:
+                    await target_message.remove_reaction(
+                        emoji_to_remove, target_channel.guild.me
+                    )
+                except Exception:
+                    pass
 
-            compacted_messages_to_remove_reaction_from = {
-                (
-                    target_message_id,
+        compacted_messages_to_remove_reaction_from = {
+            (
+                target_message_id,
+                target_channel_id,
+                target_emoji_id,
+                target_emoji_name,
+            )
+            for target_message_id, target_channel_id, target_emoji_id, target_emoji_name, _ in messages_to_remove_reaction_from
+        }
+        await asyncio.gather(
+            *[
+                remove_reactions_with_emoji(
                     target_channel_id,
+                    target_message_id,
                     target_emoji_id,
                     target_emoji_name,
                 )
-                for target_message_id, target_channel_id, target_emoji_id, target_emoji_name, _ in messages_to_remove_reaction_from
-            }
-            await asyncio.gather(
-                *[
-                    remove_reactions_with_emoji(
-                        target_channel_id,
-                        target_message_id,
-                        target_emoji_id,
-                        target_emoji_name,
-                    )
-                    for target_message_id, target_channel_id, target_emoji_id, target_emoji_name in compacted_messages_to_remove_reaction_from
-                ]
-            )
+                for target_message_id, target_channel_id, target_emoji_id, target_emoji_name in compacted_messages_to_remove_reaction_from
+            ]
+        )
     except Exception as e:
-        if session:
-            session.rollback()
-            session.close()
-
         if isinstance(e, SQLError):
             logger.warning(
                 "Ran into an SQL error while running %s(): %s", inspect.stack()[1][3], e
@@ -2495,6 +2663,7 @@ async def unreact(
         raise
 
 
+@globals.client.event
 async def on_thread_create(thread: discord.Thread):
     """This function is called whenever a thread is created.
 
@@ -2537,6 +2706,7 @@ async def on_thread_create(thread: discord.Thread):
     await auto_bridge_thread(thread)
 
 
+@overload
 async def auto_bridge_thread(thread: discord.Thread):
     """Create matching threads across a bridge if the created thread's parent channel has auto-bridge-threads enabled.
 
@@ -2545,10 +2715,29 @@ async def auto_bridge_thread(thread: discord.Thread):
     thread : :class:`~discord.Thread`
         The thread that was created.
     """
+    ...
+
+
+@overload
+async def auto_bridge_thread(thread: discord.Thread, *, session: SQLSession | None): ...
+
+
+@sql_command
+@beartype
+async def auto_bridge_thread(thread: discord.Thread, *, session: SQLSession):
+    """Create matching threads across a bridge if the created thread's parent channel has auto-bridge-threads enabled.
+
+    Parameters
+    ----------
+    thread : :class:`~discord.Thread`
+        The thread that was created.
+    session : :class:`~sqlalchemy.orm.Session` | None, optional
+        An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
+    """
     logger.debug("Automatically bridging thread with ID %s.", thread.id)
 
     try:
-        await commands.bridge_thread_helper(thread, thread.owner_id)
+        await commands.bridge_thread_helper(thread, thread.owner_id, session=session)
     except Exception as e:
         logger.error("An error occurred while trying to bridge a thread: %s", e)
         raise
@@ -2560,11 +2749,16 @@ async def auto_bridge_thread(thread: discord.Thread):
         if isinstance(refreshed_thread, discord.Thread):
             last_message = refreshed_thread.last_message
     if last_message and last_message.content != "":
-        await bridge_message_helper(last_message)
+        await bridge_message_helper(
+            last_message,
+            last_message.channel.id,
+            session=session,
+        )
 
     logger.debug("Thread with ID %s successfully bridged.", thread.id)
 
 
+@globals.client.event
 async def on_guild_join(server: discord.Guild):
     joined_server_msg = f"Just joined server '{server.name}'."
     logger.info(f"{joined_server_msg} Hashing emoji...")
@@ -2580,21 +2774,25 @@ async def on_guild_join(server: discord.Guild):
         raise
 
 
+@globals.client.event
 async def on_guild_remove(server: discord.Guild):
     left_server_msg = f"Just left server '{server.name}'."
     logger.info(left_server_msg)
     print(left_server_msg)
 
 
+@globals.client.event
 async def on_disconnect():
     """Mark the bot as disconnected."""
     globals.is_connected = False
 
 
+@globals.client.event
 async def on_connect():
     await reconnect()
 
 
+@globals.client.event
 async def on_resumed():
     await reconnect()
 
@@ -2613,78 +2811,91 @@ async def reconnect():
     await bridge_unbridged_messages()
 
 
+@overload
 async def bridge_unbridged_messages():
-    with SQLSession(engine) as session:
-        # Find the latest bridged messages from each channel
+    """Find all messages that were meant to be bridged while the bot was disconnected and bridge them."""
+    ...
+
+
+@overload
+async def bridge_unbridged_messages(*, session: SQLSession | None): ...
+
+
+@sql_command(commit_results=False)
+@beartype
+async def bridge_unbridged_messages(*, session: SQLSession):
+    """Find all messages that were meant to be bridged while the bot was disconnected and bridge them.
+
+    Parameters
+    ----------
+    session : :class:`~sqlalchemy.orm.Session` | None, optional
+        An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
+    """
+    # Find the latest bridged messages from each channel
+    subquery = (
+        session.query(
+            DBMessageMap.source_channel,
+            func.max(DBMessageMap.id).label("max_id"),
+        )
+        .group_by(DBMessageMap.source_channel)
+        .subquery()
+    )
+    select_latest_bridged_messages: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
+        DBMessageMap
+    ).join(
+        subquery,
+        (DBMessageMap.source_channel == subquery.c.source_channel)
+        & (DBMessageMap.id == subquery.c.max_id),
+    )
+
+    bridged_messages_query_result: ScalarResult[DBMessageMap] = session.scalars(
+        select_latest_bridged_messages
+    )
+
+    for bridged_message_row in bridged_messages_query_result:
+        # Check whether the ID of the latest bridged message for a channel is also the ID of that channel's latest message
+        channel_id = int(bridged_message_row.source_channel)
+        message_id = int(bridged_message_row.source_message)
+
         try:
-            subquery = (
-                session.query(
-                    DBMessageMap.source_channel,
-                    func.max(DBMessageMap.id).label("max_id"),
+            channel = await globals.get_channel_from_id(
+                channel_id,
+                ensure_text_or_thread=True,
+            )
+        except ChannelTypeError:
+            continue
+
+        if channel.last_message_id and channel.last_message_id == message_id:
+            # Most recent message in the channel has been bridged
+            continue
+
+        # There might be unbridged messages, try to find them
+        try:
+            latest_bridged_message = channel.get_partial_message(message_id)
+
+            messages_after_latest_bridged = [
+                message
+                async for message in channel.history(
+                    after=latest_bridged_message.created_at,
+                    oldest_first=True,
                 )
-                .group_by(DBMessageMap.source_channel)
-                .subquery()
+            ]
+        except discord.Forbidden as e:
+            logger.warning(
+                "An error occurred when attempting to fetch unbridged messages after a disconnection:\n%s",
+                e,
             )
-            select_latest_bridged_messages: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
-                DBMessageMap
-            ).join(
-                subquery,
-                (DBMessageMap.source_channel == subquery.c.source_channel)
-                & (DBMessageMap.id == subquery.c.max_id),
-            )
+            continue
 
-            bridged_messages_query_result: ScalarResult[DBMessageMap] = session.scalars(
-                select_latest_bridged_messages
-            )
-        except Exception:
-            session.rollback()
-            session.close()
-            raise
-
-        for bridged_message_row in bridged_messages_query_result:
-            # Check whether the ID of the latest bridged message for a channel is also the ID of that channel's latest message
-            channel_id = int(bridged_message_row.source_channel)
-            message_id = int(bridged_message_row.source_message)
+        # Try to bridge them
+        for message_to_bridge in messages_after_latest_bridged:
+            if message_to_bridge.id == message_id:
+                continue
 
             try:
-                channel = await globals.get_channel_from_id(
-                    channel_id,
-                    ensure_text_or_thread=True,
-                )
-            except ChannelTypeError:
-                continue
-
-            if channel.last_message_id and channel.last_message_id == message_id:
-                # Most recent message in the channel has been bridged
-                continue
-
-            # There might be unbridged messages, try to find them
-            try:
-                latest_bridged_message = channel.get_partial_message(message_id)
-
-                messages_after_latest_bridged = [
-                    message
-                    async for message in channel.history(
-                        after=latest_bridged_message.created_at,
-                        oldest_first=True,
-                    )
-                ]
-            except discord.Forbidden as e:
-                logger.warning(
-                    "An error occurred when attempting to fetch unbridged messages after a disconnection:\n%s",
-                    e,
-                )
-                continue
-
-            # Try to bridge them
-            for message_to_bridge in messages_after_latest_bridged:
-                if message_to_bridge.id == message_id:
-                    continue
-
-                try:
-                    await on_message(message_to_bridge)
-                except Exception:
-                    break
+                await on_message(message_to_bridge)
+            except Exception:
+                break
 
 
 def register_events():

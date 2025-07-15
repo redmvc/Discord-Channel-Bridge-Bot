@@ -1,6 +1,6 @@
 import asyncio
 import re
-from typing import TYPE_CHECKING, Any, Iterable, Literal
+from typing import TYPE_CHECKING, Any, Iterable, Literal, overload
 
 import discord
 from beartype import beartype
@@ -11,22 +11,21 @@ from sqlalchemy.orm import Session as SQLSession
 
 import emoji_hash_map
 import globals
-from bridge import bridges
+from bridge import Bridge, bridges
 from database import (
     DBAppWhitelist,
     DBAutoBridgeThreadChannels,
     DBMessageMap,
-    engine,
+    Session,
+    sql_command,
     sql_retry,
 )
 from validations import ChannelTypeError, logger, validate_channels
 
 if TYPE_CHECKING:
-    from typing import AsyncIterator, Coroutine
+    from typing import Coroutine
 
     from sqlalchemy import ScalarResult
-
-    from bridge import Bridge
 
 
 @globals.command_tree.command(
@@ -236,30 +235,9 @@ async def bridge(
         except Exception:
             pass
 
-    session = None
     try:
-        with SQLSession(engine) as session:
-            create_bridges: list["Coroutine[Any, Any, Bridge]"] = []
-            if direction != "inbound":
-                create_bridges.append(
-                    bridges.create_bridge(
-                        source=message_channel, target=target_channel, session=session
-                    )
-                )
-            if direction != "outbound":
-                create_bridges.append(
-                    bridges.create_bridge(
-                        source=target_channel, target=message_channel, session=session
-                    )
-                )
-
-            await asyncio.gather(*create_bridges)
-            session.commit()
+        await create_bridges(message_channel, target_channel, direction)
     except Exception as e:
-        if session:
-            session.rollback()
-            session.close()
-
         if isinstance(e, SQLError):
             await interaction.followup.send(
                 "❌ There was an issue with the connection to the database; bridge creation failed.",
@@ -291,6 +269,79 @@ async def bridge(
     await asyncio.gather(*join_threads)
 
     logger.debug("Call to /bridge with interaction ID %s successful.", interaction.id)
+
+
+@overload
+async def create_bridges(
+    source_channel: discord.TextChannel | discord.Thread,
+    target_channel: discord.TextChannel | discord.Thread,
+    direction: Literal["outbound", "inbound"] | None,
+):
+    """Create bridges between `source_channel` and `target_channel`.
+
+    Parameters
+    ----------
+    source_channel : :class:`~discord.TextChannel` | :class:`~discord.Thread`
+        The channel from which to create bridges.
+    target_channel : :class:`~discord.TextChannel` | :class:`~discord.Thread`
+        The channel to which to create bridges.
+    direction : Literal["outbound", "inbound"] | None
+        If this equals "outbound", only a bridge from `source_channel` to `target_channel` will be created; if it equals "inbound", only a bridge from `target_channel` to `source_channel` will be created; if it equals None, both will be created.
+    """
+    ...
+
+
+@overload
+async def create_bridges(
+    source_channel: discord.TextChannel | discord.Thread,
+    target_channel: discord.TextChannel | discord.Thread,
+    direction: Literal["outbound", "inbound"] | None,
+    *,
+    session: SQLSession | None,
+): ...
+
+
+@sql_command
+@beartype
+async def create_bridges(
+    source_channel: discord.TextChannel | discord.Thread,
+    target_channel: discord.TextChannel | discord.Thread,
+    direction: Literal["outbound", "inbound"] | None,
+    *,
+    session: SQLSession,
+):
+    """Create bridges between `source_channel` and `target_channel`.
+
+    Parameters
+    ----------
+    source_channel : :class:`~discord.TextChannel` | :class:`~discord.Thread`
+        The channel from which to create bridges.
+    target_channel : :class:`~discord.TextChannel` | :class:`~discord.Thread`
+        The channel to which to create bridges.
+    direction : Literal["outbound", "inbound"] | None
+        If this equals "outbound", only a bridge from `source_channel` to `target_channel` will be created; if it equals "inbound", only a bridge from `target_channel` to `source_channel` will be created; if it equals None, both will be created.
+    session : :class:`~sqlalchemy.orm.Session` | None, optional
+        An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
+    """
+    create_bridges: list["Coroutine[Any, Any, Bridge]"] = []
+    if direction != "inbound":
+        create_bridges.append(
+            bridges.create_bridge(
+                source=source_channel,
+                target=target_channel,
+                session=session,
+            )
+        )
+    if direction != "outbound":
+        create_bridges.append(
+            bridges.create_bridge(
+                source=target_channel,
+                target=source_channel,
+                session=session,
+            )
+        )
+
+    await asyncio.gather(*create_bridges)
 
 
 @discord.app_commands.default_permissions(
@@ -439,29 +490,12 @@ async def auto_bridge_threads(interaction: discord.Interaction):
 
     await interaction.response.defer(thinking=True, ephemeral=True)
 
-    session = None
     try:
-        with SQLSession(engine) as session:
-            if message_channel.id not in globals.auto_bridge_thread_channels:
-                await sql_retry(
-                    lambda: session.add(
-                        DBAutoBridgeThreadChannels(channel=str(message_channel.id))
-                    )
-                )
-                globals.auto_bridge_thread_channels.add(message_channel.id)
-
-                response = "✅ Threads will now be automatically created across bridges when they are created in this channel."
-            else:
-                await stop_auto_bridging_threads_helper(message_channel.id, session)
-
-                response = "✅ Threads will no longer be automatically created across bridges when they are created in this channel."
-
-            session.commit()
+        if await toggle_auto_bridge_threads(message_channel.id):
+            response = "✅ Threads will now be automatically created across bridges when they are created in this channel."
+        else:
+            response = "✅ Threads will no longer be automatically created across bridges when they are created in this channel."
     except Exception as e:
-        if session:
-            session.rollback()
-            session.close()
-
         if isinstance(e, SQLError):
             await interaction.followup.send(
                 "❌ There was an issue with the connection to the database; setting or unsetting automatic thread creation across bridges failed.",
@@ -488,6 +522,397 @@ async def auto_bridge_threads(interaction: discord.Interaction):
         "Call to /auto_bridge_threads with interaction ID %s successful.",
         interaction.id,
     )
+
+
+@overload
+async def toggle_auto_bridge_threads(message_channel_id: int) -> bool:
+    """Toggle thread auto-bridging for the channel identified by `channel_id` and return True if auto-bridging was enabled and False otherwise.
+
+    Parameters
+    ----------
+    channel_id : int
+        The ID of the channel to toggle thread auto-bridging for.
+
+    Returns
+    -------
+    bool
+    """
+    ...
+
+
+@overload
+async def toggle_auto_bridge_threads(
+    message_channel_id: int,
+    *,
+    session: SQLSession | None,
+) -> bool: ...
+
+
+@sql_command
+@beartype
+async def toggle_auto_bridge_threads(
+    channel_id: int,
+    *,
+    session: SQLSession,
+) -> bool:
+    """Toggle thread auto-bridging for the channel identified by `channel_id` and return True if auto-bridging was enabled and False otherwise.
+
+    Parameters
+    ----------
+    channel_id : int
+        The ID of the channel to toggle thread auto-bridging for.
+    session : :class:`~sqlalchemy.orm.Session` | None, optional
+        An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
+
+    Returns
+    -------
+    bool
+    """
+    if channel_id not in globals.auto_bridge_thread_channels:
+        await sql_retry(
+            lambda: session.add(DBAutoBridgeThreadChannels(channel=str(channel_id)))
+        )
+        globals.auto_bridge_thread_channels.add(channel_id)
+
+        return True
+    else:
+        await stop_auto_bridging_threads_helper(channel_id, session=session)
+
+        return False
+
+
+@overload
+async def bridge_thread_helper(
+    thread_to_bridge: discord.Thread,
+    user_id: int,
+    interaction: discord.Interaction | None = None,
+):
+    """Create threads matching the current one across bridges.
+
+    Parameters
+    ----------
+    thread_to_bridge : :class:`~discord.Thread`
+        The thread to bridge.
+    user_id : int
+        The ID of the user that created the thread.
+    interaction : :class:`~discord.Interaction` | None, optional
+        The interaction that called this function, if any. Defaults to None.
+    """
+    ...
+
+
+@overload
+async def bridge_thread_helper(
+    thread_to_bridge: discord.Thread,
+    user_id: int,
+    interaction: discord.Interaction | None = None,
+    *,
+    session: SQLSession | None,
+): ...
+
+
+@sql_command
+async def bridge_thread_helper(
+    thread_to_bridge: discord.Thread,
+    user_id: int,
+    interaction: discord.Interaction | None = None,
+    *,
+    session: SQLSession,
+):
+    """Create threads matching the current one across bridges.
+
+    Parameters
+    ----------
+    thread_to_bridge : :class:`~discord.Thread`
+        The thread to bridge.
+    user_id : int
+        The ID of the user that created the thread.
+    interaction : :class:`~discord.Interaction` | None, optional
+        The interaction that called this function, if any. Defaults to None.
+    session : :class:`~sqlalchemy.orm.Session` | None, optional
+        An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
+    """
+    thread_parent = await globals.get_channel_parent(thread_to_bridge)
+
+    outbound_bridges = bridges.get_outbound_bridges(thread_parent.id)
+    inbound_bridges = bridges.get_inbound_bridges(thread_parent.id)
+    if not outbound_bridges:
+        if interaction:
+            await interaction.response.send_message(
+                "❌ The parent channel doesn't have outbound bridges to any other channels.",
+                ephemeral=True,
+            )
+        return
+
+    # I need to check that the current channel is bridged to at least one other channel (as opposed to only threads)
+    at_least_one_channel = False
+    for target_id, bridge in outbound_bridges.items():
+        bridge_webhook = await bridge.webhook
+        if target_id == bridge_webhook.channel_id:
+            at_least_one_channel = True
+            break
+
+    if not at_least_one_channel:
+        if interaction:
+            await interaction.response.send_message(
+                "❌ The parent channel is only bridged to threads.",
+                ephemeral=True,
+            )
+        return
+
+    if interaction:
+        await interaction.response.defer(thinking=True, ephemeral=True)
+
+    # The IDs of threads are the same as that of their originating messages so we should try to create threads from the same messages
+    matching_starting_messages: dict[int, int] = {}
+    try:
+        # I don't need to store it I just need to know whether it exists
+        await thread_parent.fetch_message(thread_to_bridge.id)
+        select_message_map: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
+            DBMessageMap
+        ).where(DBMessageMap.target_message == str(thread_to_bridge.id))
+        source_starting_message: DBMessageMap | None = await sql_retry(
+            lambda: session.scalars(select_message_map).first()
+        )
+        if isinstance(source_starting_message, DBMessageMap):
+            # The message that's starting this thread is bridged
+            source_channel_id = int(source_starting_message.source_channel)
+            source_message_id = int(source_starting_message.source_message)
+            matching_starting_messages[source_channel_id] = source_message_id
+        else:
+            source_channel_id = thread_parent.id
+            source_message_id = thread_to_bridge.id
+
+        select_message_map: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
+            DBMessageMap
+        ).where(DBMessageMap.source_message == str(source_message_id))
+        target_starting_messages: "ScalarResult[DBMessageMap]" = await sql_retry(
+            lambda: session.scalars(select_message_map)
+        )
+        for target_starting_message in target_starting_messages:
+            matching_starting_messages[int(target_starting_message.target_channel)] = (
+                int(target_starting_message.target_message)
+            )
+    except discord.NotFound:
+        pass
+
+    # Now find all channels that are bridged to the channel this thread's parent is bridged to and create threads there
+    threads_created: dict[int, discord.Thread] = {}
+    succeeded_at_least_once = False
+    bridged_threads: list[int] = []
+    failed_channels: list[int] = []
+
+    create_bridges: list["Coroutine[Any, Any, Bridge]"] = []
+    add_user_to_threads: list["Coroutine[Any, Any, None]"] = []
+    try:
+        add_user_to_threads.append(thread_to_bridge.join())
+    except Exception:
+        pass
+
+    for channel_id in outbound_bridges.keys():
+        channel = await globals.get_channel_from_id(channel_id)
+        if not isinstance(channel, discord.TextChannel):
+            # I can't create a thread inside a thread
+            if channel:
+                bridged_threads.append(channel.id)
+            continue
+
+        channel_member = await globals.get_channel_member(channel, user_id)
+        if (
+            not channel_member
+            or not channel.permissions_for(channel_member).manage_webhooks
+            or not channel.permissions_for(channel_member).create_public_threads
+            or not channel.permissions_for(channel.guild.me).manage_webhooks
+            or not channel.permissions_for(channel.guild.me).create_public_threads
+        ):
+            # User doesn't have permission to act there
+            failed_channels.append(channel.id)
+            continue
+
+        new_thread = threads_created.get(channel_id)
+        thread_already_existed = new_thread is not None
+        if not new_thread and matching_starting_messages.get(channel_id):
+            # I found a matching starting message, so I'll try to create the thread starting there
+            matching_starting_message = await channel.fetch_message(
+                matching_starting_messages[channel_id]
+            )
+
+            if not matching_starting_message.thread:
+                # That message doesn't already have a thread, so I can create it
+                new_thread = await matching_starting_message.create_thread(
+                    name=thread_to_bridge.name,
+                    reason=f"Bridged from {thread_to_bridge.guild.name}#{thread_parent.name}#{thread_to_bridge.name}",
+                )
+
+        if not new_thread:
+            # Haven't created a thread yet, try to create it from the channel
+            new_thread = await channel.create_thread(
+                name=thread_to_bridge.name,
+                reason=f"Bridged from {thread_to_bridge.guild.name}#{thread_parent.name}#{thread_to_bridge.name}",
+                type=discord.ChannelType.public_thread,
+            )
+
+        if not new_thread:
+            # Failed to create a thread somehow
+            failed_channels.append(channel.id)
+            continue
+
+        if not thread_already_existed:
+            try:
+                add_user_to_threads.append(new_thread.join())
+            except Exception:
+                pass
+
+            if channel_member:
+                try:
+                    add_user_to_threads.append(new_thread.add_user(channel_member))
+                except Exception:
+                    pass
+
+        threads_created[channel_id] = new_thread
+        create_bridges.append(
+            bridges.create_bridge(
+                source=thread_to_bridge, target=new_thread, session=session
+            )
+        )
+        if inbound_bridges and inbound_bridges[channel_id]:
+            create_bridges.append(
+                bridges.create_bridge(
+                    source=new_thread, target=thread_to_bridge, session=session
+                )
+            )
+        succeeded_at_least_once = True
+    await asyncio.gather(*(create_bridges + add_user_to_threads))
+
+    if interaction:
+        if succeeded_at_least_once:
+            if len(failed_channels) == 0:
+                response = "✅ All threads created!"
+            else:
+                response = (
+                    "⭕ Some but not all threads were created. This may have happened because you lacked Manage Webhooks or Create Public Threads permissions. The channels this command failed for were:\n"
+                    + "\n".join(
+                        f"- <#{failed_channel_id}>"
+                        for failed_channel_id in failed_channels
+                    )
+                    + "\nTrying to run this command again will duplicate threads in the channels the command _succeeded_ at. If you wish to create threads in the channels this command failed for, it would be better to do so manually one by one."
+                )
+
+            if len(bridged_threads) > 0:
+                response += (
+                    "\n\nNote: this channel is bridged to at least one thread, and so this command was not able to create further threads in them. The threads bridged to this channel are:"
+                    + "\n".join(f"- <#{thread_id}>" for thread_id in bridged_threads)
+                )
+        else:
+            response = "❌ Couldn't create any threads. Make sure that you and the bot have Manage Webhooks and Create Public Threads permissions in all relevant channels."
+
+        await interaction.followup.send(response, ephemeral=True)
+
+
+@overload
+async def stop_auto_bridging_threads_helper(
+    channel_ids_to_remove: int | Iterable[int],
+):
+    """Remove a group of channels from the auto_bridge_thread_channels table and list.
+
+    Parameters
+    ----------
+    channel_ids_to_remove : int | Iterable[int]
+        The IDs of the channels to remove.
+
+    Raises
+    ------
+    `sqlalchemy.exc.StatementError`
+        Something went wrong accessing or modifying the database.
+    """
+    ...
+
+
+@overload
+async def stop_auto_bridging_threads_helper(
+    channel_ids_to_remove: int | Iterable[int],
+    *,
+    session: SQLSession | None = None,
+): ...
+
+
+@sql_command
+@beartype
+async def stop_auto_bridging_threads_helper(
+    channel_ids_to_remove: int | Iterable[int],
+    *,
+    session: SQLSession,
+):
+    """Remove a group of channels from the auto_bridge_thread_channels table and list.
+
+    Parameters
+    ----------
+    channel_ids_to_remove : int | Iterable[int]
+        The IDs of the channels to remove.
+    session : :class:`~sqlalchemy.orm.Session` | None, optional
+        An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
+
+    Raises
+    ------
+    `sqlalchemy.exc.StatementError`
+        Something went wrong accessing or modifying the database.
+    """
+    if not isinstance(channel_ids_to_remove, set):
+        if isinstance(channel_ids_to_remove, int):
+            channel_ids_to_remove = {channel_ids_to_remove}
+        else:
+            channel_ids_to_remove = set(channel_ids_to_remove)
+
+    await sql_retry(
+        lambda: session.execute(
+            SQLDelete(DBAutoBridgeThreadChannels).where(
+                DBAutoBridgeThreadChannels.channel.in_(
+                    [str(id) for id in channel_ids_to_remove]
+                )
+            )
+        )
+    )
+
+    globals.auto_bridge_thread_channels -= channel_ids_to_remove
+
+
+@beartype
+async def validate_auto_bridge_thread_channels(
+    channel_ids_to_check: int | Iterable[int],
+    session: SQLSession | None = None,
+):
+    """Check whether each one of a list of channels are in auto_bridge_thread_channels and, if so, whether they should be and, if not, remove them from there.
+
+    Parameters
+    ----------
+    channel_ids_to_check : int | Iterable[int]
+        The IDs of the channels to check.
+    session : :class:`~sqlalchemy.orm.Session` | None, optional
+        An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
+
+    Raises
+    ------
+    `sqlalchemy.exc.StatementError`
+        Something went wrong accessing or modifying the database.
+    """
+    if not isinstance(channel_ids_to_check, set):
+        if isinstance(channel_ids_to_check, int):
+            channel_ids_to_check = {channel_ids_to_check}
+        else:
+            channel_ids_to_check = set(channel_ids_to_check)
+
+    channel_ids_to_remove = {
+        id
+        for id in channel_ids_to_check
+        if id in globals.auto_bridge_thread_channels
+        and not bridges.get_inbound_bridges(id)
+        and not bridges.get_outbound_bridges(id)
+    }
+
+    if len(channel_ids_to_remove) == 0:
+        return
+
+    await stop_auto_bridging_threads_helper(channel_ids_to_remove, session=session)
 
 
 @beartype
@@ -560,7 +985,8 @@ async def demolish(interaction: discord.Interaction, target: str):
     assert isinstance(interaction.user, discord.Member)
     assert interaction.guild
     target_channel_member = await globals.get_channel_member(
-        target_channel, interaction.user.id
+        target_channel,
+        interaction.user.id,
     )
     if (
         not message_channel.permissions_for(interaction.user).manage_webhooks
@@ -589,17 +1015,7 @@ async def demolish(interaction: discord.Interaction, target: str):
     await interaction.response.defer(thinking=True, ephemeral=True)
 
     try:
-        with SQLSession(engine) as session:
-            await bridges.demolish_bridges(
-                source_channel=message_channel,
-                target_channel=target_channel,
-                session=session,
-            )
-            await validate_auto_bridge_thread_channels(
-                {message_channel.id, target_channel.id}, session
-            )
-
-            session.commit()
+        await demolish_bridges(message_channel, target_channel)
     except Exception as e:
         if isinstance(e, SQLError):
             await interaction.followup.send(
@@ -626,6 +1042,62 @@ async def demolish(interaction: discord.Interaction, target: str):
     )
 
     logger.debug("Call to /demolish with interaction ID %s successful.", interaction.id)
+
+
+@overload
+async def demolish_bridges(
+    source_channel: discord.TextChannel | discord.Thread,
+    target_channel: discord.TextChannel | discord.Thread,
+):
+    """Demolish bridges between `source_channel` and `target_channel`.
+
+    Parameters
+    ----------
+    source_channel : :class:`~discord.TextChannel` | :class:`~discord.Thread`
+        A Discord text channel or a thread off one.
+    target_channel : :class:`~discord.TextChannel` | :class:`~discord.Thread`
+        A Discord text channel or a thread off one.
+    """
+    ...
+
+
+@overload
+async def demolish_bridges(
+    source_channel: discord.TextChannel | discord.Thread,
+    target_channel: discord.TextChannel | discord.Thread,
+    *,
+    session: SQLSession | None,
+): ...
+
+
+@sql_command
+@beartype
+async def demolish_bridges(
+    source_channel: discord.TextChannel | discord.Thread,
+    target_channel: discord.TextChannel | discord.Thread,
+    *,
+    session: SQLSession,
+):
+    """Demolish bridges between `source_channel` and `target_channel`.
+
+    Parameters
+    ----------
+    source_channel : :class:`~discord.TextChannel` | :class:`~discord.Thread`
+        A Discord text channel or a thread off one.
+    target_channel : :class:`~discord.TextChannel` | :class:`~discord.Thread`
+        A Discord text channel or a thread off one.
+    session : :class:`~sqlalchemy.orm.Session` | None, optional
+        An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
+    """
+    await bridges.demolish_bridges(
+        source_channel=source_channel,
+        target_channel=target_channel,
+        session=session,
+    )
+    await validate_auto_bridge_thread_channels(
+        {source_channel.id, target_channel.id},
+        session,
+    )
 
 
 @discord.app_commands.default_permissions(manage_webhooks=True)
@@ -710,79 +1182,21 @@ async def demolish_all(
     await interaction.response.defer(thinking=True, ephemeral=True)
 
     # I'll make a list of all channels that are currently bridged to or from this channel
-    bridges_being_demolished: list["Coroutine[Any, Any, None]"] = []
-    session = None
-    exceptions: set[int] = set()
     try:
-        with SQLSession(engine) as session:
-            for channel_to_demolish_id, (
-                inbound_bridges,
-                outbound_bridges,
-            ) in lists_of_bridges.items():
-                paired_channels: set[int]
-                if inbound_bridges:
-                    paired_channels = set(inbound_bridges.keys())
-                else:
-                    paired_channels = set()
-
-                if outbound_bridges:
-                    for target_id in outbound_bridges.keys():
-                        target_channel = await globals.get_channel_from_id(target_id)
-                        if (
-                            not isinstance(
-                                target_channel,
-                                (discord.TextChannel, discord.Thread),
-                            )
-                            or not (
-                                target_channel_member
-                                := await globals.get_channel_member(
-                                    target_channel,
-                                    interaction.user.id,
-                                )
-                            )
-                            or not target_channel.permissions_for(
-                                target_channel_member
-                            ).manage_webhooks
-                            or not target_channel.permissions_for(
-                                target_channel.guild.me
-                            ).manage_webhooks
-                        ):
-                            # If I don't have Manage Webhooks permission in the target, I can't destroy the bridge from there
-                            exceptions.add(target_id)
-                        else:
-                            paired_channels.add(target_id)
-
-                channels_affected = channels_affected.union(paired_channels)
-
-                bridges_being_demolished.append(
-                    bridges.demolish_bridges(
-                        source_channel=channel_to_demolish_id,
-                        session=session,
-                    )
-                )
-                bridges_being_demolished.append(
-                    bridges.demolish_bridges(
-                        target_channel=channel_to_demolish_id,
-                        session=session,
-                    )
-                )
-
-            await asyncio.gather(*bridges_being_demolished)
-            await validate_auto_bridge_thread_channels(channels_affected, session)
-
-            session.commit()
+        demolished_all = await demolish_all_bridges(
+            interaction.user.id,
+            lists_of_bridges,
+            channels_affected,
+        )
     except Exception as e:
-        if session:
-            session.rollback()
-            session.close()
-
         if isinstance(e, SQLError):
             await interaction.followup.send(
                 "❌ There was an issue with the connection to the database; bridge demolition failed.",
                 ephemeral=True,
             )
             logger.warning(
-                "An SQL error occurred while running command /demolish_all: %s", e
+                "An SQL error occurred while running command /demolish_all: %s",
+                e,
             )
         else:
             await interaction.followup.send(
@@ -790,12 +1204,13 @@ async def demolish_all(
                 ephemeral=True,
             )
             logger.error(
-                "An unknown error occurred while running command /demolish_all: %s", e
+                "An unknown error occurred while running command /demolish_all: %s",
+                e,
             )
 
         raise
 
-    if len(exceptions) == 0:
+    if demolished_all:
         await interaction.followup.send(
             "✅ Bridges demolished!",
             ephemeral=True,
@@ -807,8 +1222,149 @@ async def demolish_all(
         )
 
     logger.debug(
-        "Call to /demolish_all with interaction ID %s successful.", interaction.id
+        "Call to /demolish_all with interaction ID %s successful.",
+        interaction.id,
     )
+
+
+@overload
+async def demolish_all_bridges(
+    user_id: int,
+    lists_of_bridges: dict[
+        int,
+        tuple[dict[int, Bridge] | None, dict[int, Bridge] | None],
+    ],
+    channels_affected: set[int],
+) -> bool:
+    """Try to demolish all bridges listed, then return True if all were demolished or False if some failed to be demolished for some reason.
+
+    Parameters
+    ----------
+    user_id : int
+        The ID of the user who ran the remolish command.
+    lists_of_bridges : dict[int, tuple[dict[int, Bridge]  |  None, dict[int, Bridge]  |  None]]
+        A dictionary whose keys are the IDs of channels and whose keys are a tuple with all inbound and all outbound bridges associated with that channel.
+    channels_affected : set[int]
+        A set of channels that were or will be affected by the demolition.
+
+    Returns
+    -------
+    bool
+    """
+    ...
+
+
+@overload
+async def demolish_all_bridges(
+    user_id: int,
+    lists_of_bridges: dict[
+        int,
+        tuple[dict[int, Bridge] | None, dict[int, Bridge] | None],
+    ],
+    channels_affected: set[int],
+    *,
+    session: SQLSession | None,
+) -> bool: ...
+
+
+@sql_command
+@beartype
+async def demolish_all_bridges(
+    user_id: int,
+    lists_of_bridges: dict[
+        int,
+        tuple[dict[int, Bridge] | None, dict[int, Bridge] | None],
+    ],
+    channels_affected: set[int],
+    *,
+    session: SQLSession,
+) -> bool:
+    """Try to demolish all bridges listed, then return True if all were demolished or False if some failed to be demolished for some reason.
+
+    Parameters
+    ----------
+    user_id : int
+        The ID of the user who ran the remolish command.
+    lists_of_bridges : dict[int, tuple[dict[int, Bridge]  |  None, dict[int, Bridge]  |  None]]
+        A dictionary whose keys are the IDs of channels and whose keys are a tuple with all inbound and all outbound bridges associated with that channel.
+    channels_affected : set[int]
+        A set of channels that were or will be affected by the demolition.
+    session : :class:`~sqlalchemy.orm.Session` | None, optional
+        An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
+
+    Returns
+    -------
+    bool
+    """
+    bridges_being_demolished: list["Coroutine[Any, Any, None]"] = []
+    demolished_all = True
+
+    for channel_to_demolish_id, (
+        inbound_bridges,
+        outbound_bridges,
+    ) in lists_of_bridges.items():
+        paired_channels: set[int]
+        if inbound_bridges:
+            paired_channels = set(inbound_bridges.keys())
+        else:
+            paired_channels = set()
+
+        if outbound_bridges:
+            for target_id in outbound_bridges.keys():
+                if (
+                    (
+                        not isinstance(
+                            (
+                                target_channel := await globals.get_channel_from_id(
+                                    target_id
+                                )
+                            ),
+                            (discord.TextChannel, discord.Thread),
+                        )
+                    )
+                    or (
+                        not (
+                            target_channel_member := await globals.get_channel_member(
+                                target_channel,
+                                user_id,
+                            )
+                        )
+                    )
+                    or (
+                        not target_channel.permissions_for(
+                            target_channel_member
+                        ).manage_webhooks
+                    )
+                    or (
+                        not target_channel.permissions_for(
+                            target_channel.guild.me
+                        ).manage_webhooks
+                    )
+                ):
+                    # If I don't have Manage Webhooks permission in the target, I can't destroy the bridge to there
+                    demolished_all = False
+                else:
+                    paired_channels.add(target_id)
+
+        channels_affected = channels_affected.union(paired_channels)
+
+        bridges_being_demolished.append(
+            bridges.demolish_bridges(
+                source_channel=channel_to_demolish_id,
+                session=session,
+            )
+        )
+        bridges_being_demolished.append(
+            bridges.demolish_bridges(
+                target_channel=channel_to_demolish_id,
+                session=session,
+            )
+        )
+
+    await asyncio.gather(*bridges_being_demolished)
+    await validate_auto_bridge_thread_channels(channels_affected, session)
+
+    return demolished_all
 
 
 @discord.app_commands.default_permissions(manage_webhooks=True)
@@ -891,11 +1447,10 @@ async def whitelist(interaction: discord.Interaction, apps: str):
             else:
                 apps_to_add.add(app_id)
 
-    session = None
     response: list[str] = []
     try:
         channel_id_str = str(channel.id)
-        with SQLSession(engine) as session:
+        with Session.begin() as session:
             run_queries: list["Coroutine[Any, Any, Any]"] = []
             if len(apps_to_add) > 0:
                 run_queries.append(
@@ -934,7 +1489,6 @@ async def whitelist(interaction: discord.Interaction, apps: str):
                 )
 
             await asyncio.gather(*run_queries)
-            session.commit()
 
             if not globals.per_channel_whitelist.get(channel.id):
                 globals.per_channel_whitelist[channel.id] = set()
@@ -945,10 +1499,6 @@ async def whitelist(interaction: discord.Interaction, apps: str):
             if len(globals.per_channel_whitelist[channel.id]) == 0:
                 del globals.per_channel_whitelist[channel.id]
     except Exception as e:
-        if session:
-            session.rollback()
-            session.close()
-
         if isinstance(e, SQLError):
             await interaction.followup.send(
                 "❌ There was a problem accessing the database.",
@@ -1040,29 +1590,20 @@ async def map_emoji(
 
     await interaction.response.defer(thinking=True, ephemeral=True)
 
-    session = None
     try:
-        with SQLSession(engine) as session:
-            image_hash = await emoji_hash_map.map.get_hash(
-                emoji=internal_emoji, session=session
-            )
-            map_emojis = await asyncio.gather(
-                *[
-                    emoji_hash_map.map.map_emoji(
-                        external_emoji_id=id,
-                        external_emoji_name=name,
-                        internal_emoji=internal_emoji,
-                        image_hash=image_hash,
-                        session=session,
-                    )
-                    for name, id in external_emojis_set
-                ]
-            )
+        image_hash = await emoji_hash_map.map.get_hash(emoji=internal_emoji)
+        map_emojis = await asyncio.gather(
+            *[
+                emoji_hash_map.map.map_emoji(
+                    external_emoji_id=id,
+                    external_emoji_name=name,
+                    internal_emoji=internal_emoji,
+                    image_hash=image_hash,
+                )
+                for name, id in external_emojis_set
+            ]
+        )
     except Exception as e:
-        if session:
-            session.rollback()
-            session.close()
-
         if isinstance(e, SQLError):
             await interaction.followup.send(
                 f"❌ There was a database error trying to map emoji to {str(internal_emoji)}.",
@@ -1237,307 +1778,6 @@ class ConfirmHashServer(discord.ui.Button[Any]):
         )
 
 
-async def bridge_thread_helper(
-    thread_to_bridge: discord.Thread,
-    user_id: int,
-    interaction: discord.Interaction | None = None,
-):
-    """Create threads matching the current one across bridges.
-
-    Parameters
-    ----------
-    thread_to_bridge : :class:`~discord.Thread`
-        The thread to bridge.
-    user_id : int
-        The ID of the user that created the thread.
-    interaction : :class:`~discord.Interaction` | None, optional
-        The interaction that called this function, if any. Defaults to None.
-    """
-    thread_parent = await globals.get_channel_parent(thread_to_bridge)
-
-    outbound_bridges = bridges.get_outbound_bridges(thread_parent.id)
-    inbound_bridges = bridges.get_inbound_bridges(thread_parent.id)
-    if not outbound_bridges:
-        if interaction:
-            await interaction.response.send_message(
-                "❌ The parent channel doesn't have outbound bridges to any other channels.",
-                ephemeral=True,
-            )
-        return
-
-    # I need to check that the current channel is bridged to at least one other channel (as opposed to only threads)
-    at_least_one_channel = False
-    for target_id, bridge in outbound_bridges.items():
-        bridge_webhook = await bridge.webhook
-        if target_id == bridge_webhook.channel_id:
-            at_least_one_channel = True
-            break
-
-    if not at_least_one_channel:
-        if interaction:
-            await interaction.response.send_message(
-                "❌ The parent channel is only bridged to threads.",
-                ephemeral=True,
-            )
-        return
-
-    if interaction:
-        await interaction.response.defer(thinking=True, ephemeral=True)
-
-    # The IDs of threads are the same as that of their originating messages so we should try to create threads from the same messages
-    session = None
-    try:
-        with SQLSession(engine) as session:
-            matching_starting_messages: dict[int, int] = {}
-            try:
-                # I don't need to store it I just need to know whether it exists
-                await thread_parent.fetch_message(thread_to_bridge.id)
-                select_message_map: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
-                    DBMessageMap
-                ).where(DBMessageMap.target_message == str(thread_to_bridge.id))
-                source_starting_message: DBMessageMap | None = await sql_retry(
-                    lambda: session.scalars(select_message_map).first()
-                )
-                if isinstance(source_starting_message, DBMessageMap):
-                    # The message that's starting this thread is bridged
-                    source_channel_id = int(source_starting_message.source_channel)
-                    source_message_id = int(source_starting_message.source_message)
-                    matching_starting_messages[source_channel_id] = source_message_id
-                else:
-                    source_channel_id = thread_parent.id
-                    source_message_id = thread_to_bridge.id
-
-                select_message_map: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
-                    DBMessageMap
-                ).where(DBMessageMap.source_message == str(source_message_id))
-                target_starting_messages: "ScalarResult[DBMessageMap]" = (
-                    await sql_retry(lambda: session.scalars(select_message_map))
-                )
-                for target_starting_message in target_starting_messages:
-                    matching_starting_messages[
-                        int(target_starting_message.target_channel)
-                    ] = int(target_starting_message.target_message)
-            except discord.NotFound:
-                pass
-
-            # Now find all channels that are bridged to the channel this thread's parent is bridged to and create threads there
-            threads_created: dict[int, discord.Thread] = {}
-            succeeded_at_least_once = False
-            bridged_threads: list[int] = []
-            failed_channels: list[int] = []
-
-            create_bridges: list["Coroutine[Any, Any, Bridge]"] = []
-            add_user_to_threads: list["Coroutine[Any, Any, None]"] = []
-            try:
-                add_user_to_threads.append(thread_to_bridge.join())
-            except Exception:
-                pass
-
-            for channel_id in outbound_bridges.keys():
-                channel = await globals.get_channel_from_id(channel_id)
-                if not isinstance(channel, discord.TextChannel):
-                    # I can't create a thread inside a thread
-                    if channel:
-                        bridged_threads.append(channel.id)
-                    continue
-
-                channel_member = await globals.get_channel_member(channel, user_id)
-                if (
-                    not channel_member
-                    or not channel.permissions_for(channel_member).manage_webhooks
-                    or not channel.permissions_for(channel_member).create_public_threads
-                    or not channel.permissions_for(channel.guild.me).manage_webhooks
-                    or not channel.permissions_for(
-                        channel.guild.me
-                    ).create_public_threads
-                ):
-                    # User doesn't have permission to act there
-                    failed_channels.append(channel.id)
-                    continue
-
-                new_thread = threads_created.get(channel_id)
-                thread_already_existed = new_thread is not None
-                if not new_thread and matching_starting_messages.get(channel_id):
-                    # I found a matching starting message, so I'll try to create the thread starting there
-                    matching_starting_message = await channel.fetch_message(
-                        matching_starting_messages[channel_id]
-                    )
-
-                    if not matching_starting_message.thread:
-                        # That message doesn't already have a thread, so I can create it
-                        new_thread = await matching_starting_message.create_thread(
-                            name=thread_to_bridge.name,
-                            reason=f"Bridged from {thread_to_bridge.guild.name}#{thread_parent.name}#{thread_to_bridge.name}",
-                        )
-
-                if not new_thread:
-                    # Haven't created a thread yet, try to create it from the channel
-                    new_thread = await channel.create_thread(
-                        name=thread_to_bridge.name,
-                        reason=f"Bridged from {thread_to_bridge.guild.name}#{thread_parent.name}#{thread_to_bridge.name}",
-                        type=discord.ChannelType.public_thread,
-                    )
-
-                if not new_thread:
-                    # Failed to create a thread somehow
-                    failed_channels.append(channel.id)
-                    continue
-
-                if not thread_already_existed:
-                    try:
-                        add_user_to_threads.append(new_thread.join())
-                    except Exception:
-                        pass
-
-                    if channel_member:
-                        try:
-                            add_user_to_threads.append(
-                                new_thread.add_user(channel_member)
-                            )
-                        except Exception:
-                            pass
-
-                threads_created[channel_id] = new_thread
-                create_bridges.append(
-                    bridges.create_bridge(
-                        source=thread_to_bridge, target=new_thread, session=session
-                    )
-                )
-                if inbound_bridges and inbound_bridges[channel_id]:
-                    create_bridges.append(
-                        bridges.create_bridge(
-                            source=new_thread, target=thread_to_bridge, session=session
-                        )
-                    )
-                succeeded_at_least_once = True
-            await asyncio.gather(*(create_bridges + add_user_to_threads))
-
-            session.commit()
-    except Exception:
-        if session:
-            session.rollback()
-            session.close()
-
-        raise
-
-    if interaction:
-        if succeeded_at_least_once:
-            if len(failed_channels) == 0:
-                response = "✅ All threads created!"
-            else:
-                response = (
-                    "⭕ Some but not all threads were created. This may have happened because you lacked Manage Webhooks or Create Public Threads permissions. The channels this command failed for were:\n"
-                    + "\n".join(
-                        f"- <#{failed_channel_id}>"
-                        for failed_channel_id in failed_channels
-                    )
-                    + "\nTrying to run this command again will duplicate threads in the channels the command _succeeded_ at. If you wish to create threads in the channels this command failed for, it would be better to do so manually one by one."
-                )
-
-            if len(bridged_threads) > 0:
-                response += (
-                    "\n\nNote: this channel is bridged to at least one thread, and so this command was not able to create further threads in them. The threads bridged to this channel are:"
-                    + "\n".join(f"- <#{thread_id}>" for thread_id in bridged_threads)
-                )
-        else:
-            response = "❌ Couldn't create any threads. Make sure that you and the bot have Manage Webhooks and Create Public Threads permissions in all relevant channels."
-
-        await interaction.followup.send(response, ephemeral=True)
-
-
-@beartype
-async def stop_auto_bridging_threads_helper(
-    channel_ids_to_remove: int | Iterable[int],
-    session: SQLSession | None = None,
-):
-    """Remove a group of channels from the auto_bridge_thread_channels table and list.
-
-    Parameters
-    ----------
-    channel_ids_to_remove : int | Iterable[int]
-        The IDs of the channels to remove.
-    session : :class:`~sqlalchemy.orm.Session` | None, optional
-        An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
-
-    Raises
-    ------
-    `sqlalchemy.exc.StatementError`
-        Something went wrong accessing or modifying the database.
-    """
-    if not isinstance(channel_ids_to_remove, set):
-        if isinstance(channel_ids_to_remove, int):
-            channel_ids_to_remove = {channel_ids_to_remove}
-        else:
-            channel_ids_to_remove = set(channel_ids_to_remove)
-
-    close_after = False
-    try:
-        if not session:
-            session = SQLSession(engine)
-            close_after = True
-
-        await sql_retry(
-            lambda: session.execute(
-                SQLDelete(DBAutoBridgeThreadChannels).where(
-                    DBAutoBridgeThreadChannels.channel.in_(
-                        [str(id) for id in channel_ids_to_remove]
-                    )
-                )
-            )
-        )
-
-        globals.auto_bridge_thread_channels -= channel_ids_to_remove
-    except Exception:
-        if close_after and session:
-            session.rollback()
-            session.close()
-
-        raise
-
-    if close_after:
-        session.commit()
-        session.close()
-
-
-@beartype
-async def validate_auto_bridge_thread_channels(
-    channel_ids_to_check: int | Iterable[int],
-    session: SQLSession | None = None,
-):
-    """Check whether each one of a list of channels are in auto_bridge_thread_channels and, if so, whether they should be and, if not, remove them from there.
-
-    Parameters
-    ----------
-    channel_ids_to_check : int | Iterable[int]
-        The IDs of the channels to check.
-    session : :class:`~sqlalchemy.orm.Session` | None, optional
-        An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
-
-    Raises
-    ------
-    `sqlalchemy.exc.StatementError`
-        Something went wrong accessing or modifying the database.
-    """
-    if not isinstance(channel_ids_to_check, set):
-        if isinstance(channel_ids_to_check, int):
-            channel_ids_to_check = {channel_ids_to_check}
-        else:
-            channel_ids_to_check = set(channel_ids_to_check)
-
-    channel_ids_to_remove = {
-        id
-        for id in channel_ids_to_check
-        if id in globals.auto_bridge_thread_channels
-        and not bridges.get_inbound_bridges(id)
-        and not bridges.get_outbound_bridges(id)
-    }
-
-    if len(channel_ids_to_remove) == 0:
-        return
-
-    await stop_auto_bridging_threads_helper(channel_ids_to_remove, session)
-
-
 @discord.app_commands.default_permissions(read_messages=True)
 @discord.app_commands.guild_only()
 @globals.command_tree.context_menu(name="List Reactions")
@@ -1598,69 +1838,44 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
     # Now find the list of channels that can validly reach this one via inbound chains
     reachable_channel_ids = await bridges.get_reachable_channels(channel.id, "inbound")
 
-    # This variable is where I'll gather the list of users per reaction
-    # The key of each entry is a reaction emoji ID
-    # The entry is a list of coroutines to get the users that reacted with that emoji
-    all_reactions_async: dict[str, list["Coroutine[Any, Any, set[int]]"]] = {}
+    # I'll define a helper function to create an async list of all users who reacted with a given reaction
+    async def get_reacting_users_coro(
+        message: discord.Message,
+        reacting_users_coro: dict[str, list["Coroutine[Any, Any, set[int]]"]] = {},
+        session: SQLSession | None = None,
+    ) -> dict[str, list["Coroutine[Any, Any, set[int]]"]]:
+        """Return a dictionary whose keys are emoji IDs used as reactions to a message and whose values are a list of Coroutines that return a set of user IDs that reacted to a message with that reaction.
 
-    # This function gets a list of user IDs from an async iterator associated with each reaction
-    async def get_users_from_iterator(
-        user_iterator: "AsyncIterator[discord.Member | discord.User]",
-    ):
-        reactions: set[int] = set()
-        async for user in user_iterator:
-            if user.id != bot_user_id:
-                reactions.add(user.id)
-        return reactions
+        Parameters
+        ----------
+        message : :class:`~discord.Message`
+            The message to get reactions for.
+        reacting_users_coro : dict[str, list[Coroutine[Any, Any, set[int]]]], optional
+            A dictionary of already-mapped reaction coroutines to append any new ones to. Defaults to {}.
+        session : :class:`~sqlalchemy.orm.Session` | None, optional
+            An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
 
-    # This function gets the equivalent ID of an emoji, matching it to an internal one if possible
-    async def get_mapped_emoji_id(emoji: discord.PartialEmoji | discord.Emoji | str):
-        if isinstance(emoji, str):
-            return emoji
-
-        if not emoji.id:
-            # Non-custom emoji
-            return str(emoji)
-
-        # Custom emoji
-        if mapped_emoji := emoji_hash_map.map.get_accessible_emoji(emoji.id):
-            # If there is an emoji I have access to that matches this one, return it
-            return str(mapped_emoji)
-        elif not globals.emoji_server:
-            # I don't have an emoji server to copy the emoji into so I'll just return its string
-            return str(emoji)
-
-        # Try to copy this emoji into my emoji server
-        if isinstance(emoji, discord.PartialEmoji):
-            copied_emoji = await emoji_hash_map.map.copy_emoji_into_server(
-                emoji_to_copy=emoji, session=session
-            )
-        else:
-            copied_emoji = await emoji_hash_map.map.copy_emoji_into_server(
-                emoji_to_copy_id=emoji.id,
-                emoji_to_copy_name=emoji.name,
-                session=session,
-            )
-        if copied_emoji:
-            return str(copied_emoji)
-
-        # Failed to copy the emoji
-        return str(emoji)
-
-    # First get the reactions on this message itself
-    async def append_users_to_reactions_list(message: discord.Message):
+        Returns
+        -------
+        dict[str, list[Coroutine[Any, Any, set[int]]]]
+        """
         for reaction in message.reactions:
-            reaction_emoji_id = await get_mapped_emoji_id(reaction.emoji)
-
-            if not all_reactions_async.get(reaction_emoji_id):
-                all_reactions_async[reaction_emoji_id] = []
-
-            all_reactions_async[reaction_emoji_id].append(
-                get_users_from_iterator(reaction.users())
+            reaction_emoji_id = await emoji_hash_map.map.get_mapped_emoji_id(
+                reaction.emoji,
+                session,
             )
+
+            if reaction_emoji_id not in reacting_users_coro:
+                reacting_users_coro[reaction_emoji_id] = []
+
+            reacting_users_coro[reaction_emoji_id].append(
+                globals.get_users_from_iterator(reaction.users())
+            )
+
+        return reacting_users_coro
 
     try:
-        await append_users_to_reactions_list(message)
+        all_reactions_async = await get_reacting_users_coro(message)
     except discord.Forbidden:
         await interaction.followup.send(
             "❌ The bot does not have access to this message.",
@@ -1669,10 +1884,9 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
         return
 
     # Then get the bridged ones
-    session = None
     at_least_one_inaccessible_bridge = False
     try:
-        with SQLSession(engine) as session:
+        with Session.begin() as session:
             # We need to see whether this message is a bridged message and, if so, find its source
             select_message_map: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
                 DBMessageMap
@@ -1700,7 +1914,11 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
                             source_message = await source_channel.fetch_message(
                                 source_message_id
                             )
-                            await append_users_to_reactions_list(source_message)
+                            all_reactions_async = await get_reacting_users_coro(
+                                source_message,
+                                all_reactions_async,
+                                session,
+                            )
                         except discord.Forbidden:
                             at_least_one_inaccessible_bridge = True
             else:
@@ -1739,14 +1957,14 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
                         target_message_id
                     )
                     try:
-                        await append_users_to_reactions_list(bridged_message)
+                        all_reactions_async = await get_reacting_users_coro(
+                            bridged_message,
+                            all_reactions_async,
+                            session,
+                        )
                     except discord.Forbidden:
                         at_least_one_inaccessible_bridge = True
     except Exception as e:
-        if session:
-            session.rollback()
-            session.close()
-
         if isinstance(e, SQLError):
             await interaction.followup.send(
                 "❌ There was a problem accessing the database.",

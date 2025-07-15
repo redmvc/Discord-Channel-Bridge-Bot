@@ -17,7 +17,7 @@ from database import (
     DBBridge,
     DBMessageMap,
     DBWebhook,
-    engine,
+    sql_command,
     sql_insert_ignore_duplicate,
     sql_retry,
     sql_upsert,
@@ -31,7 +31,7 @@ from validations import (
 )
 
 if TYPE_CHECKING:
-    from typing import Any, Callable, Coroutine, Literal
+    from typing import Any, Callable, Coroutine
 
     from sqlalchemy import ScalarResult
 
@@ -145,8 +145,18 @@ class Bridges:
         self._inbound_bridges: dict[int, dict[int, Bridge]] = {}
         self.webhooks = Webhooks()
 
+    @overload
+    async def load_from_database(self, *, session: SQLSession): ...
+
+    @overload
+    async def load_from_database(self, *, session: None): ...
+
+    @overload
+    async def load_from_database(self): ...
+
+    @sql_command
     @beartype
-    async def load_from_database(self, session: SQLSession | None = None):
+    async def load_from_database(self, *, session: SQLSession):
         """Load all bridges saved in the bot's connected database.
 
         Parameters
@@ -155,12 +165,6 @@ class Bridges:
             An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
         """
         logger.info("Loading bridges from database...")
-
-        if not session:
-            session = SQLSession(engine)
-            close_after = True
-        else:
-            close_after = False
 
         self._outbound_bridges: dict[int, dict[int, Bridge]] = {}
         self._inbound_bridges: dict[int, dict[int, Bridge]] = {}
@@ -348,10 +352,6 @@ class Bridges:
             )
             session.execute(delete_invalid_webhooks)
 
-        if close_after:
-            session.commit()
-            session.close()
-
         logger.info("Bridges successfully loaded from database!")
 
     @beartype
@@ -505,54 +505,86 @@ class Bridges:
             )
             return bridge
 
-        # Add this Bridge and webhook to the DB
-        logger.debug(
-            "Inserting bridge from #%s to #%s into database...",
-            source_channel.name,
-            target_channel.name,
-        )
-        close_after = False
         try:
-            if not session:
-                close_after = True
-                session = SQLSession(engine)
-
-            target_id_str = str(target_id)
-            insert_bridge_row = await sql_insert_ignore_duplicate(
-                table=DBBridge,
-                indices={"source", "target"},
-                source=str(source_id),
-                target=target_id_str,
+            return await self._add_bridge_to_db(
+                source_channel=source_channel,
+                source_id=source_id,
+                target_channel=target_channel,
+                target_id=target_id,
+                bridge=bridge,
+                session=session,
             )
-
-            bridge_webhook = await bridge.webhook
-            insert_webhook_row = await sql_upsert(
-                table=DBWebhook,
-                indices={"channel"},
-                channel=target_id_str,
-                webhook=str(bridge_webhook.id),
-            )
-
-            await sql_retry(lambda: session.execute(insert_bridge_row))
-            await sql_retry(lambda: session.execute(insert_webhook_row))
         except Exception as e:
-            if close_after and session:
-                session.rollback()
-                session.close()
-
             if isinstance(e, SQLError):
                 await self.demolish_bridges(
-                    source_channel=source,
-                    target_channel=target,
+                    source_channel=source_id,
+                    target_channel=target_id,
                     one_sided=True,
                     update_db=False,
                 )
 
             raise
 
-        if close_after:
-            session.commit()
-            session.close()
+    @overload
+    async def _add_bridge_to_db(
+        self,
+        *,
+        source_channel: discord.TextChannel | discord.Thread,
+        source_id: int,
+        target_channel: discord.TextChannel | discord.Thread,
+        target_id: int,
+        bridge: Bridge,
+        session: SQLSession,
+    ) -> Bridge: ...
+
+    @overload
+    async def _add_bridge_to_db(
+        self,
+        *,
+        source_channel: discord.TextChannel | discord.Thread,
+        source_id: int,
+        target_channel: discord.TextChannel | discord.Thread,
+        target_id: int,
+        bridge: Bridge,
+        session: SQLSession | None,
+    ) -> Bridge: ...
+
+    @sql_command
+    async def _add_bridge_to_db(
+        self,
+        *,
+        source_channel: discord.TextChannel | discord.Thread,
+        source_id: int,
+        target_channel: discord.TextChannel | discord.Thread,
+        target_id: int,
+        bridge: Bridge,
+        session: SQLSession,
+    ) -> Bridge:
+        """Add the bridge from source channel to target channel to the database."""
+        logger.debug(
+            "Inserting bridge from #%s to #%s into database...",
+            source_channel.name,
+            target_channel.name,
+        )
+
+        target_id_str = str(target_id)
+        insert_bridge_row = await sql_insert_ignore_duplicate(
+            table=DBBridge,
+            indices={"source", "target"},
+            source=str(source_id),
+            target=target_id_str,
+        )
+
+        bridge_webhook = await bridge.webhook
+        insert_webhook_row = await sql_upsert(
+            table=DBWebhook,
+            indices={"channel"},
+            channel=target_id_str,
+            webhook=str(bridge_webhook.id),
+        )
+
+        await sql_retry(lambda: session.execute(insert_bridge_row))
+        await sql_retry(lambda: session.execute(insert_webhook_row))
 
         logger.debug(
             "Bridge from #%s to #%s created.", source_channel.name, target_channel.name
@@ -568,7 +600,7 @@ class Bridges:
         update_db: bool = True,
         session: SQLSession | None = None,
         one_sided: bool = False,
-    ) -> None:
+    ):
         """Destroy Bridges from source and/or to target channel.
 
         Parameters
@@ -749,56 +781,73 @@ class Bridges:
             logger.debug("Bridge(s) demolished.")
             return
 
-        # Update the DB
+        await self._remove_bridges_from_db(
+            bridges_to_demolish=bridges_to_demolish,
+            webhooks_deleted=webhooks_deleted,
+            session=session,
+        )
+
+    @overload
+    async def _remove_bridges_from_db(
+        self,
+        *,
+        bridges_to_demolish: list[tuple[int, int]],
+        webhooks_deleted: set[str],
+        session: SQLSession,
+    ): ...
+
+    @overload
+    async def _remove_bridges_from_db(
+        self,
+        *,
+        bridges_to_demolish: list[tuple[int, int]],
+        webhooks_deleted: set[str],
+        session: SQLSession | None,
+    ): ...
+
+    @sql_command
+    async def _remove_bridges_from_db(
+        self,
+        *,
+        bridges_to_demolish: list[tuple[int, int]],
+        webhooks_deleted: set[str],
+        session: SQLSession,
+    ):
+        """Remove bridges from database."""
         logger.debug("Removing bridge(s) from database...")
-        close_after = False
-        try:
-            if not session:
-                session = SQLSession(engine)
-                close_after = True
 
-            delete_demolished_bridges_and_messages: list[SQLDelete] = []
-            for sid, tid in bridges_to_demolish:
-                source_id_str = str(sid)
-                target_id_str = str(tid)
-                delete_demolished_bridges_and_messages.append(
-                    SQLDelete(DBBridge).where(
-                        sql_and(
-                            DBBridge.source == source_id_str,
-                            DBBridge.target == target_id_str,
-                        )
+        delete_demolished_bridges_and_messages: list[SQLDelete] = []
+        for sid, tid in bridges_to_demolish:
+            source_id_str = str(sid)
+            target_id_str = str(tid)
+            delete_demolished_bridges_and_messages.append(
+                SQLDelete(DBBridge).where(
+                    sql_and(
+                        DBBridge.source == source_id_str,
+                        DBBridge.target == target_id_str,
                     )
                 )
-                delete_demolished_bridges_and_messages.append(
-                    SQLDelete(DBMessageMap).where(
-                        sql_and(
-                            DBMessageMap.source_channel == source_id_str,
-                            DBMessageMap.target_channel == target_id_str,
-                        )
+            )
+            delete_demolished_bridges_and_messages.append(
+                SQLDelete(DBMessageMap).where(
+                    sql_and(
+                        DBMessageMap.source_channel == source_id_str,
+                        DBMessageMap.target_channel == target_id_str,
                     )
                 )
+            )
 
-            if len(webhooks_deleted) > 0:
-                delete_invalid_webhooks = SQLDelete(DBWebhook).where(
-                    DBWebhook.webhook.in_(webhooks_deleted)
-                )
-            else:
-                delete_invalid_webhooks = None
+        if len(webhooks_deleted) > 0:
+            delete_invalid_webhooks = SQLDelete(DBWebhook).where(
+                DBWebhook.webhook.in_(webhooks_deleted)
+            )
+        else:
+            delete_invalid_webhooks = None
 
-            for delete_query in delete_demolished_bridges_and_messages:
-                await sql_retry(lambda: session.execute(delete_query))
-            if delete_invalid_webhooks is not None:
-                await sql_retry(lambda: session.execute(delete_invalid_webhooks))
-        except Exception:
-            if close_after and session:
-                session.rollback()
-                session.close()
-
-            raise
-
-        if close_after:
-            session.commit()
-            session.close()
+        for delete_query in delete_demolished_bridges_and_messages:
+            await sql_retry(lambda: session.execute(delete_query))
+        if delete_invalid_webhooks is not None:
+            await sql_retry(lambda: session.execute(delete_invalid_webhooks))
 
         logger.debug("Bridge(s) removed from database.")
 
@@ -1072,7 +1121,7 @@ class Bridges:
 class Webhooks:
     """A class for keeping track of all webhooks available."""
 
-    def __init__(self) -> None:
+    def __init__(self):
         # A list of webhooks by ID
         self._webhooks: dict[int, discord.Webhook] = {}
 
