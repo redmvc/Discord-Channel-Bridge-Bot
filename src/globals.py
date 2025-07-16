@@ -780,7 +780,6 @@ async def get_emoji_information(
         emoji_id = emoji.id
         emoji_name = emoji.name
         emoji_animated = emoji.animated
-        emoji_url = emoji.url
     else:
         if not emoji_id:
             err = ArgumentError(
@@ -803,12 +802,6 @@ async def get_emoji_information(
                 emoji_name = emoji_name[2:]
             elif emoji_name.startswith(":"):
                 emoji_name = emoji_name[1:]
-
-            if emoji_animated:
-                ext = "gif"
-            else:
-                ext = "png"
-            emoji_url = f"https://cdn.discordapp.com/emojis/{emoji_id}.{ext}?v=1"
         else:
             # If I don't have the name for the emoji, I'll try to find it
             for e in client.emojis:
@@ -831,7 +824,10 @@ async def get_emoji_information(
 
             emoji_name = emoji.name
             emoji_animated = emoji.animated
-            emoji_url = emoji.url
+
+    emoji_url = f"https://cdn.discordapp.com/emojis/{emoji_id}.webp?size=96"
+    if emoji_animated:
+        emoji_url += "&animated=true"
 
     return (emoji_id, emoji_name, emoji_animated, emoji_url)
 
