@@ -2853,9 +2853,14 @@ async def bridge_unbridged_messages(*, session: SQLSession):
     )
 
     for bridged_message_row in bridged_messages_query_result:
-        # Check whether the ID of the latest bridged message for a channel is also the ID of that channel's latest message
+        # Check whether a channel's latest message has already been bridged
         channel_id = int(bridged_message_row.source_channel)
-        message_id = int(bridged_message_row.source_message)
+        latest_bridged_message_id = int(bridged_message_row.source_message)
+        logger.debug(
+            "Latest message from channel <#%s> had ID %s.",
+            channel_id,
+            latest_bridged_message_id,
+        )
 
         try:
             channel = await globals.get_channel_from_id(
@@ -2865,13 +2870,26 @@ async def bridge_unbridged_messages(*, session: SQLSession):
         except ChannelTypeError:
             continue
 
-        if channel.last_message_id and channel.last_message_id == message_id:
+        messages_with_id_query: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
+            DBMessageMap
+        ).where(
+            sql_or(
+                DBMessageMap.source_message == str(latest_bridged_message_id),
+                DBMessageMap.target_message == str(latest_bridged_message_id),
+            )
+        )
+        messages_with_id_result: DBMessageMap | None = await sql_retry(
+            lambda: session.scalars(messages_with_id_query).first()
+        )
+        if isinstance(messages_with_id_result, DBMessageMap):
             # Most recent message in the channel has been bridged
             continue
 
         # There might be unbridged messages, try to find them
         try:
-            latest_bridged_message = channel.get_partial_message(message_id)
+            latest_bridged_message = channel.get_partial_message(
+                latest_bridged_message_id
+            )
 
             messages_after_latest_bridged = [
                 message
@@ -2889,8 +2907,8 @@ async def bridge_unbridged_messages(*, session: SQLSession):
 
         # Try to bridge them
         for message_to_bridge in messages_after_latest_bridged:
-            if message_to_bridge.id == message_id:
-                continue
+            if message_to_bridge.id == latest_bridged_message_id:
+                break
 
             try:
                 await on_message(message_to_bridge)
