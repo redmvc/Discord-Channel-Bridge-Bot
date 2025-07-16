@@ -2784,16 +2784,19 @@ async def on_guild_remove(server: discord.Guild):
 @globals.client.event
 async def on_disconnect():
     """Mark the bot as disconnected."""
+    logger.info("Bot has disconnected.")
     globals.is_connected = False
 
 
 @globals.client.event
 async def on_connect():
+    logger.info("Bot has connected.")
     await reconnect()
 
 
 @globals.client.event
 async def on_resumed():
+    logger.info("Bot has reconnected.")
     await reconnect()
 
 
@@ -2808,7 +2811,9 @@ async def reconnect():
     if len(bridges.get_channels_with_outbound_bridges()) == 0:
         return
 
+    logger.info("Looking for and bridging any unbridged messages...")
     await bridge_unbridged_messages()
+    logger.info("Finished bridging unbridged messages.")
 
 
 @overload
@@ -2832,6 +2837,7 @@ async def bridge_unbridged_messages(*, session: SQLSession):
         An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
     """
     # Find the latest bridged messages from each channel
+    logger.debug("Looking for latest bridged message in each channel.")
     subquery = (
         session.query(
             DBMessageMap.source_channel,
@@ -2852,6 +2858,7 @@ async def bridge_unbridged_messages(*, session: SQLSession):
         select_latest_bridged_messages
     )
 
+    logger.debug("Checking each channel with bridges...")
     for bridged_message_row in bridged_messages_query_result:
         # Check whether a channel's latest message has already been bridged
         channel_id = int(bridged_message_row.source_channel)
@@ -2868,6 +2875,10 @@ async def bridge_unbridged_messages(*, session: SQLSession):
                 ensure_text_or_thread=True,
             )
         except ChannelTypeError:
+            logger.debug(
+                "Channel <#%s> was not a text channel nor a thread off one.",
+                channel_id,
+            )
             continue
 
         messages_with_id_query: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
@@ -2883,9 +2894,13 @@ async def bridge_unbridged_messages(*, session: SQLSession):
         )
         if isinstance(messages_with_id_result, DBMessageMap):
             # Most recent message in the channel has been bridged
+            logger.debug(
+                "Latest message in channel <#%s> was already bridged.", channel_id
+            )
             continue
 
         # There might be unbridged messages, try to find them
+        logger.debug("Looking for messages after the latest bridged message...")
         try:
             latest_bridged_message = channel.get_partial_message(
                 latest_bridged_message_id
@@ -2910,6 +2925,7 @@ async def bridge_unbridged_messages(*, session: SQLSession):
             if message_to_bridge.id == latest_bridged_message_id:
                 break
 
+            logger.debug("Bridging message with ID %s.", message_to_bridge.id)
             try:
                 await on_message(message_to_bridge)
             except Exception:
