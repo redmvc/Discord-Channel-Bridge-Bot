@@ -236,7 +236,7 @@ async def bridge(
             pass
 
     try:
-        await create_bridges(message_channel, target_channel, direction)
+        await create_bridges(message_channel, target_channel, direction, interaction)
     except Exception as e:
         if isinstance(e, SQLError):
             await interaction.followup.send(
@@ -276,8 +276,9 @@ async def create_bridges(
     source_channel: discord.TextChannel | discord.Thread,
     target_channel: discord.TextChannel | discord.Thread,
     direction: Literal["outbound", "inbound"] | None,
-):
-    """Create bridges between `source_channel` and `target_channel`.
+    interaction: discord.Interaction,
+) -> bool:
+    """Create bridges between `source_channel` and `target_channel`. This function returns True unless it would've created a bridge from an NSFW channel to a SFW one and the user decided to cancel the interaction.
 
     Parameters
     ----------
@@ -287,6 +288,12 @@ async def create_bridges(
         The channel to which to create bridges.
     direction : Literal["outbound", "inbound"] | None
         If this equals "outbound", only a bridge from `source_channel` to `target_channel` will be created; if it equals "inbound", only a bridge from `target_channel` to `source_channel` will be created; if it equals None, both will be created.
+    interaction : :class:`~discord.Interaction`
+        The interaction that called this function.
+
+    Returns
+    -------
+    bool
     """
     ...
 
@@ -296,20 +303,10 @@ async def create_bridges(
     source_channel: discord.TextChannel | discord.Thread,
     target_channel: discord.TextChannel | discord.Thread,
     direction: Literal["outbound", "inbound"] | None,
+    interaction: discord.Interaction,
     *,
-    session: SQLSession | None,
-): ...
-
-
-@sql_command
-@beartype
-async def create_bridges(
-    source_channel: discord.TextChannel | discord.Thread,
-    target_channel: discord.TextChannel | discord.Thread,
-    direction: Literal["outbound", "inbound"] | None,
-    *,
-    session: SQLSession,
-):
+    nsfw_to_sfw_bridge_confirmed: Literal[True],
+) -> Literal[True]:
     """Create bridges between `source_channel` and `target_channel`.
 
     Parameters
@@ -320,8 +317,59 @@ async def create_bridges(
         The channel to which to create bridges.
     direction : Literal["outbound", "inbound"] | None
         If this equals "outbound", only a bridge from `source_channel` to `target_channel` will be created; if it equals "inbound", only a bridge from `target_channel` to `source_channel` will be created; if it equals None, both will be created.
+    interaction : :class:`~discord.Interaction`
+        The interaction that called this function.
+
+    Returns
+    -------
+    Literal[True]
+    """
+    ...
+
+
+@overload
+async def create_bridges(
+    source_channel: discord.TextChannel | discord.Thread,
+    target_channel: discord.TextChannel | discord.Thread,
+    direction: Literal["outbound", "inbound"] | None,
+    interaction: discord.Interaction,
+    *,
+    nsfw_to_sfw_bridge_confirmed: bool = False,
+    session: SQLSession | None,
+) -> bool: ...
+
+
+@sql_command
+@beartype
+async def create_bridges(
+    source_channel: discord.TextChannel | discord.Thread,
+    target_channel: discord.TextChannel | discord.Thread,
+    direction: Literal["outbound", "inbound"] | None,
+    interaction: discord.Interaction,
+    *,
+    nsfw_to_sfw_bridge_confirmed: bool = False,
+    session: SQLSession,
+) -> bool:
+    """Try to create bridges between `source_channel` and `target_channel`. This function returns True unless it would've created a bridge from an NSFW channel to a SFW one and the user decided to cancel the interaction.
+
+    Parameters
+    ----------
+    source_channel : :class:`~discord.TextChannel` | :class:`~discord.Thread`
+        The channel from which to create bridges.
+    target_channel : :class:`~discord.TextChannel` | :class:`~discord.Thread`
+        The channel to which to create bridges.
+    direction : Literal["outbound", "inbound"] | None
+        If this equals "outbound", only a bridge from `source_channel` to `target_channel` will be created; if it equals "inbound", only a bridge from `target_channel` to `source_channel` will be created; if it equals None, both will be created.
+    interaction : :class:`~discord.Interaction`
+        The interaction that called this function.
+    nsfw_to_sfw_bridge_confirmed : bool, optional
+        If the bridge to be created would forward messages from an NSFW channel to an SFW one, this argument tracks whether the function call has already received confirmation that a the user is aware of this and fine with it.
     session : :class:`~sqlalchemy.orm.Session` | None, optional
-        An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
+        An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created. It is unused otherwise. Defaults to False.
+
+    Returns
+    -------
+    bool
     """
     create_bridges: list["Coroutine[Any, Any, Bridge]"] = []
     if direction != "inbound":
@@ -342,6 +390,8 @@ async def create_bridges(
         )
 
     await asyncio.gather(*create_bridges)
+
+    return True
 
 
 @discord.app_commands.default_permissions(
