@@ -13,7 +13,7 @@ from beartype import beartype
 from validations import ArgumentError, ChannelTypeError, HTTPResponseError, logger
 
 if TYPE_CHECKING:
-    from typing import Literal, NotRequired, SupportsInt, TypedDict
+    from typing import Coroutine, Literal, NotRequired, SupportsInt, TypedDict
 
     class Settings(TypedDict):
         """A TypedDict with the bot's settings. The `settings.json` file must contain a `"context"` entry whose value is another key in the file with the attributes below. For example:
@@ -118,7 +118,7 @@ message_lock: dict[int, asyncio.Lock] = {}
 # Variable to keep track of channels that are being sent messages to to try to preserve ordering
 channel_lock: dict[int, asyncio.Lock] = {}
 
-# Type wildcard
+# Type wildcards
 T = TypeVar("T", bound=Any)
 
 DiscordChannel = (
@@ -130,6 +130,7 @@ DiscordChannel = (
 CH = TypeVar("CH", bound=DiscordChannel)
 
 
+# Getters
 @overload
 async def get_channel_from_id(
     channel_or_id: int,
@@ -830,6 +831,103 @@ async def get_emoji_information(
         emoji_url += "&animated=true"
 
     return (emoji_id, emoji_name, emoji_animated, emoji_url)
+
+
+# Action functions
+@beartype
+async def join_threads(*threads: DiscordChannel):
+    """Try to join a set of threads.
+
+    Parameters
+    ----------
+    threads : :class:`~discord.abc.GuildChannel` | :class:`~discord.abc.PrivateChannel` | :class:`~discord.Thread` | :class:`~discord.PartialMessageable`
+        A list of Discord channels to join. Will only join threads off text channels.
+
+    Raises
+    ------
+    Exception
+        In case any thread join raised an exception, an Exception will be raised with a list of them.
+    """
+    if not threads:
+        return
+
+    logger.debug(
+        "Joining thread%s with ID%s %s...",
+        "s" if len(threads) > 1 else "",
+        "s" if len(threads) > 1 else "",
+        natural_language_string_join(*[str(thread.id) for thread in threads]),
+    )
+
+    join_threads: list["Coroutine[Any, Any, None]"] = []
+    for thread in threads:
+        if not isinstance(thread, discord.Thread) or not thread.parent or thread.me:
+            continue
+
+        logger.debug(
+            "Adding thread #%s:%s:%s (<#%s>) to list of threads to join.",
+            thread.guild.name,
+            thread.parent.name,
+            thread.name,
+            thread.id,
+        )
+        join_threads.append(thread.join())
+
+    if not join_threads:
+        logger.debug(
+            "None of the channels passed to call to join_threads were threads."
+        )
+        return
+
+    exceptions = [
+        exc
+        for exc in await asyncio.gather(*join_threads, return_exceptions=True)
+        if exc is not None
+    ]
+    if not exceptions:
+        logger.debug("All threads joined!")
+        return
+
+    exception_messages = ["There were some exceptions while trying to join threads:"]
+    for exc in exceptions:
+        exception_messages.append(str(exc))
+    exception_message = "\n - ".join(exception_messages)
+
+    logger.error(exception_message)
+    raise Exception(exception_message)
+
+
+# Utility functions
+@beartype
+def natural_language_string_join(
+    *strings_to_join: str,
+    oxford_comma: bool = True,
+) -> str:
+    """Join strings in natural language, using the word "and" and commas, then return:
+    - an empty string if no strings are passed as argument;
+    - the string passed if only one string was passed;
+    - "`strings_to_join[0]` and `strings_to_join[1]`" if two strings were passed;
+    - or a comma-separated list ending with an "and" of all strings passed.
+
+    Parameters
+    ----------
+    *strings_to_join : str
+        The strings to join.
+    oxford_comma : bool, optional
+        Whether to use the Oxford comma to join three or more strings.
+
+    Returns
+    -------
+    str
+    """
+    num_strings = len(strings_to_join)
+    if num_strings == 0:
+        return ""
+    elif num_strings == 1:
+        return strings_to_join[0]
+    elif num_strings == 2:
+        return f"{strings_to_join[0]} and {strings_to_join[1]}"
+
+    return f"{', '.join(strings_to_join[:-1])}{',' if oxford_comma else ''} and {strings_to_join[-1]}"
 
 
 @beartype

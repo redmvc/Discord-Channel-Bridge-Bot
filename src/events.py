@@ -2698,9 +2698,8 @@ async def on_thread_create(thread: discord.Thread):
         return
 
     try:
-        await thread.join()
-    except Exception as e:
-        logger.error("An error occurred while trying to join a thread: %s", e)
+        await globals.join_threads(thread)
+    except Exception:
         raise
 
     await auto_bridge_thread(thread)

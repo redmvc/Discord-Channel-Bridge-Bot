@@ -223,17 +223,11 @@ async def bridge(
 
     await interaction.response.defer(thinking=True, ephemeral=True)
 
-    join_threads: list["Coroutine[Any, Any, None]"] = []
+    join_threads: list["globals.DiscordChannel"] = []
     if isinstance(message_channel, discord.Thread) and not message_channel.me:
-        try:
-            join_threads.append(message_channel.join())
-        except Exception:
-            pass
+        join_threads.append(message_channel)
     if isinstance(target_channel, discord.Thread) and not target_channel.me:
-        try:
-            join_threads.append(target_channel.join())
-        except Exception:
-            pass
+        join_threads.append(target_channel)
 
     try:
         await create_bridges(message_channel, target_channel, direction, interaction)
@@ -266,7 +260,10 @@ async def bridge(
         ephemeral=True,
     )
 
-    await asyncio.gather(*join_threads)
+    try:
+        await globals.join_threads(*join_threads)
+    except Exception:
+        pass
 
     logger.debug("Call to /bridge with interaction ID %s successful.", interaction.id)
 
