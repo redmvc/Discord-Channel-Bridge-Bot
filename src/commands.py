@@ -1241,16 +1241,14 @@ async def demolish_all(
 
     # If channel_and_threads I'm going to demolish all bridges connected to the current channel and its threads
     if channel_and_threads:
-        if isinstance(message_channel, discord.Thread):
-            thread_parent_channel = message_channel.parent
-            if not isinstance(thread_parent_channel, discord.TextChannel):
-                await interaction.response.send_message(
-                    "❌ Please run this command from a text channel or a thread off one.",
-                    ephemeral=True,
-                )
-                return
-        else:
-            thread_parent_channel = message_channel
+        try:
+            thread_parent_channel = await globals.get_channel_parent(message_channel)
+        except ChannelTypeError:
+            await interaction.response.send_message(
+                "❌ Please run this command from a text channel or a thread off one.",
+                ephemeral=True,
+            )
+            return
 
         channels_to_check = [thread_parent_channel] + thread_parent_channel.threads
     else:

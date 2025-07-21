@@ -538,22 +538,10 @@ async def bridge_message_helper(
             logger.debug("Message with ID %s has snapshots, is forwarded.", message.id)
 
             forwarded_message = original_message
-            original_message_channel_parent = original_message_channel
-            if isinstance(original_message_channel, discord.Thread) and (
-                possible_parent := original_message_channel.parent
-            ):
-                original_message_channel_parent = possible_parent
-            forwarded_message_channel_is_nsfw = (
-                isinstance(
-                    original_message_channel_parent,
-                    discord.TextChannel
-                    | discord.VoiceChannel
-                    | discord.StageChannel
-                    | discord.ForumChannel
-                    | discord.CategoryChannel,
-                )
-                and original_message_channel_parent.nsfw
+            original_message_channel_parent = await globals.get_channel_parent(
+                original_message_channel
             )
+            forwarded_message_channel_is_nsfw = original_message_channel_parent.nsfw
 
             message_content = ""
             message_attachments = []
@@ -2677,8 +2665,11 @@ async def on_thread_create(thread: discord.Thread):
         return
     assert (bot_user := globals.client.user)
 
-    parent_channel = thread.parent
-    thread_is_not_off_text_channel = not isinstance(parent_channel, discord.TextChannel)
+    try:
+        parent_channel = await globals.get_channel_parent(thread)
+    except ChannelTypeError:
+        # Thread is not off a Text Channel
+        return
     parent_not_in_auto_bridge = parent_channel and (
         parent_channel.id not in globals.auto_bridge_thread_channels
     )
@@ -2690,8 +2681,7 @@ async def on_thread_create(thread: discord.Thread):
     ).manage_webhooks
 
     if (
-        thread_is_not_off_text_channel
-        or parent_not_in_auto_bridge
+        parent_not_in_auto_bridge
         or thread_created_by_self
         or no_manage_webhook_permissions
     ):
