@@ -877,10 +877,10 @@ async def bridge_thread_helper(
                 )
             )
         succeeded_at_least_once = True
-    await asyncio.gather(
-        *(create_bridges + add_user_to_new_threads),
-        globals.join_threads(*threads_to_join),
-    )
+
+    await asyncio.gather(*create_bridges)
+    await globals.join_threads(*threads_to_join)
+    await asyncio.gather(*add_user_to_new_threads)
 
     if interaction:
         if succeeded_at_least_once:
