@@ -221,16 +221,66 @@ async def bridge(
         )
         return
 
+    await _bridge_creation_wrapper(
+        message_channel,
+        target_channel,
+        direction,
+        interaction,
+    )
+
+
+async def _bridge_creation_wrapper(
+    source_channel: discord.TextChannel | discord.Thread,
+    target_channel: discord.TextChannel | discord.Thread,
+    direction: Literal["outbound", "inbound"] | None,
+    interaction: discord.Interaction,
+    *,
+    nsfw_to_sfw_bridge_confirmed: bool = False,
+):
+    """Wraps the function for the creation of bridges between `source_channel` and `target_channel`, validating that a user is certain they want to create a bridge from and NSFW channel to a SFW one if applicable and generating and logging responses and errors.
+
+    Parameters
+    ----------
+    source_channel : :class:`~discord.TextChannel` | :class:`~discord.Thread`
+        The channel from which to create bridges.
+    target_channel : :class:`~discord.TextChannel` | :class:`~discord.Thread`
+        The channel to which to create bridges.
+    direction : Literal["outbound", "inbound"] | None
+        If this equals "outbound", only a bridge from `source_channel` to `target_channel` will be created; if it equals "inbound", only a bridge from `target_channel` to `source_channel` will be created; if it equals None, both will be created.
+    interaction : :class:`~discord.Interaction`
+        The interaction that called this function.
+    nsfw_to_sfw_bridge_confirmed : bool, optional
+        If the bridge to be created would forward messages from an NSFW channel to an SFW one, this argument tracks whether the function call has already received confirmation that the user is aware of this and fine with it. It is unused otherwise. Defaults to False.
+    """
     await interaction.response.defer(thinking=True, ephemeral=True)
 
-    join_threads: list["globals.DiscordChannel"] = []
-    if isinstance(message_channel, discord.Thread) and not message_channel.me:
-        join_threads.append(message_channel)
-    if isinstance(target_channel, discord.Thread) and not target_channel.me:
-        join_threads.append(target_channel)
+    if not nsfw_to_sfw_bridge_confirmed:
+        # Check whether this is creating a bridge from a NSFW channel to an SFW one
+        source_is_nsfw = (await globals.get_channel_parent(source_channel)).is_nsfw()
+        target_is_nsfw = (await globals.get_channel_parent(target_channel)).is_nsfw()
+
+        if ((direction != "inbound") and source_is_nsfw and not target_is_nsfw) or (
+            (direction != "outbound") and target_is_nsfw and not source_is_nsfw
+        ):
+            logger.debug("Creating a bridge from an NSFW channel to an SFW one.")
+
+            message = "This interaction would create a bridge from an NSFW channel to an SFW channel. Are you sure you wish to do that?"
+            view = discord.ui.View()
+            view.add_item(
+                ConfirmNSFWToSFWBridge(
+                    interaction,
+                    source_channel,
+                    target_channel,
+                    direction,
+                )
+            )
+            view.add_item(CancelNSFWToSFWBridge(interaction))
+
+            await interaction.response.send_message(message, view=view, ephemeral=True)
+            return
 
     try:
-        await create_bridges(message_channel, target_channel, direction, interaction)
+        await create_bridges(source_channel, target_channel, direction)
     except Exception as e:
         if isinstance(e, SQLError):
             await interaction.followup.send(
@@ -260,50 +310,61 @@ async def bridge(
         ephemeral=True,
     )
 
-    try:
-        await globals.join_threads(*join_threads)
-    except Exception:
-        pass
-
     logger.debug("Call to /bridge with interaction ID %s successful.", interaction.id)
 
 
+class CancelNSFWToSFWBridge(discord.ui.Button[Any]):
+    def __init__(self, original_interaction: discord.Interaction):
+        super().__init__(label="No", style=discord.ButtonStyle.grey)
+        self._original_interaction = original_interaction
+
+    async def callback(self, interaction: discord.Interaction):
+        await self._original_interaction.edit_original_response(
+            view=None,
+            content="Request cancelled.",
+        )
+        logger.debug(
+            "Call to /bridge with interaction ID %s cancelled.",
+            interaction.id,
+        )
+
+
+class ConfirmNSFWToSFWBridge(discord.ui.Button[Any]):
+    def __init__(
+        self,
+        original_interaction: discord.Interaction,
+        source_channel: discord.TextChannel | discord.Thread,
+        target_channel: discord.TextChannel | discord.Thread,
+        direction: Literal["outbound", "inbound"] | None,
+    ):
+        super().__init__(label="Yes", style=discord.ButtonStyle.danger, emoji="⚠️")
+
+        self._original_interaction: discord.Interaction = original_interaction
+        self._source_channel: discord.TextChannel | discord.Thread = source_channel
+        self._target_channel: discord.TextChannel | discord.Thread = target_channel
+        self._direction: Literal["outbound", "inbound"] | None = direction
+
+    async def callback(self, interaction: discord.Interaction):
+        # await self._original_interaction.delete_original_response()
+        await self._original_interaction.edit_original_response(
+            view=None,
+            content="Creating bridges...",
+        )
+        await _bridge_creation_wrapper(
+            self._source_channel,
+            self._target_channel,
+            self._direction,
+            interaction,
+            nsfw_to_sfw_bridge_confirmed=True,
+        )
+
+
 @overload
 async def create_bridges(
     source_channel: discord.TextChannel | discord.Thread,
     target_channel: discord.TextChannel | discord.Thread,
     direction: Literal["outbound", "inbound"] | None,
-    interaction: discord.Interaction,
-) -> bool:
-    """Create bridges between `source_channel` and `target_channel`. This function returns True unless it would've created a bridge from an NSFW channel to a SFW one and the user decided to cancel the interaction.
-
-    Parameters
-    ----------
-    source_channel : :class:`~discord.TextChannel` | :class:`~discord.Thread`
-        The channel from which to create bridges.
-    target_channel : :class:`~discord.TextChannel` | :class:`~discord.Thread`
-        The channel to which to create bridges.
-    direction : Literal["outbound", "inbound"] | None
-        If this equals "outbound", only a bridge from `source_channel` to `target_channel` will be created; if it equals "inbound", only a bridge from `target_channel` to `source_channel` will be created; if it equals None, both will be created.
-    interaction : :class:`~discord.Interaction`
-        The interaction that called this function.
-
-    Returns
-    -------
-    bool
-    """
-    ...
-
-
-@overload
-async def create_bridges(
-    source_channel: discord.TextChannel | discord.Thread,
-    target_channel: discord.TextChannel | discord.Thread,
-    direction: Literal["outbound", "inbound"] | None,
-    interaction: discord.Interaction,
-    *,
-    nsfw_to_sfw_bridge_confirmed: Literal[True],
-) -> Literal[True]:
+):
     """Create bridges between `source_channel` and `target_channel`.
 
     Parameters
@@ -314,12 +375,6 @@ async def create_bridges(
         The channel to which to create bridges.
     direction : Literal["outbound", "inbound"] | None
         If this equals "outbound", only a bridge from `source_channel` to `target_channel` will be created; if it equals "inbound", only a bridge from `target_channel` to `source_channel` will be created; if it equals None, both will be created.
-    interaction : :class:`~discord.Interaction`
-        The interaction that called this function.
-
-    Returns
-    -------
-    Literal[True]
     """
     ...
 
@@ -329,11 +384,9 @@ async def create_bridges(
     source_channel: discord.TextChannel | discord.Thread,
     target_channel: discord.TextChannel | discord.Thread,
     direction: Literal["outbound", "inbound"] | None,
-    interaction: discord.Interaction,
     *,
-    nsfw_to_sfw_bridge_confirmed: bool = False,
     session: SQLSession | None,
-) -> bool: ...
+): ...
 
 
 @sql_command
@@ -342,12 +395,10 @@ async def create_bridges(
     source_channel: discord.TextChannel | discord.Thread,
     target_channel: discord.TextChannel | discord.Thread,
     direction: Literal["outbound", "inbound"] | None,
-    interaction: discord.Interaction,
     *,
-    nsfw_to_sfw_bridge_confirmed: bool = False,
     session: SQLSession,
-) -> bool:
-    """Try to create bridges between `source_channel` and `target_channel`. This function returns True unless it would've created a bridge from an NSFW channel to a SFW one and the user decided to cancel the interaction.
+):
+    """Create bridges between `source_channel` and `target_channel`.
 
     Parameters
     ----------
@@ -357,16 +408,8 @@ async def create_bridges(
         The channel to which to create bridges.
     direction : Literal["outbound", "inbound"] | None
         If this equals "outbound", only a bridge from `source_channel` to `target_channel` will be created; if it equals "inbound", only a bridge from `target_channel` to `source_channel` will be created; if it equals None, both will be created.
-    interaction : :class:`~discord.Interaction`
-        The interaction that called this function.
-    nsfw_to_sfw_bridge_confirmed : bool, optional
-        If the bridge to be created would forward messages from an NSFW channel to an SFW one, this argument tracks whether the function call has already received confirmation that a the user is aware of this and fine with it.
     session : :class:`~sqlalchemy.orm.Session` | None, optional
-        An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created. It is unused otherwise. Defaults to False.
-
-    Returns
-    -------
-    bool
+        An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
     """
     create_bridges: list["Coroutine[Any, Any, Bridge]"] = []
     if direction != "inbound":
@@ -387,6 +430,17 @@ async def create_bridges(
         )
 
     await asyncio.gather(*create_bridges)
+
+    join_threads: list["globals.DiscordChannel"] = []
+    if isinstance(source_channel, discord.Thread) and not source_channel.me:
+        join_threads.append(source_channel)
+    if isinstance(target_channel, discord.Thread) and not target_channel.me:
+        join_threads.append(target_channel)
+
+    try:
+        await globals.join_threads(*join_threads)
+    except Exception:
+        pass
 
     return True
 
@@ -750,12 +804,8 @@ async def bridge_thread_helper(
     failed_channels: list[int] = []
 
     create_bridges: list["Coroutine[Any, Any, Bridge]"] = []
-    add_user_to_threads: list["Coroutine[Any, Any, None]"] = []
-    try:
-        add_user_to_threads.append(thread_to_bridge.join())
-    except Exception:
-        pass
-
+    threads_to_join: list["globals.DiscordChannel"] = [thread_to_bridge]
+    add_user_to_new_threads: list["Coroutine[Any, Any, None]"] = []
     for channel_id in outbound_bridges.keys():
         channel = await globals.get_channel_from_id(channel_id)
         if not isinstance(channel, discord.TextChannel):
@@ -805,31 +855,32 @@ async def bridge_thread_helper(
             continue
 
         if not thread_already_existed:
-            try:
-                add_user_to_threads.append(new_thread.join())
-            except Exception:
-                pass
+            threads_to_join.append(new_thread)
 
             if channel_member:
-                try:
-                    add_user_to_threads.append(new_thread.add_user(channel_member))
-                except Exception:
-                    pass
+                add_user_to_new_threads.append(new_thread.add_user(channel_member))
 
         threads_created[channel_id] = new_thread
         create_bridges.append(
             bridges.create_bridge(
-                source=thread_to_bridge, target=new_thread, session=session
+                source=thread_to_bridge,
+                target=new_thread,
+                session=session,
             )
         )
         if inbound_bridges and inbound_bridges[channel_id]:
             create_bridges.append(
                 bridges.create_bridge(
-                    source=new_thread, target=thread_to_bridge, session=session
+                    source=new_thread,
+                    target=thread_to_bridge,
+                    session=session,
                 )
             )
         succeeded_at_least_once = True
-    await asyncio.gather(*(create_bridges + add_user_to_threads))
+    await asyncio.gather(
+        *(create_bridges + add_user_to_new_threads),
+        globals.join_threads(*threads_to_join),
+    )
 
     if interaction:
         if succeeded_at_least_once:
