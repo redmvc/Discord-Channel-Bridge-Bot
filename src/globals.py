@@ -493,11 +493,8 @@ async def get_channel_parent(
 
     if isinstance(channel, discord.Thread):
         channel = channel.parent
-
-    if not isinstance(channel, discord.TextChannel):
-        raise ChannelTypeError(
-            "The channel or ID passed as argument does not refer to a Discord text channel or a Thread."
-        )
+        if TYPE_CHECKING:
+            assert isinstance(channel, discord.TextChannel)
 
     return channel
 
