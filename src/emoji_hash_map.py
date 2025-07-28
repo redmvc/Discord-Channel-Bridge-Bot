@@ -601,7 +601,7 @@ class EmojiHashMap:
         ):
             await self.delete_emoji(emoji.id)
 
-            image = await globals.get_image_from_URL(emoji.url)
+            image = await globals.get_emoji_image(emoji)
             image_hash = globals.hash_image(image)
             self._add_emoji_to_map(
                 emoji.id,
@@ -894,12 +894,9 @@ class EmojiHashMap:
 
         try:
             if not image_hash:
-                if partial_or_full_emoji := (external_emoji or full_emoji):
-                    # Get the hash of the external emoji's image if we have access to it
-                    image = await globals.get_image_from_URL(partial_or_full_emoji.url)
-                else:
-                    image = await globals.get_image_from_URL(internal_emoji.url)
-
+                image = await globals.get_emoji_image(
+                    external_emoji or full_emoji or internal_emoji
+                )
                 image_hash = globals.hash_image(image)
 
             external_emoji_accessible = full_emoji.is_usable() if full_emoji else False
