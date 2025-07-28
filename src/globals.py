@@ -644,6 +644,8 @@ async def get_image_from_URL(url: str) -> bytes:
 @overload
 async def get_emoji_information(
     emoji: discord.PartialEmoji | discord.Emoji,
+    *,
+    emoji_size: int | None = 96,
 ) -> tuple[int, str, bool, str]:
     """Process the custom emoji passed as argument and return a tuple whose elements are:
     - its ID;
@@ -655,6 +657,8 @@ async def get_emoji_information(
     ----------
     emoji : :class:`~discord.PartialEmoji` | :class:`~discord.Emoji`
         A custom Discord emoji.
+    emoji_size : int | None, optional
+        A specific emoji size to get the URL for. If set to None, will not limit the emoji size. Defaults to 96.
 
     Returns
     -------
@@ -672,6 +676,8 @@ async def get_emoji_information(
 async def get_emoji_information(
     emoji: None,
     emoji_id: int | str,
+    *,
+    emoji_size: int | None = 96,
 ) -> tuple[int, str, bool, str]:
     """Process the custom emoji passed as argument and return a tuple whose elements are:
     - its ID;
@@ -683,6 +689,8 @@ async def get_emoji_information(
     ----------
     emoji_id : int | str
         The ID of a a custom emoji.
+    emoji_size : int | None, optional
+        A specific emoji size to get the URL for. If set to None, will not limit the emoji size. Defaults to 96.
 
     Returns
     -------
@@ -703,6 +711,8 @@ async def get_emoji_information(
     emoji: None,
     emoji_id: int | str,
     emoji_name: str,
+    *,
+    emoji_size: int | None = 96,
 ) -> tuple[int, str, bool, str]:
     """Process the custom emoji passed as argument and return a tuple whose elements are:
     - its ID;
@@ -716,6 +726,8 @@ async def get_emoji_information(
         The ID of a a custom emoji.
     emoji_name : str
         The name of the emoji. It must start with the string "a:" if the emoji is animated.
+    emoji_size : int | None, optional
+        A specific emoji size to get the URL for. If set to None, will not limit the emoji size. Defaults to 96.
 
     Returns
     -------
@@ -734,6 +746,8 @@ async def get_emoji_information(
     emoji: discord.PartialEmoji | discord.Emoji | None = None,
     emoji_id: int | str | None = None,
     emoji_name: str | None = None,
+    *,
+    emoji_size: int | None = 96,
 ) -> tuple[int, str, bool, str]: ...
 
 
@@ -742,6 +756,8 @@ async def get_emoji_information(
     emoji: discord.PartialEmoji | discord.Emoji | None = None,
     emoji_id: int | str | None = None,
     emoji_name: str | None = None,
+    *,
+    emoji_size: int | None = 96,
 ) -> tuple[int, str, bool, str]:
     """Process the custom emoji passed as argument and return a tuple whose elements are:
     - its ID;
@@ -751,12 +767,14 @@ async def get_emoji_information(
 
     Parameters
     ----------
-    emoji : discord.PartialEmoji | discord.Emoji | None, optional
+    emoji : :class:`~discord.PartialEmoji` | :class:`~discord.Emoji` | None, optional
         A custom Discord emoji. Defaults to None, in which case `emoji_id` and `emoji_name` are used instead.
     emoji_id : int | str | None, optional
         The ID of a custom emoji. Defaults to None. Only used if `emoji` is not present.
     emoji_name : str | None, optional
         The name of the emoji. Defaults to None, in which case the client will try to find an emoji with ID `emoji_id`. If it's included, it must start with the string "a:" if the emoji animated. Only used if `emoji` is not present.
+    emoji_size : int | None, optional
+        A specific emoji size to get the URL for. If set to None, will not limit the emoji size. Defaults to 96.
 
     Returns
     -------
@@ -825,9 +843,14 @@ async def get_emoji_information(
             emoji_name = emoji.name
             emoji_animated = emoji.animated
 
-    emoji_url = f"https://cdn.discordapp.com/emojis/{emoji_id}.webp?size=96"
+    emoji_url = f"https://cdn.discordapp.com/emojis/{emoji_id}.webp"
+    arguments = []
+    if emoji_size:
+        arguments.append(f"size={emoji_size}")
     if emoji_animated:
-        emoji_url += "&animated=true"
+        arguments.append("animated=true")
+    if arguments:
+        emoji_url += "?" + "&".join(arguments)
 
     return (emoji_id, emoji_name, emoji_animated, emoji_url)
 
