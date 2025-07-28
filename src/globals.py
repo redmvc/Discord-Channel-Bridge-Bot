@@ -592,56 +592,11 @@ async def get_users_from_iterator(
     return user_ids
 
 
-@beartype
-async def get_image_from_URL(url: str) -> bytes:
-    """Return an image stored in a URL.
-
-    Parameters
-    ----------
-    url : str
-        The URL of the image to get.
-
-    Returns
-    -------
-    bytes
-
-    Raises
-    ------
-    HTTPResponseError
-        HTTP request to fetch image returned a status other than 200.
-    InvalidURL
-        Argument was not a valid URL.
-    RuntimeError
-        Session connection failed.
-    ServerTimeoutError
-        Connection to server timed out.
-    """
-    image_bytes: io.BytesIO | None = None
-    async with aiohttp.ClientSession(
-        headers={"User-Agent": "Discord Channel Bridge Bot/1.0"}
-    ) as session:
-        async with session.get(url) as response:
-            if response.status != 200:
-                err = HTTPResponseError(
-                    f"Error in function {inspect.stack()[1][3]}(): failed to retrieve image from URL. HTTP status {response.status}."
-                )
-                logger.error(err)
-                raise err
-
-            response_buffer = await response.read()
-            image_bytes = io.BytesIO(response_buffer)
-
-    if not image_bytes:
-        err = Exception("Unknown problem occurred trying to fetch image.")
-        logger.error(err)
-        raise err
-
-    return image_bytes.read()
-
-
 @overload
 async def get_emoji_information(
     emoji: discord.PartialEmoji | discord.Emoji,
+    *,
+    emoji_size: int | None = 96,
 ) -> tuple[int, str, bool, str]:
     """Process the custom emoji passed as argument and return a tuple whose elements are:
     - its ID;
@@ -653,6 +608,8 @@ async def get_emoji_information(
     ----------
     emoji : :class:`~discord.PartialEmoji` | :class:`~discord.Emoji`
         A custom Discord emoji.
+    emoji_size : int | None, optional
+        A specific emoji size to get the URL for. If set to None, will not limit the emoji size. Defaults to 96.
 
     Returns
     -------
@@ -670,6 +627,8 @@ async def get_emoji_information(
 async def get_emoji_information(
     emoji: None,
     emoji_id: int | str,
+    *,
+    emoji_size: int | None = 96,
 ) -> tuple[int, str, bool, str]:
     """Process the custom emoji passed as argument and return a tuple whose elements are:
     - its ID;
@@ -681,6 +640,8 @@ async def get_emoji_information(
     ----------
     emoji_id : int | str
         The ID of a a custom emoji.
+    emoji_size : int | None, optional
+        A specific emoji size to get the URL for. If set to None, will not limit the emoji size. Defaults to 96.
 
     Returns
     -------
@@ -701,6 +662,8 @@ async def get_emoji_information(
     emoji: None,
     emoji_id: int | str,
     emoji_name: str,
+    *,
+    emoji_size: int | None = 96,
 ) -> tuple[int, str, bool, str]:
     """Process the custom emoji passed as argument and return a tuple whose elements are:
     - its ID;
@@ -714,6 +677,8 @@ async def get_emoji_information(
         The ID of a a custom emoji.
     emoji_name : str
         The name of the emoji. It must start with the string "a:" if the emoji is animated.
+    emoji_size : int | None, optional
+        A specific emoji size to get the URL for. If set to None, will not limit the emoji size. Defaults to 96.
 
     Returns
     -------
@@ -732,6 +697,8 @@ async def get_emoji_information(
     emoji: discord.PartialEmoji | discord.Emoji | None = None,
     emoji_id: int | str | None = None,
     emoji_name: str | None = None,
+    *,
+    emoji_size: int | None = 96,
 ) -> tuple[int, str, bool, str]: ...
 
 
@@ -740,6 +707,8 @@ async def get_emoji_information(
     emoji: discord.PartialEmoji | discord.Emoji | None = None,
     emoji_id: int | str | None = None,
     emoji_name: str | None = None,
+    *,
+    emoji_size: int | None = 96,
 ) -> tuple[int, str, bool, str]:
     """Process the custom emoji passed as argument and return a tuple whose elements are:
     - its ID;
@@ -749,12 +718,14 @@ async def get_emoji_information(
 
     Parameters
     ----------
-    emoji : discord.PartialEmoji | discord.Emoji | None, optional
+    emoji : :class:`~discord.PartialEmoji` | :class:`~discord.Emoji` | None, optional
         A custom Discord emoji. Defaults to None, in which case `emoji_id` and `emoji_name` are used instead.
     emoji_id : int | str | None, optional
         The ID of a custom emoji. Defaults to None. Only used if `emoji` is not present.
     emoji_name : str | None, optional
         The name of the emoji. Defaults to None, in which case the client will try to find an emoji with ID `emoji_id`. If it's included, it must start with the string "a:" if the emoji animated. Only used if `emoji` is not present.
+    emoji_size : int | None, optional
+        A specific emoji size to get the URL for. If set to None, will not limit the emoji size. Defaults to 96.
 
     Returns
     -------
@@ -823,11 +794,289 @@ async def get_emoji_information(
             emoji_name = emoji.name
             emoji_animated = emoji.animated
 
-    emoji_url = f"https://cdn.discordapp.com/emojis/{emoji_id}.webp?size=96"
-    if emoji_animated:
-        emoji_url += "&animated=true"
+    return (
+        emoji_id,
+        emoji_name,
+        emoji_animated,
+        get_emoji_url(emoji_id, emoji_animated, emoji_size),
+    )
 
-    return (emoji_id, emoji_name, emoji_animated, emoji_url)
+
+@overload
+async def get_emoji_image(
+    emoji: discord.PartialEmoji | discord.Emoji,
+    emoji_size: int | None = 96,
+) -> bytes:
+    """Return an emoji's image.
+
+    Parameters
+    ----------
+    emoji : :class:`~discord.PartialEmoji` | :class:`~discord.Emoji`
+        A custom Discord emoji.
+    emoji_size : int | None, optional
+        A specific emoji image size. If set to None, will not limit the emoji size. Defaults to 96.
+
+    Returns
+    -------
+    bytes
+
+    Raises
+    ------
+    ValueError
+        `emoji` had type `PartialEmoji` but it was not a custom emoji.
+    """
+    ...
+
+
+@overload
+async def get_emoji_image(
+    emoji_id: int | str,
+    emoji_animated: bool,
+    emoji_size: int | None = 96,
+) -> bytes:
+    """Return an emoji's image.
+
+    Parameters
+    ----------
+    emoji_id : int | str
+        The ID of a custom emoji.
+    emoji_animated : bool
+        Whether the emoji is animated.
+    emoji_size : int | None, optional
+        A specific emoji image size. If set to None, will not limit the emoji size. Defaults to 96.
+
+    Returns
+    -------
+    bytes
+
+    Raises
+    ------
+    ValueError
+        `emoji_id` had type `str` but it was not a valid numerical ID.
+    """
+    ...
+
+
+@beartype
+async def get_emoji_image(  # pyright: ignore[reportInconsistentOverload]
+    *args: discord.PartialEmoji | discord.Emoji | int | str | bool,
+) -> bytes:
+    """Return an emoji's image.
+
+    Parameters
+    ----------
+    emoji : :class:`~discord.PartialEmoji` | :class:`~discord.Emoji` | None, optional
+        A custom Discord emoji. Defaults to None, in which case `emoji_id` and `emoji_animated` are used instead.
+    emoji_id : int | str | None, optional
+        The ID of a custom emoji. Only used if `emoji` is not present. Defaults to None.
+    emoji_animated : bool | None, optional
+        Whether the emoji is animated. Only used if `emoji` is not present. Defaults to None.
+    emoji_size : int | None, optional
+        A specific emoji image size. If set to None, will not limit the emoji size. Defaults to 96.
+
+    Returns
+    -------
+    bytes
+
+    Raises
+    ------
+    ValueError
+        `emoji` argument was passed and had type `PartialEmoji` but it was not a custom emoji, or `emoji_id` argument was passed and had type `str` but it was not a valid numerical ID.
+    """
+    emoji_url = get_emoji_url(*args)
+    return await get_image_from_URL(emoji_url)
+
+
+@overload
+def get_emoji_url(
+    emoji: discord.PartialEmoji | discord.Emoji,
+    emoji_size: int | None = 96,
+) -> str:
+    """Return the standardised URL for an emoji.
+
+    Parameters
+    ----------
+    emoji : :class:`~discord.PartialEmoji` | :class:`~discord.Emoji`
+        A custom Discord emoji.
+    emoji_size : int | None, optional
+        A specific emoji size to get the URL for. If set to None, will not limit the emoji size. Defaults to 96.
+
+    Returns
+    -------
+    str
+
+    Raises
+    ------
+    ValueError
+        `emoji` had type `PartialEmoji` but it was not a custom emoji.
+    """
+    ...
+
+
+@overload
+def get_emoji_url(
+    emoji_id: int | str,
+    emoji_animated: bool,
+    emoji_size: int | None = 96,
+) -> str:
+    """Return the standardised URL for an emoji.
+
+    Parameters
+    ----------
+    emoji_id : int | str
+        The ID of a custom emoji.
+    emoji_animated : bool
+        Whether the emoji is animated.
+    emoji_size : int | None, optional
+        A specific emoji size to get the URL for. If set to None, will not limit the emoji size. Defaults to 96.
+
+    Returns
+    -------
+    str
+
+    Raises
+    ------
+    ValueError
+        `emoji_id` had type `str` but it was not a valid numerical ID.
+    """
+    ...
+
+
+@overload
+def get_emoji_url(
+    *args: discord.PartialEmoji | discord.Emoji | int | str | bool,
+) -> str: ...
+
+
+@beartype
+def get_emoji_url(  # pyright: ignore[reportInconsistentOverload]
+    *args: discord.PartialEmoji | discord.Emoji | int | str | bool,
+) -> str:
+    """Return the standardised URL for an emoji.
+
+    Parameters
+    ----------
+    emoji : :class:`~discord.PartialEmoji` | :class:`~discord.Emoji` | None, optional
+        A custom Discord emoji. Defaults to None, in which case `emoji_id` and `emoji_animated` are used instead.
+    emoji_id : int | str | None, optional
+        The ID of a custom emoji. Only used if `emoji` is not present. Defaults to None.
+    emoji_animated : bool | None, optional
+        Whether the emoji is animated. Only used if `emoji` is not present. Defaults to None.
+    emoji_size : int | None, optional
+        A specific emoji size to get the URL for. If set to None, will not limit the emoji size. Defaults to 96.
+
+    Returns
+    -------
+    str
+
+    Raises
+    ------
+    ValueError
+        `emoji` argument was passed and had type `PartialEmoji` but it was not a custom emoji, or `emoji_id` argument was passed and had type `str` but it was not a valid numerical ID.
+    """
+    emoji_animated = False
+    emoji_size = 96
+    if isinstance(emoji := args[0], discord.PartialEmoji | discord.Emoji):
+        if not emoji.id:
+            err = ValueError(
+                f"Error in function {inspect.stack()[1][3]}(): PartialEmoji passed as argument to get_emoji_url() is not a custom emoji."
+            )
+            logger.error(err)
+            raise err
+
+        emoji_id = emoji.id
+        emoji_animated = emoji.animated
+
+        if len(args) > 1:
+            if isinstance(args[1], int):
+                emoji_size = args[1]
+            else:
+                emoji_size = None
+    elif isinstance(emoji_id := args[0], int | str):
+        if not emoji_id:
+            err = ArgumentError(
+                f"Error in function {inspect.stack()[1][3]}(): at least one of emoji or emoji_id must be passed as argument to get_emoji_information()."
+            )
+            logger.error(err)
+            raise err
+        elif isinstance(emoji_id, str):
+            try:
+                emoji_id = int(emoji_id)
+            except ValueError:
+                err = ValueError(
+                    f"Error in function {inspect.stack()[1][3]}(): emoji_id was passed as an argument to get_emoji_information() and had type str but was not convertible to an ID."
+                )
+                logger.error(err)
+                raise err
+
+        if len(args) > 1:
+            emoji_animated = not not args[1]
+
+            if len(args) > 2:
+                if isinstance(args[2], int):
+                    emoji_size = args[2]
+                else:
+                    emoji_size = None
+    else:
+        raise AttributeError("Emoji arguments were not passed to get_emoji_url().")
+
+    emoji_url = f"https://cdn.discordapp.com/emojis/{emoji_id}.webp"
+    arguments = []
+    if emoji_size:
+        arguments.append(f"size={emoji_size}")
+    if emoji_animated:
+        arguments.append("animated=true")
+    if arguments:
+        emoji_url += "?" + "&".join(arguments)
+
+    return emoji_url
+
+
+@beartype
+async def get_image_from_URL(url: str) -> bytes:
+    """Return an image stored in a URL.
+
+    Parameters
+    ----------
+    url : str
+        The URL of the image to get.
+
+    Returns
+    -------
+    bytes
+
+    Raises
+    ------
+    HTTPResponseError
+        HTTP request to fetch image returned a status other than 200.
+    InvalidURL
+        Argument was not a valid URL.
+    RuntimeError
+        Session connection failed.
+    ServerTimeoutError
+        Connection to server timed out.
+    """
+    image_bytes: io.BytesIO | None = None
+    async with aiohttp.ClientSession(
+        headers={"User-Agent": "Discord Channel Bridge Bot/1.0"}
+    ) as session:
+        async with session.get(url) as response:
+            if response.status != 200:
+                err = HTTPResponseError(
+                    f"Error in function {inspect.stack()[1][3]}(): failed to retrieve image from URL {url}. HTTP status {response.status}."
+                )
+                logger.error(err)
+                raise err
+
+            response_buffer = await response.read()
+            image_bytes = io.BytesIO(response_buffer)
+
+    if not image_bytes:
+        err = Exception("Unknown problem occurred trying to fetch image.")
+        logger.error(err)
+        raise err
+
+    return image_bytes.read()
 
 
 # Action functions
