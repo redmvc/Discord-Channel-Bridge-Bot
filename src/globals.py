@@ -805,6 +805,91 @@ async def get_emoji_information(
 
 
 @overload
+async def get_emoji_image(
+    emoji: discord.PartialEmoji | discord.Emoji,
+    emoji_size: int | None = 96,
+) -> bytes:
+    """Return an emoji's image.
+
+    Parameters
+    ----------
+    emoji : :class:`~discord.PartialEmoji` | :class:`~discord.Emoji`
+        A custom Discord emoji.
+    emoji_size : int | None, optional
+        A specific emoji image size. If set to None, will not limit the emoji size. Defaults to 96.
+
+    Returns
+    -------
+    bytes
+
+    Raises
+    ------
+    ValueError
+        `emoji` had type `PartialEmoji` but it was not a custom emoji.
+    """
+    ...
+
+
+@overload
+async def get_emoji_image(
+    emoji_id: int | str,
+    emoji_animated: bool,
+    emoji_size: int | None = 96,
+) -> bytes:
+    """Return an emoji's image.
+
+    Parameters
+    ----------
+    emoji_id : int | str
+        The ID of a custom emoji.
+    emoji_animated : bool
+        Whether the emoji is animated.
+    emoji_size : int | None, optional
+        A specific emoji image size. If set to None, will not limit the emoji size. Defaults to 96.
+
+    Returns
+    -------
+    bytes
+
+    Raises
+    ------
+    ValueError
+        `emoji_id` had type `str` but it was not a valid numerical ID.
+    """
+    ...
+
+
+@beartype
+async def get_emoji_image(  # pyright: ignore[reportInconsistentOverload]
+    *args: discord.PartialEmoji | discord.Emoji | int | str | bool,
+) -> bytes:
+    """Return an emoji's image.
+
+    Parameters
+    ----------
+    emoji : :class:`~discord.PartialEmoji` | :class:`~discord.Emoji` | None, optional
+        A custom Discord emoji. Defaults to None, in which case `emoji_id` and `emoji_animated` are used instead.
+    emoji_id : int | str | None, optional
+        The ID of a custom emoji. Only used if `emoji` is not present. Defaults to None.
+    emoji_animated : bool | None, optional
+        Whether the emoji is animated. Only used if `emoji` is not present. Defaults to None.
+    emoji_size : int | None, optional
+        A specific emoji image size. If set to None, will not limit the emoji size. Defaults to 96.
+
+    Returns
+    -------
+    bytes
+
+    Raises
+    ------
+    ValueError
+        `emoji` argument was passed and had type `PartialEmoji` but it was not a custom emoji, or `emoji_id` argument was passed and had type `str` but it was not a valid numerical ID.
+    """
+    emoji_url = get_emoji_url(*args)
+    return await get_image_from_URL(emoji_url)
+
+
+@overload
 def get_emoji_url(
     emoji: discord.PartialEmoji | discord.Emoji,
     emoji_size: int | None = 96,
