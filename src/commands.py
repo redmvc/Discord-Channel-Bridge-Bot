@@ -336,7 +336,7 @@ class ConfirmNSFWToSFWBridge(discord.ui.Button[Any]):
         target_channel: discord.TextChannel | discord.Thread,
         direction: Literal["outbound", "inbound"] | None,
     ):
-        super().__init__(label="Yes", style=discord.ButtonStyle.danger, emoji="⚠️")
+        super().__init__(label="Yes", style=discord.ButtonStyle.danger, emoji="🔞")
 
         self._original_interaction: discord.Interaction = original_interaction
         self._source_channel: discord.TextChannel | discord.Thread = source_channel
