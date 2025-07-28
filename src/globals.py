@@ -625,7 +625,7 @@ async def get_image_from_URL(url: str) -> bytes:
         async with session.get(url) as response:
             if response.status != 200:
                 err = HTTPResponseError(
-                    f"Error in function {inspect.stack()[1][3]}(): failed to retrieve image from URL. HTTP status {response.status}."
+                    f"Error in function {inspect.stack()[1][3]}(): failed to retrieve image from URL {url}. HTTP status {response.status}."
                 )
                 logger.error(err)
                 raise err
