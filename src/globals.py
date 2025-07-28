@@ -594,53 +594,6 @@ async def get_users_from_iterator(
     return user_ids
 
 
-@beartype
-async def get_image_from_URL(url: str) -> bytes:
-    """Return an image stored in a URL.
-
-    Parameters
-    ----------
-    url : str
-        The URL of the image to get.
-
-    Returns
-    -------
-    bytes
-
-    Raises
-    ------
-    HTTPResponseError
-        HTTP request to fetch image returned a status other than 200.
-    InvalidURL
-        Argument was not a valid URL.
-    RuntimeError
-        Session connection failed.
-    ServerTimeoutError
-        Connection to server timed out.
-    """
-    image_bytes: io.BytesIO | None = None
-    async with aiohttp.ClientSession(
-        headers={"User-Agent": "Discord Channel Bridge Bot/1.0"}
-    ) as session:
-        async with session.get(url) as response:
-            if response.status != 200:
-                err = HTTPResponseError(
-                    f"Error in function {inspect.stack()[1][3]}(): failed to retrieve image from URL {url}. HTTP status {response.status}."
-                )
-                logger.error(err)
-                raise err
-
-            response_buffer = await response.read()
-            image_bytes = io.BytesIO(response_buffer)
-
-    if not image_bytes:
-        err = Exception("Unknown problem occurred trying to fetch image.")
-        logger.error(err)
-        raise err
-
-    return image_bytes.read()
-
-
 @overload
 async def get_emoji_information(
     emoji: discord.PartialEmoji | discord.Emoji,
@@ -853,6 +806,53 @@ async def get_emoji_information(
         emoji_url += "?" + "&".join(arguments)
 
     return (emoji_id, emoji_name, emoji_animated, emoji_url)
+
+
+@beartype
+async def get_image_from_URL(url: str) -> bytes:
+    """Return an image stored in a URL.
+
+    Parameters
+    ----------
+    url : str
+        The URL of the image to get.
+
+    Returns
+    -------
+    bytes
+
+    Raises
+    ------
+    HTTPResponseError
+        HTTP request to fetch image returned a status other than 200.
+    InvalidURL
+        Argument was not a valid URL.
+    RuntimeError
+        Session connection failed.
+    ServerTimeoutError
+        Connection to server timed out.
+    """
+    image_bytes: io.BytesIO | None = None
+    async with aiohttp.ClientSession(
+        headers={"User-Agent": "Discord Channel Bridge Bot/1.0"}
+    ) as session:
+        async with session.get(url) as response:
+            if response.status != 200:
+                err = HTTPResponseError(
+                    f"Error in function {inspect.stack()[1][3]}(): failed to retrieve image from URL {url}. HTTP status {response.status}."
+                )
+                logger.error(err)
+                raise err
+
+            response_buffer = await response.read()
+            image_bytes = io.BytesIO(response_buffer)
+
+    if not image_bytes:
+        err = Exception("Unknown problem occurred trying to fetch image.")
+        logger.error(err)
+        raise err
+
+    return image_bytes.read()
 
 
 @beartype
