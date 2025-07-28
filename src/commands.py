@@ -252,8 +252,6 @@ async def _bridge_creation_wrapper(
     nsfw_to_sfw_bridge_confirmed : bool, optional
         If the bridge to be created would forward messages from an NSFW channel to an SFW one, this argument tracks whether the function call has already received confirmation that the user is aware of this and fine with it. It is unused otherwise. Defaults to False.
     """
-    await interaction.response.defer(thinking=True, ephemeral=True)
-
     if not nsfw_to_sfw_bridge_confirmed:
         # Check whether this is creating a bridge from a NSFW channel to an SFW one
         source_is_nsfw = (await globals.get_channel_parent(source_channel)).is_nsfw()
@@ -279,6 +277,7 @@ async def _bridge_creation_wrapper(
             await interaction.response.send_message(message, view=view, ephemeral=True)
             return
 
+    await interaction.response.defer(thinking=True, ephemeral=True)
     try:
         await create_bridges(source_channel, target_channel, direction)
     except Exception as e:
