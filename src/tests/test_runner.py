@@ -25,7 +25,7 @@ from beartype import beartype
 from tester_bot import logger
 
 sys.path.append(str(Path(__file__).parent.parent))
-import globals
+import common
 
 if TYPE_CHECKING:
     from typing import NotRequired
@@ -195,7 +195,7 @@ async def _give_or_remove_manage_webhook_perms(
         Whether to give or remove Manage Webhook permissions.
     """
     assert tester_bot.user
-    tester_bot_member = await globals.get_server_member(
+    tester_bot_member = await common.get_server_member(
         testing_server,
         tester_bot.user.id,
     )
@@ -281,25 +281,25 @@ async def create_bridge(
     :class:`~discord.Message` | None
     """
 
-    target_channel_id = globals.get_id_from_channel(target_channel)
+    target_channel_id = common.get_id_from_channel(target_channel)
 
     command = f"/bridge {target_channel_id}{(' ' + direction) if direction else ''}"
     if send_message:
-        source_channel = await globals.get_channel_from_id(
+        source_channel = await common.get_channel_from_id(
             source_channel,
             ensure_text_or_thread=True,
             bot_client=tester_bot.client,
         )
         return await source_channel.send(command)
 
-    source_channel = await globals.get_channel_from_id(
+    source_channel = await common.get_channel_from_id(
         source_channel,
         ensure_text_or_thread=True,
-        bot_client=globals.client,
+        bot_client=common.client,
     )
     message = tester_bot.FakeMessage(command, source_channel)
-    assert globals.test_app
-    if not await tester_bot.process_tester_bot_command(message, globals.test_app):
+    assert common.test_app
+    if not await tester_bot.process_tester_bot_command(message, common.test_app):
         raise Exception(f"{command} command failed to be executed")
     return None
 
@@ -441,27 +441,27 @@ async def demolish_bridges(
     :class:`~discord.Message` | None
     """
     if target_channel:
-        target_channel_id = globals.get_id_from_channel(target_channel)
+        target_channel_id = common.get_id_from_channel(target_channel)
         command = f"/demolish {target_channel_id}"
     else:
         command = f"/demolish_all{' True' if channel_and_threads else ''}"
 
     if send_message:
-        source_channel = await globals.get_channel_from_id(
+        source_channel = await common.get_channel_from_id(
             source_channel,
             ensure_text_or_thread=True,
             bot_client=tester_bot.client,
         )
         return await source_channel.send(command)
 
-    source_channel = await globals.get_channel_from_id(
+    source_channel = await common.get_channel_from_id(
         source_channel,
         ensure_text_or_thread=True,
-        bot_client=globals.client,
+        bot_client=common.client,
     )
     message = tester_bot.FakeMessage(command, source_channel)
-    assert globals.test_app
-    if not await tester_bot.process_tester_bot_command(message, globals.test_app):
+    assert common.test_app
+    if not await tester_bot.process_tester_bot_command(message, common.test_app):
         raise Exception(f"{command} command failed to be executed")
     return None
 
@@ -541,7 +541,7 @@ class TestRunner:
 
             # Register the test bot in globals
             assert self.tester_bot.user
-            globals.test_app = await self.bridge_bot.fetch_user(self.tester_bot.user.id)
+            common.test_app = await self.bridge_bot.fetch_user(self.tester_bot.user.id)
 
             # Create a role in the testing server with the necessary permissions
             global webhook_permissions_role
@@ -865,7 +865,7 @@ async def expect(
         to = [to]
 
     if in_channel:
-        in_channel = globals.get_id_from_channel(in_channel)
+        in_channel = common.get_id_from_channel(in_channel)
 
     if obj in ("next_message", "no_new_message"):
         assert in_channel
@@ -1158,4 +1158,4 @@ async def expect(
     return (obj, failure_messages)
 
 
-test_runner = TestRunner(globals.client, tester_bot.client)
+test_runner = TestRunner(common.client, tester_bot.client)

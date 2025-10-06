@@ -12,7 +12,7 @@ from sqlalchemy import or_ as sql_or
 from sqlalchemy.exc import StatementError as SQLError
 from sqlalchemy.orm import Session as SQLSession
 
-import globals
+import common
 from database import (
     DBBridge,
     DBMessageMap,
@@ -85,13 +85,13 @@ class Bridge:
         logger.debug("Creating bridge from %s to %s.", source, target)
 
         if isinstance(source, int):
-            validate_channels(source=await globals.get_channel_from_id(source))
+            validate_channels(source=await common.get_channel_from_id(source))
         if isinstance(target, int):
-            validate_channels(target=await globals.get_channel_from_id(target))
+            validate_channels(target=await common.get_channel_from_id(target))
 
         self = Bridge()
-        self._source_id = globals.get_id_from_channel(source)
-        self._target_id = globals.get_id_from_channel(target)
+        self._source_id = common.get_id_from_channel(source)
+        self._target_id = common.get_id_from_channel(target)
 
         return self
 
@@ -107,7 +107,7 @@ class Bridge:
 
     @property
     async def source_channel(self) -> discord.TextChannel | discord.Thread:
-        return await globals.get_channel_from_id(
+        return await common.get_channel_from_id(
             self.source_id,
             ensure_text_or_thread=True,
         )
@@ -119,7 +119,7 @@ class Bridge:
 
     @property
     async def target_channel(self) -> discord.TextChannel | discord.Thread:
-        return await globals.get_channel_from_id(
+        return await common.get_channel_from_id(
             self.target_id,
             ensure_text_or_thread=True,
         )
@@ -184,7 +184,7 @@ class Bridges:
             channel_id = int(channel_webhook.channel)
             webhook_id = int(channel_webhook.webhook)
 
-            channel = await globals.get_channel_from_id(channel_id)
+            channel = await common.get_channel_from_id(channel_id)
             if not channel or not isinstance(
                 channel, (discord.TextChannel, discord.Thread)
             ):
@@ -202,7 +202,7 @@ class Bridges:
                 continue
 
             try:
-                webhook = await globals.client.fetch_webhook(webhook_id)
+                webhook = await common.client.fetch_webhook(webhook_id)
             except Exception:
                 # If I have access to the channel but not the webhook I remove that channel from targets
                 invalid_channel_ids.add(channel_webhook.channel)
@@ -257,7 +257,7 @@ class Bridges:
 
             source_id_str = bridge.source
             source_id = int(source_id_str)
-            source_channel = await globals.get_channel_from_id(source_id)
+            source_channel = await common.get_channel_from_id(source_id)
             if not source_channel:
                 # If I don't have access to the source channel, delete bridges from and to it
                 logger.debug(
@@ -393,8 +393,8 @@ class Bridges:
             You do not have permissions to create or delete webhooks.
         """
         validated_channels = validate_channels(
-            source=await globals.get_channel_from_id(source),
-            target=await globals.get_channel_from_id(target),
+            source=await common.get_channel_from_id(source),
+            target=await common.get_channel_from_id(target),
         )
         source_channel = validated_channels["source"]
         target_channel = validated_channels["target"]
@@ -420,8 +420,8 @@ class Bridges:
         )
 
         # First I create the Bridge in memory
-        source_id = globals.get_id_from_channel(source)
-        target_id = globals.get_id_from_channel(target)
+        source_id = common.get_id_from_channel(source)
+        target_id = common.get_id_from_channel(target)
         if self._outbound_bridges.get(source_id) and self._outbound_bridges[
             source_id
         ].get(target_id):
@@ -636,7 +636,7 @@ class Bridges:
 
         # Now let's check that all relevant bridges exist
         if target_channel:
-            target_id = globals.get_id_from_channel(target_channel)
+            target_id = common.get_id_from_channel(target_channel)
             inbound_bridges_to_target = self._inbound_bridges.get(target_id)
             outbound_bridges_from_target = self._outbound_bridges.get(target_id)
         else:
@@ -645,7 +645,7 @@ class Bridges:
             outbound_bridges_from_target = None
 
         if source_channel:
-            source_id = globals.get_id_from_channel(source_channel)
+            source_id = common.get_id_from_channel(source_channel)
             outbound_bridges_from_source = self._outbound_bridges.get(source_id)
             if outbound_bridges_from_source and target_id:
                 bridge_source_to_target = outbound_bridges_from_source.get(target_id)
@@ -871,8 +871,8 @@ class Bridges:
         :class:`~bridge.Bridge` | None
         """
         logger.debug("Fetching one-way bridge from %s to %s.", source, target)
-        source_id = globals.get_id_from_channel(source)
-        target_id = globals.get_id_from_channel(target)
+        source_id = common.get_id_from_channel(source)
+        target_id = common.get_id_from_channel(target)
 
         if not (bridges_from_source := self._outbound_bridges.get(source_id)):
             return None
@@ -921,7 +921,7 @@ class Bridges:
         dict[int, :class:`~bridge.Bridge`] | None
         """
         logger.debug("Fetching outbound bridges from %s.", source)
-        return self._outbound_bridges.get(globals.get_id_from_channel(source))
+        return self._outbound_bridges.get(common.get_id_from_channel(source))
 
     def get_channels_with_outbound_bridges(self) -> set[int]:
         """Return a set with the IDs of all channels that have outbound bridges coming from them.
@@ -949,7 +949,7 @@ class Bridges:
         dict[int, :class:`~bridge.Bridge`] | None
         """
         logger.debug("Fetching inbound bridges to %s.", target)
-        return self._inbound_bridges.get(globals.get_id_from_channel(target))
+        return self._inbound_bridges.get(common.get_id_from_channel(target))
 
     @overload
     async def get_reachable_channels(
@@ -1075,7 +1075,7 @@ class Bridges:
         else:
             get_bridges = self.get_inbound_bridges
 
-        starting_channel_id = globals.get_id_from_channel(starting_channel)
+        starting_channel_id = common.get_id_from_channel(starting_channel)
         channel_ids_to_check: set[int] = {starting_channel_id}
         channel_ids_checked: set[int] = set()
 
@@ -1153,7 +1153,7 @@ class Webhooks:
         -------
         :class:`~discord.Webhook`
         """
-        channel_id = globals.get_id_from_channel(channel_or_id)
+        channel_id = common.get_id_from_channel(channel_or_id)
 
         if existing_webhook := self._webhooks.get(channel_id):
             # if I already have a webhook associated with this channel I'm gucci
@@ -1162,7 +1162,7 @@ class Webhooks:
         if not webhook or not webhook.channel_id:
             # Webhook wasn't given or wasn't valid
             channel = validate_channels(
-                channel=await globals.get_channel_from_id(channel_or_id)
+                channel=await common.get_channel_from_id(channel_or_id)
             )["channel"]
 
             logger.debug(
@@ -1177,7 +1177,7 @@ class Webhooks:
                 channel.id,
             )
 
-            webhook_owner = await globals.get_channel_parent(channel)
+            webhook_owner = await common.get_channel_parent(channel)
             if (webhook_id := self._webhook_by_channel.get(webhook_owner.id)) or (
                 webhook_id := self._webhook_by_parent.get(webhook_owner.id)
             ):
@@ -1225,7 +1225,7 @@ class Webhooks:
         """
         logger.debug("Fetching webhook associated with channel %s.", channel_or_id)
 
-        channel_id = globals.get_id_from_channel(channel_or_id)
+        channel_id = common.get_id_from_channel(channel_or_id)
         if (webhook_id := self._webhook_by_channel.get(channel_id)) and (
             webhook := self._webhooks.get(webhook_id)
         ):
@@ -1237,7 +1237,7 @@ class Webhooks:
             # This thread is the owner of a webhook added by a thread
             return await self.add_webhook(channel_id, webhook)
 
-        channel = await globals.get_channel_from_id(channel_or_id)
+        channel = await common.get_channel_from_id(channel_or_id)
         if (
             isinstance(channel, discord.Thread)
             and isinstance(channel.parent, discord.TextChannel)
@@ -1269,7 +1269,7 @@ class Webhooks:
         -------
         int | None
         """
-        channel_id = globals.get_id_from_channel(channel_or_id)
+        channel_id = common.get_id_from_channel(channel_or_id)
         logger.debug("Deleting channel with ID %s from list of webhooks...", channel_id)
 
         webhook_id = self._webhook_by_channel.get(channel_id)

@@ -11,7 +11,7 @@ import discord
 from beartype import beartype
 
 sys.path.append(str(Path(__file__).parent.parent))
-import globals
+import common
 from validations import setup_logger
 
 if TYPE_CHECKING:
@@ -159,7 +159,7 @@ async def on_ready():
 
 @client.event
 async def on_message(message: discord.Message):
-    if (bridge_bot_user := globals.client.user) and (
+    if (bridge_bot_user := common.client.user) and (
         (message.author.id == bridge_bot_user.id)
         or (message.application_id == bridge_bot_user.id)
     ):
@@ -488,8 +488,8 @@ async def process_tester_bot_command(
 
     # -----
     logger.debug("Tester bot sent a slash command: %s", command_and_args[0])
-    if not (command := globals.command_tree.get_command(command_and_args[0])):
-        command = globals.command_tree.get_command(
+    if not (command := common.command_tree.get_command(command_and_args[0])):
+        command = common.command_tree.get_command(
             command_and_args[0],
             guild=message.guild,
         )

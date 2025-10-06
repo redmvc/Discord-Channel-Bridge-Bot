@@ -12,19 +12,23 @@ from typing import (
 )
 
 from beartype import beartype
-from sqlalchemy import Boolean, Integer
+from sqlalchemy import (
+    Boolean,
+    Integer,
+    String,
+    UniqueConstraint,
+    UpdateBase,
+    create_engine,
+)
 from sqlalchemy import Select as SQLSelect
-from sqlalchemy import String, UniqueConstraint
 from sqlalchemy import Update as SQLUpdate
-from sqlalchemy import UpdateBase, create_engine
 from sqlalchemy import insert as other_db_insert
 from sqlalchemy.dialects import mysql, postgresql, sqlite
 from sqlalchemy.exc import StatementError as SQLError
-from sqlalchemy.orm import DeclarativeBase, Mapped
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 from sqlalchemy.orm import Session as SQLSession
-from sqlalchemy.orm import mapped_column, sessionmaker
 
-from globals import run_retries, settings
+from common import run_retries, settings
 from validations import logger
 
 if TYPE_CHECKING:

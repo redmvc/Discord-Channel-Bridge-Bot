@@ -18,8 +18,8 @@ from sqlalchemy.orm import Session as SQLSession
 from sqlalchemy.sql import func
 
 import commands
+import common
 import emoji_hash_map
-import globals
 from bridge import Bridge, bridges
 from database import (
     DBAppWhitelist,
@@ -48,7 +48,7 @@ class ThreadSplat(TypedDict, total=False):
     thread: discord.Thread
 
 
-@globals.client.event
+@common.client.event
 async def on_ready():
     """This function is called when the client is done preparing the data received from Discord. Usually after login is successful and the Client.guilds and co. are filled up.
 
@@ -63,15 +63,15 @@ async def on_ready():
     :class:`~discord.Forbidden`
         You do not have permissions to create or delete webhooks for some of the channels in existing Bridges.
     """
-    if globals.is_ready:
+    if common.is_ready:
         return
 
     logger.info("Client successfully connected. Running initial loading procedures...")
 
     await setup_bot()
 
-    globals.is_connected = True
-    globals.is_ready = True
+    common.is_connected = True
+    common.is_ready = True
     logger.info("Bot is ready.")
 
 
@@ -150,7 +150,7 @@ async def setup_bot(*, session: SQLSession):
             )
 
             if channel_id not in accessible_channels:
-                channel = await globals.get_channel_from_id(channel_id)
+                channel = await common.get_channel_from_id(channel_id)
 
                 if channel:
                     accessible_channels.add(channel_id)
@@ -162,10 +162,10 @@ async def setup_bot(*, session: SQLSession):
                     inaccessible_channels.add(channel_id)
                     continue
 
-            if not globals.per_channel_whitelist.get(channel_id):
-                globals.per_channel_whitelist[channel_id] = set()
+            if not common.per_channel_whitelist.get(channel_id):
+                common.per_channel_whitelist[channel_id] = set()
 
-            globals.per_channel_whitelist[channel_id].add(
+            common.per_channel_whitelist[channel_id].add(
                 int(whitelisted_app.application)
             )
 
@@ -185,7 +185,7 @@ async def setup_bot(*, session: SQLSession):
         auto_thread_query_result: ScalarResult[DBAutoBridgeThreadChannels] = (
             session.scalars(select_auto_bridge_thread_channels)
         )
-        globals.auto_bridge_thread_channels = globals.auto_bridge_thread_channels.union(
+        common.auto_bridge_thread_channels = common.auto_bridge_thread_channels.union(
             {
                 int(auto_bridge_thread_channel.channel)
                 for auto_bridge_thread_channel in auto_thread_query_result
@@ -193,13 +193,13 @@ async def setup_bot(*, session: SQLSession):
         )
         logger.info("Auto-thread-bridging channels loaded.")
     except Exception as e:
-        await globals.client.close()
+        await common.client.close()
         logger.error("An error occurred when performing bot startup procedures: %s", e)
         raise
 
     # -----
     logger.info("Loading emoji server...")
-    emoji_server_id_str = globals.settings.get("emoji_server_id")
+    emoji_server_id_str = common.settings.get("emoji_server_id")
     try:
         if emoji_server_id_str:
             emoji_server_id = int(emoji_server_id_str)
@@ -212,10 +212,10 @@ async def setup_bot(*, session: SQLSession):
         emoji_server_id = None
 
     if emoji_server_id:
-        emoji_server = globals.client.get_guild(emoji_server_id)
+        emoji_server = common.client.get_guild(emoji_server_id)
         if not emoji_server:
             try:
-                emoji_server = await globals.client.fetch_guild(emoji_server_id)
+                emoji_server = await common.client.fetch_guild(emoji_server_id)
             except Exception:
                 emoji_server = None
 
@@ -231,23 +231,23 @@ async def setup_bot(*, session: SQLSession):
                 "I don't have Create Expressions and Manage Expressions permissions in the emoji server."
             )
         else:
-            globals.emoji_server = emoji_server
+            common.emoji_server = emoji_server
 
         logger.info("Emoji server loaded.")
     else:
         logger.info("Emoji server ID not set.")
 
     logger.info("Syncing command tree...")
-    sync_command_tree = [globals.command_tree.sync()]
-    if globals.emoji_server:
-        sync_command_tree.append(globals.command_tree.sync(guild=globals.emoji_server))
+    sync_command_tree = [common.command_tree.sync()]
+    if common.emoji_server:
+        sync_command_tree.append(common.command_tree.sync(guild=common.emoji_server))
     await asyncio.gather(*sync_command_tree)
     logger.info("Command tree synced.")
 
-    if (connected_servers := globals.client.guilds) and len(connected_servers) > 0:
-        print(f"{globals.client.user} is connected to the following servers:\n")
+    if (connected_servers := common.client.guilds) and len(connected_servers) > 0:
+        print(f"{common.client.user} is connected to the following servers:\n")
         connected_servers_listed: list[str] = []
-        for server in globals.client.guilds:
+        for server in common.client.guilds:
             server_id_str = f"{server.name}(id: {server.id})"
             print(server_id_str)
             connected_servers_listed.append(server_id_str)
@@ -261,7 +261,7 @@ async def setup_bot(*, session: SQLSession):
         logger.info("Bot is not connected to any servers.")
 
 
-@globals.client.event
+@common.client.event
 async def on_typing(
     channel: discord.abc.Messageable,
     user: discord.User | discord.Member,
@@ -277,12 +277,12 @@ async def on_typing(
         The user that is typing in the channel.
     """
     if not (
-        globals.is_ready
-        and globals.is_connected
-        and globals.rate_limiter.has_capacity()
+        common.is_ready
+        and common.is_connected
+        and common.rate_limiter.has_capacity()
         and isinstance(channel, (discord.TextChannel, discord.Thread))
-        and globals.client.user
-        and globals.client.user.id != user.id
+        and common.client.user
+        and common.client.user.id != user.id
     ):
         return
 
@@ -297,7 +297,7 @@ async def on_typing(
         except Exception:
             pass
 
-    async with globals.rate_limiter:
+    async with common.rate_limiter:
         channels_typing: list["Coroutine[Any, Any, None]"] = []
         for _, bridge in outbound_bridges.items():
             channels_typing.append(type_through_bridge(bridge))
@@ -305,7 +305,7 @@ async def on_typing(
         await asyncio.gather(*channels_typing)
 
 
-@globals.client.event
+@common.client.event
 async def on_message(message: discord.Message):
     """This function is called when a Message is created and sent. Requires :class:`~discord.Intents.messages` to be enabled.
 
@@ -325,7 +325,7 @@ async def on_message(message: discord.Message):
     ValueError
         The length of embeds was invalid, there was no token associated with one of the webhooks or ephemeral was passed with the improper webhook type or there was no state attached with one of the webhooks when giving it a view.
     """
-    lock = globals.message_lock[message.id]
+    lock = common.message_lock[message.id]
     async with lock:
         # I'll define each validity check for ease of reading
         invalid_channel_type = not isinstance(
@@ -339,7 +339,7 @@ async def on_message(message: discord.Message):
 
         author_id = message.author.id
         application_id = message.application_id
-        client_application_id = globals.client.application_id
+        client_application_id = common.client.application_id
         message_from_self = (author_id == client_application_id) or (
             application_id and (application_id == client_application_id)
         )
@@ -347,7 +347,7 @@ async def on_message(message: discord.Message):
             (
                 (
                     not (
-                        local_whitelist := globals.per_channel_whitelist.get(
+                        local_whitelist := common.per_channel_whitelist.get(
                             message.channel.id
                         )
                     )
@@ -355,7 +355,7 @@ async def on_message(message: discord.Message):
                 or (application_id not in local_whitelist)
             )
             and (
-                (not (global_whitelist := globals.settings.get("whitelisted_apps")))
+                (not (global_whitelist := common.settings.get("whitelisted_apps")))
                 or (application_id not in global_whitelist)
             )
         )
@@ -365,12 +365,12 @@ async def on_message(message: discord.Message):
             or invalid_message_type
             or message_from_self
             or message_from_non_whitelisted_app
-            or (not await globals.wait_until_ready())
+            or (not await common.wait_until_ready())
         ):
             return
 
         if (
-            (test_app := globals.test_app)
+            (test_app := common.test_app)
             and (
                 ((test_app_id := test_app.id) == application_id)
                 or (test_app_id == author_id)
@@ -378,7 +378,7 @@ async def on_message(message: discord.Message):
             and message.content.strip().startswith("/")
         ):
             # Test app sending a slash command
-            if await process_tester_bot_command(message, globals.test_app):
+            if await process_tester_bot_command(message, common.test_app):
                 return
 
         message_channel_id = message.channel.id
@@ -487,7 +487,7 @@ async def bridge_message_helper(
                 original_message_channel = original_message.channel
             elif message_reference_id:
                 # Try to find the original message, if it's not resolved
-                original_message_channel = await globals.get_channel_from_id(
+                original_message_channel = await common.get_channel_from_id(
                     message_reference.channel_id
                 )
                 if isinstance(
@@ -570,7 +570,7 @@ async def bridge_message_helper(
                 replied_to_message = resolved_message_reference
             if isinstance(replied_to_message, discord.Message):
                 replied_to_content = await replace_missing_emoji(
-                    globals.truncate(
+                    common.truncate(
                         discord.utils.remove_markdown(replied_to_message.clean_content),
                         50,
                     ),
@@ -600,7 +600,7 @@ async def bridge_message_helper(
 
                 try:
                     # Try to find the author of the original message
-                    reply_source_channel = await globals.get_channel_from_id(
+                    reply_source_channel = await common.get_channel_from_id(
                         reply_source_channel_id,
                         ensure_text_or_thread=True,
                     )
@@ -631,7 +631,7 @@ async def bridge_message_helper(
         # Check who, if anyone, is pinged in the message
         people_to_ping = {m.id for m in message.mentions}
         # Remove everyone who was already successfully pinged in the message in the original channel
-        message_channel = await globals.get_channel_parent(message.channel)
+        message_channel = await common.get_channel_parent(message.channel)
         people_to_ping.difference_update(
             {member.id for member in message_channel.members}
         )
@@ -648,7 +648,7 @@ async def bridge_message_helper(
             if not isinstance(webhook_channel, discord.TextChannel):
                 continue
 
-            target_channel = await globals.get_channel_from_id(
+            target_channel = await common.get_channel_from_id(
                 target_id,
                 ensure_text_or_thread=True,
             )
@@ -825,7 +825,7 @@ async def bridge_message_to_target_channel(
     )
 
     # Lock the channel to preserve message ordering (particularly when doing message forwards)
-    lock = globals.channel_lock[target_channel.id]
+    lock = common.channel_lock[target_channel.id]
     async with lock:
         return await _bridge_message_to_target_channel(
             sent_message,
@@ -887,7 +887,7 @@ async def _bridge_message_to_target_channel(
         )
 
     # Try to find whether the user who sent this message is on the other side of the bridge and if so what their name and avatar would be
-    bridged_member = await globals.get_channel_member(
+    bridged_member = await common.get_channel_member(
         webhook_channel,
         sent_message.author.id,
     )
@@ -923,7 +923,7 @@ async def _bridge_message_to_target_channel(
                 # Try to fetch the replied to content if it's not available
                 if not replied_to_content:
                     replied_to_content = await replace_missing_emoji(
-                        globals.truncate(
+                        common.truncate(
                             discord.utils.remove_markdown(
                                 message_replied_to.clean_content
                             ),
@@ -1048,7 +1048,7 @@ async def _bridge_message_to_target_channel(
             ]
 
         # Message is a forward so I'll send a short message saying who sent it then forward it myself
-        target_channel_parent = await globals.get_channel_parent(target_channel)
+        target_channel_parent = await common.get_channel_parent(target_channel)
         if not target_channel_parent.nsfw and forwarded_message_channel_is_nsfw:
             # Messages can't be forwarded from NSFW channels to SFW channels
             sent_message = await target_channel.send(
@@ -1113,7 +1113,7 @@ async def _bridge_message_to_target_channel(
         return None
 
 
-@globals.client.event
+@common.client.event
 async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
     """This function is called when a message is edited. Unlike `on_message_edit()`, this is called regardless of the state of the internal message cache.
 
@@ -1133,17 +1133,17 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
     """
     message_id = payload.message_id
 
-    lock = globals.message_lock[message_id]
+    lock = common.message_lock[message_id]
     async with lock:
         # If by the time this gets unlocked it was deleted from the dictionary, the message was deleted
-        message_was_deleted = not globals.message_lock[message_id]
+        message_was_deleted = not common.message_lock[message_id]
         contentless_edit = not (updated_message_content := payload.data.get("content"))
 
         channel_id = payload.channel_id
         if (
             message_was_deleted
             or contentless_edit
-            or (not await globals.wait_until_ready())
+            or (not await common.wait_until_ready())
             or (not bridges.get_outbound_bridges(channel_id))
         ):
             return
@@ -1264,7 +1264,7 @@ async def edit_message_helper(
 
         for bridged_channel_id, webhook in reachable_channels.items():
             # Iterate through the target channels and edit the bridged messages
-            bridged_channel = await globals.get_channel_from_id(bridged_channel_id)
+            bridged_channel = await common.get_channel_from_id(bridged_channel_id)
             if not isinstance(
                 bridged_channel,
                 (discord.TextChannel, discord.Thread),
@@ -1321,7 +1321,7 @@ async def edit_message_helper(
                 # The webhook returned by the call to get_reachable_channels() may not be the same as the one used to post the message
                 if (message_webhook_id := int(message_row.webhook)) != webhook.id:
                     try:
-                        webhook = await globals.client.fetch_webhook(message_webhook_id)
+                        webhook = await common.client.fetch_webhook(message_webhook_id)
                     except Exception:
                         break
 
@@ -1484,7 +1484,7 @@ async def replace_missing_emoji(
     :class:`~discord.ServerTimeoutError`
         Connection to server timed out.
     """
-    if not globals.emoji_server:
+    if not common.emoji_server:
         # If we don't have an emoji server to store our own versions of emoji in then there's nothing we can do
         return message_content
 
@@ -1498,7 +1498,7 @@ async def replace_missing_emoji(
     emoji_to_replace: dict[str, str] = {}
     for emoji_name, emoji_id_str in message_emoji:
         emoji_id = int(emoji_id_str)
-        emoji = globals.client.get_emoji(emoji_id)
+        emoji = common.client.get_emoji(emoji_id)
         if emoji and emoji.is_usable():
             # I already have access to this emoji so it's fine
             continue
@@ -1606,7 +1606,7 @@ async def replace_discord_links(
     )
 
     # If the current channel is actually a thread, get reachable channel IDs from its parent
-    parent_channel = await globals.get_channel_parent(channel)
+    parent_channel = await common.get_channel_parent(channel)
     if isinstance(channel, discord.Thread):
         parent_channel_id = parent_channel.id
         channel_ids_to_check.add(str(parent_channel_id))
@@ -1667,7 +1667,7 @@ async def replace_discord_links(
     return content
 
 
-@globals.client.event
+@common.client.event
 async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
     """This function is called when a message is deleted. Unlike `on_message_delete()`, this is called regardless of the message being in the internal message cache or not.
 
@@ -1687,22 +1687,22 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
     """
     message_id = payload.message_id
 
-    lock = globals.message_lock[message_id]
+    lock = common.message_lock[message_id]
     async with lock:
         # If by the time this gets unlocked it was deleted from the dictionary, the message was deleted
-        message_was_deleted = not globals.message_lock.get(message_id)
+        message_was_deleted = not common.message_lock.get(message_id)
 
         channel_id = payload.channel_id
         if (
             message_was_deleted
-            or (not await globals.wait_until_ready())
+            or (not await common.wait_until_ready())
             or (not bridges.get_outbound_bridges(channel_id))
         ):
             return
 
         await delete_message_helper(message_id, channel_id)
 
-        del globals.message_lock[message_id]
+        del common.message_lock[message_id]
 
 
 @overload
@@ -1789,7 +1789,7 @@ async def delete_message_helper(
             if target_channel_id not in reachable_channels:
                 continue
 
-            bridged_channel = await globals.get_channel_from_id(target_channel_id)
+            bridged_channel = await common.get_channel_from_id(target_channel_id)
             if not isinstance(
                 bridged_channel,
                 (discord.TextChannel, discord.Thread),
@@ -1820,7 +1820,7 @@ async def delete_message_helper(
                             webhook = reachable_channels[target_channel_id]
                         else:
                             try:
-                                webhook = await globals.client.fetch_webhook(
+                                webhook = await common.client.fetch_webhook(
                                     message_webhook_id
                                 )
                             except Exception:
@@ -1853,7 +1853,7 @@ async def delete_message_helper(
                                 raise
                     elif message_row.forward_header_message:
                         # If the message doesn't have a webhook, it's forwarded
-                        partial_target_channel = globals.client.get_partial_messageable(
+                        partial_target_channel = common.client.get_partial_messageable(
                             target_channel_id
                         )
                         await partial_target_channel.get_partial_message(
@@ -1909,7 +1909,7 @@ async def delete_message_helper(
     logger.debug("Successfully bridged deletion of message with ID %s.", message_id)
 
 
-@globals.client.event
+@common.client.event
 async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
     """This function is called when a message has a reaction added. Unlike `on_reaction_add()`, this is called regardless of the state of the internal message cache.
 
@@ -1929,13 +1929,13 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
     :class:`~discord.ServerTimeoutError`
         Connection to server timed out.
     """
-    own_reaction = (client_user := globals.client.user) and (
+    own_reaction = (client_user := common.client.user) and (
         payload.user_id == client_user.id
     )
 
     channel_id = payload.channel_id
     if (
-        (not await globals.wait_until_ready())
+        (not await common.wait_until_ready())
         or own_reaction
         or (not bridges.get_outbound_bridges(channel_id))
     ):
@@ -2197,7 +2197,7 @@ async def bridge_reaction_add(
         if isinstance(source_message_map, DBMessageMap):
             # This message was bridged, so find the original one, react to it, and then find any other bridged messages from it
             try:
-                source_channel = await globals.get_channel_from_id(
+                source_channel = await common.get_channel_from_id(
                     int(source_message_map.source_channel),
                     ensure_text_or_thread=True,
                 )
@@ -2258,7 +2258,7 @@ async def bridge_reaction_add(
             lambda: session.scalars(select_message_map)
         )
         for message_row in bridged_messages_query_result:
-            bridged_channel = await globals.get_channel_from_id(
+            bridged_channel = await common.get_channel_from_id(
                 int(message_row.target_channel)
             )
             if not isinstance(
@@ -2305,7 +2305,7 @@ async def bridge_reaction_add(
     logger.debug("Reaction bridged.")
 
 
-@globals.client.event
+@common.client.event
 async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
     """This function is called when a message has a reaction removed. Unlike `on_reaction_remove()`, this is called regardless of the state of the internal message cache.
 
@@ -2315,19 +2315,19 @@ async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
         The raw event payload data.
     """
     client_user_id = 0
-    own_reaction = (client_user := globals.client.user) and (
+    own_reaction = (client_user := common.client.user) and (
         (client_user_id := client_user.id) == payload.user_id
     )
 
     if (
-        (not await globals.wait_until_ready())
+        (not await common.wait_until_ready())
         or own_reaction
         or (not bridges.get_outbound_bridges(channel_id := payload.channel_id))
     ):
         return
 
     try:
-        channel = await globals.get_channel_from_id(
+        channel = await common.get_channel_from_id(
             channel_id,
             ensure_text_or_thread=True,
         )
@@ -2371,7 +2371,7 @@ async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
     )
 
 
-@globals.client.event
+@common.client.event
 async def on_raw_reaction_clear_emoji(payload: discord.RawReactionClearEmojiEvent):
     """This function is called when a message has a specific reaction removed it. Unlike `on_reaction_clear_emoji()`, this is called regardless of the state of the internal message cache.
 
@@ -2380,7 +2380,7 @@ async def on_raw_reaction_clear_emoji(payload: discord.RawReactionClearEmojiEven
     payload : :class:`~discord.RawReactionClearEmojiEvent`
         The raw event payload data.
     """
-    if (not await globals.wait_until_ready()) or (
+    if (not await common.wait_until_ready()) or (
         not bridges.get_outbound_bridges(payload.channel_id)
     ):
         return
@@ -2403,7 +2403,7 @@ async def on_raw_reaction_clear_emoji(payload: discord.RawReactionClearEmojiEven
     )
 
 
-@globals.client.event
+@common.client.event
 async def on_raw_reaction_clear(payload: discord.RawReactionClearEvent):
     """Bridge reaction removal, if necessary.
 
@@ -2414,7 +2414,7 @@ async def on_raw_reaction_clear(payload: discord.RawReactionClearEvent):
     payload : :class:`~discord.RawReactionClearEvent`
         The raw event payload data.
     """
-    if (not await globals.wait_until_ready()) or (
+    if (not await common.wait_until_ready()) or (
         not bridges.get_outbound_bridges(payload.channel_id)
     ):
         return
@@ -2583,7 +2583,7 @@ async def unreact(
                     return target_emoji_name
             elif target_emoji_id:
                 try:
-                    return globals.client.get_emoji(int(target_emoji_id))
+                    return common.client.get_emoji(int(target_emoji_id))
                 except ValueError:
                     return None
             else:
@@ -2595,7 +2595,7 @@ async def unreact(
             target_emoji_id: str | None,
             target_emoji_name: str | None,
         ):
-            target_channel = await globals.get_channel_from_id(int(target_channel_id))
+            target_channel = await common.get_channel_from_id(int(target_channel_id))
             if not isinstance(
                 target_channel,
                 (discord.TextChannel, discord.Thread),
@@ -2648,7 +2648,7 @@ async def unreact(
         raise
 
 
-@globals.client.event
+@common.client.event
 async def on_thread_create(thread: discord.Thread):
     """This function is called whenever a thread is created.
 
@@ -2658,14 +2658,14 @@ async def on_thread_create(thread: discord.Thread):
         The thread that was created.
     """
     # Bridge a thread from a channel that has auto_bridge_threads enabled
-    if not await globals.wait_until_ready():
+    if not await common.wait_until_ready():
         return
-    assert (bot_user := globals.client.user)
+    assert (bot_user := common.client.user)
 
     parent_channel = thread.parent
     thread_is_not_off_text_channel = not isinstance(parent_channel, discord.TextChannel)
     parent_not_in_auto_bridge = parent_channel and (
-        parent_channel.id not in globals.auto_bridge_thread_channels
+        parent_channel.id not in common.auto_bridge_thread_channels
     )
 
     thread_created_by_self = thread.owner_id and (thread.owner_id == bot_user.id)
@@ -2730,7 +2730,7 @@ async def auto_bridge_thread(thread: discord.Thread, *, session: SQLSession):
     # The message that was used to create the thread will need to be bridged, as the bridge didn't exist at the time
     last_message = thread.last_message
     if not last_message or last_message.content == "":
-        refreshed_thread = await globals.get_channel_from_id(thread.id)
+        refreshed_thread = await common.get_channel_from_id(thread.id)
         if isinstance(refreshed_thread, discord.Thread):
             last_message = refreshed_thread.last_message
     if last_message and last_message.content != "":
@@ -2743,7 +2743,7 @@ async def auto_bridge_thread(thread: discord.Thread, *, session: SQLSession):
     logger.debug("Thread with ID %s successfully bridged.", thread.id)
 
 
-@globals.client.event
+@common.client.event
 async def on_guild_join(server: discord.Guild):
     joined_server_msg = f"Just joined server '{server.name}'."
     logger.info(f"{joined_server_msg} Hashing emoji...")
@@ -2759,27 +2759,27 @@ async def on_guild_join(server: discord.Guild):
         raise
 
 
-@globals.client.event
+@common.client.event
 async def on_guild_remove(server: discord.Guild):
     left_server_msg = f"Just left server '{server.name}'."
     logger.info(left_server_msg)
     print(left_server_msg)
 
 
-@globals.client.event
+@common.client.event
 async def on_disconnect():
     """Mark the bot as disconnected."""
     logger.info("Bot has disconnected.")
-    globals.is_connected = False
+    common.is_connected = False
 
 
-@globals.client.event
+@common.client.event
 async def on_connect():
     logger.info("Bot has connected.")
     await reconnect()
 
 
-@globals.client.event
+@common.client.event
 async def on_resumed():
     logger.info("Bot has reconnected.")
     await reconnect()
@@ -2787,10 +2787,10 @@ async def on_resumed():
 
 async def reconnect():
     """Mark the bot as connected and try to check for new messages that haven't been bridged."""
-    if (not globals.is_ready) or globals.is_connected:
+    if (not common.is_ready) or common.is_connected:
         return
 
-    globals.is_connected = True
+    common.is_connected = True
 
     # Find all channels that have outbound bridges.
     if len(bridges.get_channels_with_outbound_bridges()) == 0:
@@ -2855,7 +2855,7 @@ async def bridge_unbridged_messages(*, session: SQLSession):
         )
 
         try:
-            channel = await globals.get_channel_from_id(
+            channel = await common.get_channel_from_id(
                 channel_id,
                 ensure_text_or_thread=True,
             )
@@ -2937,4 +2937,4 @@ def register_events():
         on_resumed,
     ]
     for event in events:
-        globals.client.event(event)
+        common.client.event(event)

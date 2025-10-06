@@ -11,7 +11,7 @@ from sqlalchemy import UpdateBase
 from sqlalchemy import not_ as sql_not
 from sqlalchemy.orm import Session as SQLSession
 
-import globals
+import common
 from database import DBEmoji, sql_command, sql_retry, sql_upsert
 from validations import ArgumentError, logger
 
@@ -63,12 +63,12 @@ class EmojiHashMap:
                 emoji_hash = row.image_hash
 
                 emoji_actually_accessible = (
-                    emoji := globals.client.get_emoji(emoji_id)
+                    emoji := common.client.get_emoji(emoji_id)
                 ) and emoji.is_usable()
                 if (
                     row.server_id
                     and (server_id := int(row.server_id))
-                    and globals.client.get_guild(server_id)
+                    and common.client.get_guild(server_id)
                     and not emoji_actually_accessible
                 ):
                     # Emoji isn't accessible despite me being in its guild, it was probably deleted
@@ -134,11 +134,11 @@ class EmojiHashMap:
         if not is_internal and server_id:
             server_id = int(server_id)
             if (
-                emoji_server_id := globals.settings.get("emoji_server_id")
+                emoji_server_id := common.settings.get("emoji_server_id")
             ) and server_id == int(emoji_server_id):
                 is_internal = True
                 accessible = True
-            elif globals.client.get_guild(server_id):
+            elif common.client.get_guild(server_id):
                 accessible = True
 
         emoji_id = int(emoji_id)
@@ -146,7 +146,7 @@ class EmojiHashMap:
         self._emoji_to_hash[emoji_id] = image_hash
         if accessible is None:
             accessible = (
-                emoji := globals.client.get_emoji(emoji_id)
+                emoji := common.client.get_emoji(emoji_id)
             ) and emoji.is_usable()
 
         if image_hash not in self._hash_to_emoji:
@@ -254,7 +254,7 @@ class EmojiHashMap:
             emoji_name,
             emoji_animated_inferred,
             emoji_url,
-        ) = await globals.get_emoji_information(emoji, emoji_id, emoji_name)
+        ) = await common.get_emoji_information(emoji, emoji_id, emoji_name)
         logger.debug("Adding emoji with ID %s to database...", emoji_id)
 
         if emoji_animated is None:
@@ -263,11 +263,11 @@ class EmojiHashMap:
         if not image_hash:
             if not image:
                 logger.debug("Getting image for emoji with ID %s from URL...", emoji_id)
-                image = await globals.get_image_from_URL(emoji_url)
+                image = await common.get_image_from_URL(emoji_url)
                 logger.debug(
                     "Image for emoji with ID %s successfully loaded from URL.", emoji_id
                 )
-            image_hash = globals.hash_image(image)
+            image_hash = common.hash_image(image)
 
         upsert_emoji = await self.upsert_emoji(
             emoji_id=emoji_id,
@@ -330,7 +330,7 @@ class EmojiHashMap:
         """
         logger.debug("Adding %s to hash map.", emoji if emoji else emoji_id)
         if not emoji_id or not image_hash:
-            emoji_id, emoji_name, _, emoji_url = await globals.get_emoji_information(
+            emoji_id, emoji_name, _, emoji_url = await common.get_emoji_information(
                 emoji,
                 emoji_id,
                 emoji_name,
@@ -340,17 +340,17 @@ class EmojiHashMap:
                     logger.debug(
                         "Getting image for emoji with ID %s from URL...", emoji_id
                     )
-                    image = await globals.get_image_from_URL(emoji_url)
+                    image = await common.get_image_from_URL(emoji_url)
                     logger.debug(
                         "Image for emoji with ID %s successfully loaded from URL.",
                         emoji_id,
                     )
-                image_hash = globals.hash_image(image)
+                image_hash = common.hash_image(image)
         else:
             emoji_id = int(emoji_id)
 
         if is_internal:
-            assert (emoji_server_id_raw := globals.settings.get("emoji_server_id"))
+            assert (emoji_server_id_raw := common.settings.get("emoji_server_id"))
             emoji_server_id = int(emoji_server_id_raw)
 
         self._add_emoji_to_map(
@@ -582,7 +582,7 @@ class EmojiHashMap:
             Connection to server timed out.
         """
         if server_id:
-            server = globals.client.get_guild(server_id)
+            server = common.client.get_guild(server_id)
             if not server:
                 raise ValueError("Bot is not in server.")
 
@@ -590,7 +590,7 @@ class EmojiHashMap:
             logger.info("Loading emoji from server %s into hash map...", server.name)
             ending_info_message = "Emoji from server %s loaded."
         else:
-            servers = globals.client.guilds
+            servers = common.client.guilds
             logger.info("Loading emoji from all available servers into hash map...")
             ending_info_message = "Emoji from all available servers loaded."
 
@@ -601,8 +601,8 @@ class EmojiHashMap:
         ):
             await self.delete_emoji(emoji.id)
 
-            image = await globals.get_emoji_image(emoji)
-            image_hash = globals.hash_image(image)
+            image = await common.get_emoji_image(emoji)
+            image_hash = common.hash_image(image)
             self._add_emoji_to_map(
                 emoji.id,
                 image_hash,
@@ -625,8 +625,7 @@ class EmojiHashMap:
             update_emoji_async: list["Coroutine[Any, Any, UpdateBase]"] = []
 
             is_internal = (
-                globals.emoji_server is not None
-                and server.id == globals.emoji_server.id
+                common.emoji_server is not None and server.id == common.emoji_server.id
             )
             for emoji in server.emojis:
                 update_emoji_async.append(update_emoji(server.id, is_internal, emoji))
@@ -689,9 +688,9 @@ class EmojiHashMap:
         ServerTimeoutError
             Connection to server to fetch image from URL timed out.
         """
-        if not globals.emoji_server:
+        if not common.emoji_server:
             return None
-        emoji_server_id = globals.emoji_server.id
+        emoji_server_id = common.emoji_server.id
 
         if not emoji_image:
             logger.debug(
@@ -704,13 +703,13 @@ class EmojiHashMap:
                 emoji_to_copy_name,
                 _,
                 emoji_to_copy_url,
-            ) = await globals.get_emoji_information(
+            ) = await common.get_emoji_information(
                 emoji_to_copy,
                 emoji_to_copy_id,
                 emoji_to_copy_name,
             )
 
-            emoji_image = await globals.get_image_from_URL(emoji_to_copy_url)
+            emoji_image = await common.get_image_from_URL(emoji_to_copy_url)
         else:
             if not emoji_to_copy_name:
                 raise ArgumentError(
@@ -720,11 +719,11 @@ class EmojiHashMap:
             logger.debug("Inserting emoji from image directly into emoji server.")
 
         if not emoji_image_hash:
-            emoji_image_hash = globals.hash_image(emoji_image)
+            emoji_image_hash = common.hash_image(emoji_image)
 
         emoji_to_delete_id = None
         try:
-            emoji = await globals.emoji_server.create_custom_emoji(
+            emoji = await common.emoji_server.create_custom_emoji(
                 name=emoji_to_copy_name,
                 image=emoji_image,
                 reason="Bridging reaction.",
@@ -733,7 +732,7 @@ class EmojiHashMap:
             logger.warning("Emoji server permissions not set correctly.")
             raise
         except discord.HTTPException:
-            loaded_emojis = await globals.emoji_server.fetch_emojis()
+            loaded_emojis = await common.emoji_server.fetch_emojis()
             if len(loaded_emojis) < 50:
                 # Something weird happened, the error was not due to a full server
                 raise
@@ -747,7 +746,7 @@ class EmojiHashMap:
             await emoji_to_delete.delete()
 
             try:
-                emoji = await globals.emoji_server.create_custom_emoji(
+                emoji = await common.emoji_server.create_custom_emoji(
                     name=emoji_to_copy_name,
                     image=emoji_image,
                     reason="Bridging reaction.",
@@ -880,13 +879,13 @@ class EmojiHashMap:
             external_emoji_name,
             external_emoji_animated,
             _,
-        ) = await globals.get_emoji_information(
+        ) = await common.get_emoji_information(
             external_emoji,
             external_emoji_id,
             external_emoji_name,
         )
 
-        full_emoji = globals.client.get_emoji(external_emoji_id)
+        full_emoji = common.client.get_emoji(external_emoji_id)
         if full_emoji and full_emoji.guild:
             external_emoji_server_id = full_emoji.guild_id
         else:
@@ -894,10 +893,10 @@ class EmojiHashMap:
 
         try:
             if not image_hash:
-                image = await globals.get_emoji_image(
+                image = await common.get_emoji_image(
                     external_emoji or full_emoji or internal_emoji
                 )
-                image_hash = globals.hash_image(image)
+                image_hash = common.hash_image(image)
 
             external_emoji_accessible = full_emoji.is_usable() if full_emoji else False
             await self.add_emoji(
@@ -1160,20 +1159,20 @@ class EmojiHashMap:
 
         if (
             not skip_self
-            and (emoji := globals.client.get_emoji(emoji_id))
+            and (emoji := common.client.get_emoji(emoji_id))
             and emoji.is_usable()
         ):
             return emoji
 
         if (internal_emoji_id := self.get_internal_equivalent(emoji_id)) and (
-            emoji := globals.client.get_emoji(internal_emoji_id)
+            emoji := common.client.get_emoji(internal_emoji_id)
         ):
             return emoji
 
         if matching_emoji_ids := self.get_matches(emoji_id):
             for matching_emoji_id in matching_emoji_ids:
                 if (
-                    emoji := globals.client.get_emoji(matching_emoji_id)
+                    emoji := common.client.get_emoji(matching_emoji_id)
                 ) and emoji.is_usable():
                     return emoji
 
@@ -1414,7 +1413,7 @@ class EmojiHashMap:
             "Ensuring that emoji %s is in hash map.", emoji if emoji else emoji_id
         )
 
-        emoji_id, emoji_name, _, _ = await globals.get_emoji_information(
+        emoji_id, emoji_name, _, _ = await common.get_emoji_information(
             emoji,
             emoji_id,
             emoji_name,
@@ -1423,7 +1422,7 @@ class EmojiHashMap:
         if already_existing_hash := self._emoji_to_hash.get(emoji_id):
             return already_existing_hash
 
-        if (emoji := globals.client.get_emoji(emoji_id)) and emoji.is_usable():
+        if (emoji := common.client.get_emoji(emoji_id)) and emoji.is_usable():
             accessible = True
         else:
             accessible = False
@@ -1475,7 +1474,7 @@ class EmojiHashMap:
         if mapped_emoji := self.get_accessible_emoji(emoji.id):
             # If there is an emoji I have access to that matches this one, return it
             return str(mapped_emoji)
-        elif globals.emoji_server:
+        elif common.emoji_server:
             # Try to copy this emoji into my emoji server
             if isinstance(emoji, discord.PartialEmoji):
                 copied_emoji = await self.copy_emoji_into_server(

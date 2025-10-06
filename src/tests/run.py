@@ -3,16 +3,16 @@ import traceback
 from types import TracebackType
 from typing import Any
 
+import test_cases.auto_bridge_threads  # noqa: F401
+import test_cases.bridge_thread  # noqa: F401
+import test_cases.bridging_replies  # noqa: F401
 import test_cases.creating_bridges  # noqa: F401
 import test_cases.demolishing_bridges  # noqa: F401
-import test_cases.bridge_thread  # noqa: F401
-import test_cases.auto_bridge_threads  # noqa: F401
-import test_cases.bridging_replies  # noqa: F401
 import test_runner
 import tester_bot
 from tester_bot import start_client as start_tester_bot
 
-import globals
+import common
 from main import start_client as start_bridge_bot
 
 
@@ -21,12 +21,12 @@ class Bots:
         self.running_bridge_bot_client_task = asyncio.create_task(
             start_bridge_bot(False)
         )
-        self.bridge_bot_client = globals.client
+        self.bridge_bot_client = common.client
 
         self.running_tester_bot_client_task = asyncio.create_task(start_tester_bot())
         self.tester_bot_client = tester_bot.client
 
-        await asyncio.gather(globals.wait_until_ready(), tester_bot.wait_until_ready())
+        await asyncio.gather(common.wait_until_ready(), tester_bot.wait_until_ready())
         return self
 
     async def __aexit__(
