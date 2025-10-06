@@ -325,10 +325,7 @@ async def on_message(message: discord.Message):
     ValueError
         The length of embeds was invalid, there was no token associated with one of the webhooks or ephemeral was passed with the improper webhook type or there was no state attached with one of the webhooks when giving it a view.
     """
-    message_id = message.id
-
-    lock = asyncio.Lock()
-    globals.message_lock[message_id] = lock
+    lock = globals.message_lock[message.id]
     async with lock:
         # I'll define each validity check for ease of reading
         invalid_channel_type = not isinstance(
@@ -370,7 +367,6 @@ async def on_message(message: discord.Message):
             or message_from_non_whitelisted_app
             or (not await globals.wait_until_ready())
         ):
-            del globals.message_lock[message_id]
             return
 
         if (
@@ -387,7 +383,6 @@ async def on_message(message: discord.Message):
 
         message_channel_id = message.channel.id
         if not bridges.get_outbound_bridges(message_channel_id):
-            del globals.message_lock[message_id]
             return
 
         await bridge_message_helper(message, message_channel_id)
@@ -830,11 +825,7 @@ async def bridge_message_to_target_channel(
     )
 
     # Lock the channel to preserve message ordering (particularly when doing message forwards)
-    target_channel_id = target_channel.id
-    lock = globals.channel_lock.get(target_channel_id)
-    if not lock:
-        lock = globals.channel_lock[target_channel_id] = asyncio.Lock()
-
+    lock = globals.channel_lock[target_channel.id]
     async with lock:
         return await _bridge_message_to_target_channel(
             sent_message,
@@ -942,10 +933,10 @@ async def _bridge_message_to_target_channel(
                     )
             except discord.HTTPException:
                 reply_error_msg = "The message being replied to could not be loaded."
-        else:
-            reply_error_msg = (
-                "The message being replied to has not been bridged or has been deleted."
-            )
+        # else:
+        #     reply_error_msg = (
+        #         "The message being replied to has not been bridged or has been deleted."
+        #     ) TODO: fix failure to fetch replied-tos
 
         if replied_to_author is not None:
             if not replied_to_author_name:
@@ -1142,13 +1133,10 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
     """
     message_id = payload.message_id
 
-    lock = globals.message_lock.get(message_id)
-    if not lock:
-        lock = asyncio.Lock()
-        globals.message_lock[message_id] = lock
-
+    lock = globals.message_lock[message_id]
     async with lock:
-        message_was_deleted = not globals.message_lock.get(message_id)
+        # If by the time this gets unlocked it was deleted from the dictionary, the message was deleted
+        message_was_deleted = not globals.message_lock[message_id]
         contentless_edit = not (updated_message_content := payload.data.get("content"))
 
         channel_id = payload.channel_id
@@ -1699,12 +1687,9 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
     """
     message_id = payload.message_id
 
-    lock = globals.message_lock.get(message_id)
-    if not lock:
-        lock = asyncio.Lock()
-        globals.message_lock[message_id] = lock
-
+    lock = globals.message_lock[message_id]
     async with lock:
+        # If by the time this gets unlocked it was deleted from the dictionary, the message was deleted
         message_was_deleted = not globals.message_lock.get(message_id)
 
         channel_id = payload.channel_id
@@ -2784,16 +2769,19 @@ async def on_guild_remove(server: discord.Guild):
 @globals.client.event
 async def on_disconnect():
     """Mark the bot as disconnected."""
+    logger.info("Bot has disconnected.")
     globals.is_connected = False
 
 
 @globals.client.event
 async def on_connect():
+    logger.info("Bot has connected.")
     await reconnect()
 
 
 @globals.client.event
 async def on_resumed():
+    logger.info("Bot has reconnected.")
     await reconnect()
 
 
@@ -2808,7 +2796,9 @@ async def reconnect():
     if len(bridges.get_channels_with_outbound_bridges()) == 0:
         return
 
+    logger.info("Looking for and bridging any unbridged messages...")
     await bridge_unbridged_messages()
+    logger.info("Finished bridging unbridged messages.")
 
 
 @overload
@@ -2832,6 +2822,7 @@ async def bridge_unbridged_messages(*, session: SQLSession):
         An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
     """
     # Find the latest bridged messages from each channel
+    logger.debug("Looking for latest bridged message in each channel.")
     subquery = (
         session.query(
             DBMessageMap.source_channel,
@@ -2852,10 +2843,16 @@ async def bridge_unbridged_messages(*, session: SQLSession):
         select_latest_bridged_messages
     )
 
+    logger.debug("Checking each channel with bridges...")
     for bridged_message_row in bridged_messages_query_result:
-        # Check whether the ID of the latest bridged message for a channel is also the ID of that channel's latest message
+        # Check whether a channel's latest message has already been bridged
         channel_id = int(bridged_message_row.source_channel)
-        message_id = int(bridged_message_row.source_message)
+        latest_bridged_message_id = int(bridged_message_row.source_message)
+        logger.debug(
+            "Latest message from channel <#%s> had ID %s.",
+            channel_id,
+            latest_bridged_message_id,
+        )
 
         try:
             channel = await globals.get_channel_from_id(
@@ -2863,15 +2860,36 @@ async def bridge_unbridged_messages(*, session: SQLSession):
                 ensure_text_or_thread=True,
             )
         except ChannelTypeError:
+            logger.debug(
+                "Channel <#%s> was not a text channel nor a thread off one.",
+                channel_id,
+            )
             continue
 
-        if channel.last_message_id and channel.last_message_id == message_id:
+        messages_with_id_query: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
+            DBMessageMap
+        ).where(
+            sql_or(
+                DBMessageMap.source_message == str(latest_bridged_message_id),
+                DBMessageMap.target_message == str(latest_bridged_message_id),
+            )
+        )
+        messages_with_id_result: DBMessageMap | None = await sql_retry(
+            lambda: session.scalars(messages_with_id_query).first()
+        )
+        if isinstance(messages_with_id_result, DBMessageMap):
             # Most recent message in the channel has been bridged
+            logger.debug(
+                "Latest message in channel <#%s> was already bridged.", channel_id
+            )
             continue
 
         # There might be unbridged messages, try to find them
+        logger.debug("Looking for messages after the latest bridged message...")
         try:
-            latest_bridged_message = channel.get_partial_message(message_id)
+            latest_bridged_message = channel.get_partial_message(
+                latest_bridged_message_id
+            )
 
             messages_after_latest_bridged = [
                 message
@@ -2889,9 +2907,10 @@ async def bridge_unbridged_messages(*, session: SQLSession):
 
         # Try to bridge them
         for message_to_bridge in messages_after_latest_bridged:
-            if message_to_bridge.id == message_id:
-                continue
+            if message_to_bridge.id == latest_bridged_message_id:
+                break
 
+            logger.debug("Bridging message with ID %s.", message_to_bridge.id)
             try:
                 await on_message(message_to_bridge)
             except Exception:

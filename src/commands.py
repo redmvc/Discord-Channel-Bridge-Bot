@@ -1737,11 +1737,7 @@ class ConfirmHashServer(discord.ui.Button[Any]):
         self._server_to_hash_id = server_to_hash.id if server_to_hash else None
 
     async def callback(self, interaction: discord.Interaction):
-        # await self._original_interaction.delete_original_response()
-        await self._original_interaction.edit_original_response(
-            view=None,
-            content="Hashing...",
-        )
+        await self._original_interaction.delete_original_response()
         await interaction.response.defer(thinking=True, ephemeral=True)
         try:
             await emoji_hash_map.map.load_server_emoji(self._server_to_hash_id)
