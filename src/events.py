@@ -942,10 +942,10 @@ async def _bridge_message_to_target_channel(
                     )
             except discord.HTTPException:
                 reply_error_msg = "The message being replied to could not be loaded."
-        else:
-            reply_error_msg = (
-                "The message being replied to has not been bridged or has been deleted."
-            )
+        # else:
+        #     reply_error_msg = (
+        #         "The message being replied to has not been bridged or has been deleted."
+        #     ) TODO: fix failure to fetch replied-tos
 
         if replied_to_author is not None:
             if not replied_to_author_name:
