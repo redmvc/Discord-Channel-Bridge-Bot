@@ -369,7 +369,6 @@ async def on_message(message: discord.Message):
             or message_from_non_whitelisted_app
             or (not await globals.wait_until_ready())
         ):
-            del globals.message_lock[message_id]
             return
 
         if (
@@ -386,7 +385,6 @@ async def on_message(message: discord.Message):
 
         message_channel_id = message.channel.id
         if not bridges.get_outbound_bridges(message_channel_id):
-            del globals.message_lock[message_id]
             return
 
         await bridge_message_helper(message, message_channel_id)
