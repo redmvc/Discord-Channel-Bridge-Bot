@@ -1169,8 +1169,8 @@ async def edit_message_helper(
     message_id: int,
     channel_id: int,
     message_is_reply: bool,
-):
-    """Edit bridged versions of a message, if possible.
+) -> bool:
+    """Edit bridged versions of a message, if possible, and return True if at least one edit was performed.
 
     Parameters
     ----------
@@ -1184,6 +1184,10 @@ async def edit_message_helper(
         The ID of the channel the message being edited is in.
     message_is_reply : bool
         Whether the message being edited is a reply.
+
+    Returns
+    -------
+    bool
 
     Raises
     ------
@@ -1206,7 +1210,7 @@ async def edit_message_helper(
     channel_id: int,
     message_is_reply: bool,
     session: SQLSession | None,
-): ...
+) -> bool: ...
 
 
 @sql_command(commit_results=False)
@@ -1219,8 +1223,8 @@ async def edit_message_helper(
     channel_id: int,
     message_is_reply: bool,
     session: SQLSession,
-):
-    """Edit bridged versions of a message, if possible.
+) -> bool:
+    """Edit bridged versions of a message, if possible, and return True if at least one edit was performed.
 
     Parameters
     ----------
@@ -1236,6 +1240,10 @@ async def edit_message_helper(
         Whether the message being edited is a reply.
     session : :class:`~sqlalchemy.orm.Session` | None, optional
         An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
+
+    Returns
+    -------
+    bool
 
     Raises
     ------
@@ -1416,6 +1424,8 @@ async def edit_message_helper(
         raise
 
     logger.debug("Successfully bridged edit to message with ID %s.", message_id)
+
+    return len(async_message_edits) > 0
 
 
 @overload
@@ -1706,8 +1716,8 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
 
 
 @overload
-async def delete_message_helper(message_id: int, channel_id: int):
-    """Delete bridged versions of a message, if possible.
+async def delete_message_helper(message_id: int, channel_id: int) -> bool:
+    """Delete bridged versions of a message, if possible, and return True if at least one deletion was performed.
 
     Parameters
     ----------
@@ -1715,6 +1725,10 @@ async def delete_message_helper(message_id: int, channel_id: int):
         The message ID.
     channel_id : int
         The ID of the channel the message being deleted is in.
+
+    Returns
+    -------
+    bool
 
     Raises
     ------
@@ -1734,7 +1748,7 @@ async def delete_message_helper(
     channel_id: int,
     *,
     session: SQLSession | None,
-): ...
+) -> bool: ...
 
 
 @sql_command
@@ -1744,8 +1758,8 @@ async def delete_message_helper(
     channel_id: int,
     *,
     session: SQLSession,
-):
-    """Delete bridged versions of a message, if possible.
+) -> bool:
+    """Delete bridged versions of a message, if possible, and return True if at least one deletion was performed.
 
     Parameters
     ----------
@@ -1755,6 +1769,10 @@ async def delete_message_helper(
         The ID of the channel the message being deleted is in.
     session : :class:`~sqlalchemy.orm.Session` | None, optional
         An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
+
+    Returns
+    -------
+    bool
 
     Raises
     ------
@@ -1907,6 +1925,8 @@ async def delete_message_helper(
     await asyncio.gather(*async_message_deletes)
 
     logger.debug("Successfully bridged deletion of message with ID %s.", message_id)
+
+    return len(async_message_deletes) > 0
 
 
 @common.client.event
