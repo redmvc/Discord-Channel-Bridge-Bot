@@ -2,6 +2,7 @@ import asyncio
 import inspect
 import io
 import json
+from collections import defaultdict
 from hashlib import md5
 from typing import TYPE_CHECKING, Any, AsyncIterator, Callable, TypeVar, cast, overload
 
@@ -113,10 +114,10 @@ per_channel_whitelist: dict[int, set[int]] = {}
 rate_limiter = AsyncLimiter(1, 10)
 
 # Variable to keep track of messages that are still being bridged/edited before they can be edited/deleted
-message_lock: dict[int, asyncio.Lock] = {}
+message_lock: dict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
 
 # Variable to keep track of channels that are being sent messages to to try to preserve ordering
-channel_lock: dict[int, asyncio.Lock] = {}
+channel_lock: dict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
 
 # Type wildcard
 T = TypeVar("T", bound=Any)

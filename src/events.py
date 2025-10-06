@@ -325,10 +325,7 @@ async def on_message(message: discord.Message):
     ValueError
         The length of embeds was invalid, there was no token associated with one of the webhooks or ephemeral was passed with the improper webhook type or there was no state attached with one of the webhooks when giving it a view.
     """
-    message_id = message.id
-
-    lock = asyncio.Lock()
-    globals.message_lock[message_id] = lock
+    lock = globals.message_lock[message.id]
     async with lock:
         # I'll define each validity check for ease of reading
         invalid_channel_type = not isinstance(
@@ -370,7 +367,6 @@ async def on_message(message: discord.Message):
             or message_from_non_whitelisted_app
             or (not await globals.wait_until_ready())
         ):
-            del globals.message_lock[message_id]
             return
 
         if (
@@ -387,7 +383,6 @@ async def on_message(message: discord.Message):
 
         message_channel_id = message.channel.id
         if not bridges.get_outbound_bridges(message_channel_id):
-            del globals.message_lock[message_id]
             return
 
         await bridge_message_helper(message, message_channel_id)
@@ -830,11 +825,7 @@ async def bridge_message_to_target_channel(
     )
 
     # Lock the channel to preserve message ordering (particularly when doing message forwards)
-    target_channel_id = target_channel.id
-    lock = globals.channel_lock.get(target_channel_id)
-    if not lock:
-        lock = globals.channel_lock[target_channel_id] = asyncio.Lock()
-
+    lock = globals.channel_lock[target_channel.id]
     async with lock:
         return await _bridge_message_to_target_channel(
             sent_message,
@@ -1142,13 +1133,10 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
     """
     message_id = payload.message_id
 
-    lock = globals.message_lock.get(message_id)
-    if not lock:
-        lock = asyncio.Lock()
-        globals.message_lock[message_id] = lock
-
+    lock = globals.message_lock[message_id]
     async with lock:
-        message_was_deleted = not globals.message_lock.get(message_id)
+        # If by the time this gets unlocked it was deleted from the dictionary, the message was deleted
+        message_was_deleted = not globals.message_lock[message_id]
         contentless_edit = not (updated_message_content := payload.data.get("content"))
 
         channel_id = payload.channel_id
@@ -1699,12 +1687,9 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
     """
     message_id = payload.message_id
 
-    lock = globals.message_lock.get(message_id)
-    if not lock:
-        lock = asyncio.Lock()
-        globals.message_lock[message_id] = lock
-
+    lock = globals.message_lock[message_id]
     async with lock:
+        # If by the time this gets unlocked it was deleted from the dictionary, the message was deleted
         message_was_deleted = not globals.message_lock.get(message_id)
 
         channel_id = payload.channel_id
