@@ -1135,8 +1135,8 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
 
     lock = common.message_lock[message_id]
     async with lock:
-        # If by the time this gets unlocked it was deleted from the dictionary, the message was deleted
-        message_was_deleted = not common.message_lock[message_id]
+        # If by the time this gets unlocked it was deleted from the dictionary or is in, the message was deleted
+        message_was_deleted = common.message_lock[message_id] is None
         contentless_edit = not (updated_message_content := payload.data.get("content"))
 
         channel_id = payload.channel_id
@@ -1699,8 +1699,8 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
 
     lock = common.message_lock[message_id]
     async with lock:
-        # If by the time this gets unlocked it was deleted from the dictionary, the message was deleted
-        message_was_deleted = not common.message_lock.get(message_id)
+        # If by the time this gets unlocked it was removed from the dictionary, the message was deleted
+        message_was_deleted = common.message_lock.get(message_id) is None
 
         channel_id = payload.channel_id
         if (
