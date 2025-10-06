@@ -325,9 +325,7 @@ async def on_message(message: discord.Message):
     ValueError
         The length of embeds was invalid, there was no token associated with one of the webhooks or ephemeral was passed with the improper webhook type or there was no state attached with one of the webhooks when giving it a view.
     """
-    message_id = message.id
-
-    lock = globals.message_lock[message_id]
+    lock = globals.message_lock[message.id]
     async with lock:
         # I'll define each validity check for ease of reading
         invalid_channel_type = not isinstance(
@@ -827,8 +825,7 @@ async def bridge_message_to_target_channel(
     )
 
     # Lock the channel to preserve message ordering (particularly when doing message forwards)
-    target_channel_id = target_channel.id
-    lock = globals.channel_lock[target_channel_id]
+    lock = globals.channel_lock[target_channel.id]
     async with lock:
         return await _bridge_message_to_target_channel(
             sent_message,
