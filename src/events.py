@@ -392,6 +392,18 @@ async def on_message(message: discord.Message):
 
         await bridge_message_helper(message, message_channel_id)
 
+        pre_bridge_edit_payload = common.messages_to_edit.get(message_id)
+
+    if pre_bridge_edit_payload is not None:
+        # We received a message edit event prior to it being bridged
+        # so we edit now
+        await on_raw_message_edit(pre_bridge_edit_payload)
+
+        try:
+            del common.messages_to_edit[message_id]
+        except Exception:
+            pass
+
 
 @overload
 async def bridge_message_helper(message: discord.Message, message_channel_id: int):
@@ -1141,7 +1153,12 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
         # Received the message delete event prior to editing the message
         return
 
-    lock = common.message_lock[message_id]
+    if (lock := common.message_lock.get(message_id)) is None:
+        # Editing a message that's not in my list of message locks
+        # This could mean it hasn't been bridged yet and I received the edit event prior to the create event
+        common.messages_to_edit[message_id] = payload
+        lock = common.message_lock[message_id]
+
     async with lock:
         # If by the time this gets unlocked it was deleted from the dictionary or is in, the message was deleted
         message_was_deleted = common.message_lock[message_id] is None
@@ -1154,19 +1171,27 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
             or (not await common.wait_until_ready())
             or (not bridges.get_outbound_bridges(channel_id))
         ):
+            if message_id in common.messages_to_edit:
+                del common.messages_to_edit[message_id]
             return
 
-        await edit_message_helper(
-            message_content=updated_message_content,
-            embeds=[
-                discord.Embed.from_dict(embed) for embed in payload.data.get("embeds")
-            ],
-            message_id=message_id,
-            channel_id=channel_id,
-            message_is_reply=(
-                int(payload.data.get("type")) == discord.MessageType.reply.value
-            ),
-        )
+        if (
+            await edit_message_helper(
+                message_content=updated_message_content,
+                embeds=[
+                    discord.Embed.from_dict(embed)
+                    for embed in payload.data.get("embeds")
+                ],
+                message_id=message_id,
+                channel_id=channel_id,
+                message_is_reply=(
+                    int(payload.data.get("type")) == discord.MessageType.reply.value
+                ),
+            )
+        ) and (message_id in common.messages_to_edit):
+            # Since I edited at least one message, that means the message had in fact been bridged
+            # so I don't need to worry about edits prior to bridging
+            del common.messages_to_edit[message_id]
 
 
 @overload
