@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, NamedTuple, TypedDict, overload
 
 import discord
 from beartype import beartype
+from discord.ext import tasks
 from sqlalchemy import Delete as SQLDelete
 from sqlalchemy import ScalarResult
 from sqlalchemy import Select as SQLSelect
@@ -325,8 +326,14 @@ async def on_message(message: discord.Message):
     ValueError
         The length of embeds was invalid, there was no token associated with one of the webhooks or ephemeral was passed with the improper webhook type or there was no state attached with one of the webhooks when giving it a view.
     """
-    lock = common.message_lock[message.id]
+    message_id = message.id
+    lock = common.message_lock[message_id]
     async with lock:
+        if message_id in common.messages_to_delete:
+            # Received the message delete event prior to bridging the message
+            common.messages_to_delete.discard(message_id)
+            return
+
         # I'll define each validity check for ease of reading
         invalid_channel_type = not isinstance(
             message.channel,
@@ -386,6 +393,16 @@ async def on_message(message: discord.Message):
             return
 
         await bridge_message_helper(message, message_channel_id)
+
+    if message_id in common.messages_to_edit:
+        # We received a message edit event prior to it being bridged
+        # so we edit now
+        await on_raw_message_edit(common.messages_to_edit[message_id])
+
+        try:
+            del common.messages_to_edit[message_id]
+        except Exception:
+            pass
 
 
 @overload
@@ -1132,11 +1149,19 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
         The length of embeds was invalid, there was no token associated with a webhook or a webhook had no state.
     """
     message_id = payload.message_id
+    if message_id in common.messages_to_delete:
+        # Received the message delete event prior to editing the message
+        return
 
-    lock = common.message_lock[message_id]
+    if (lock := common.message_lock.get(message_id)) is None:
+        # Editing a message that's not in my list of message locks
+        # This could mean it hasn't been bridged yet and I received the edit event prior to the create event
+        common.messages_to_edit[message_id] = payload
+        lock = common.message_lock[message_id]
+
     async with lock:
-        # If by the time this gets unlocked it was deleted from the dictionary, the message was deleted
-        message_was_deleted = not common.message_lock[message_id]
+        # If by the time this gets unlocked it was deleted from the dictionary or is in, the message was deleted
+        message_was_deleted = common.message_lock[message_id] is None
         contentless_edit = not (updated_message_content := payload.data.get("content"))
 
         channel_id = payload.channel_id
@@ -1146,19 +1171,27 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
             or (not await common.wait_until_ready())
             or (not bridges.get_outbound_bridges(channel_id))
         ):
+            if message_id in common.messages_to_edit:
+                del common.messages_to_edit[message_id]
             return
 
-        await edit_message_helper(
-            message_content=updated_message_content,
-            embeds=[
-                discord.Embed.from_dict(embed) for embed in payload.data.get("embeds")
-            ],
-            message_id=message_id,
-            channel_id=channel_id,
-            message_is_reply=(
-                int(payload.data.get("type")) == discord.MessageType.reply.value
-            ),
-        )
+        if (
+            await edit_message_helper(
+                message_content=updated_message_content,
+                embeds=[
+                    discord.Embed.from_dict(embed)
+                    for embed in payload.data.get("embeds")
+                ],
+                message_id=message_id,
+                channel_id=channel_id,
+                message_is_reply=(
+                    int(payload.data.get("type")) == discord.MessageType.reply.value
+                ),
+            )
+        ) and (message_id in common.messages_to_edit):
+            # Since I edited at least one message, that means the message had in fact been bridged
+            # so I don't need to worry about edits prior to bridging
+            del common.messages_to_edit[message_id]
 
 
 @overload
@@ -1169,8 +1202,8 @@ async def edit_message_helper(
     message_id: int,
     channel_id: int,
     message_is_reply: bool,
-):
-    """Edit bridged versions of a message, if possible.
+) -> bool:
+    """Edit bridged versions of a message, if possible, and return True if at least one edit was performed.
 
     Parameters
     ----------
@@ -1184,6 +1217,10 @@ async def edit_message_helper(
         The ID of the channel the message being edited is in.
     message_is_reply : bool
         Whether the message being edited is a reply.
+
+    Returns
+    -------
+    bool
 
     Raises
     ------
@@ -1206,7 +1243,7 @@ async def edit_message_helper(
     channel_id: int,
     message_is_reply: bool,
     session: SQLSession | None,
-): ...
+) -> bool: ...
 
 
 @sql_command(commit_results=False)
@@ -1219,8 +1256,8 @@ async def edit_message_helper(
     channel_id: int,
     message_is_reply: bool,
     session: SQLSession,
-):
-    """Edit bridged versions of a message, if possible.
+) -> bool:
+    """Edit bridged versions of a message, if possible, and return True if at least one edit was performed.
 
     Parameters
     ----------
@@ -1236,6 +1273,10 @@ async def edit_message_helper(
         Whether the message being edited is a reply.
     session : :class:`~sqlalchemy.orm.Session` | None, optional
         An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
+
+    Returns
+    -------
+    bool
 
     Raises
     ------
@@ -1416,6 +1457,8 @@ async def edit_message_helper(
         raise
 
     logger.debug("Successfully bridged edit to message with ID %s.", message_id)
+
+    return len(async_message_edits) > 0
 
 
 @overload
@@ -1686,11 +1729,15 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
         A webhook does not have a token associated with it.
     """
     message_id = payload.message_id
+    if (lock := common.message_lock.get(message_id)) is None:
+        # Deleting a message that's not in my list of message locks
+        # This could mean it hasn't been bridged yet and I received the delete event prior to the create event
+        common.messages_to_delete.add(message_id)
+        lock = common.message_lock[message_id]
 
-    lock = common.message_lock[message_id]
     async with lock:
-        # If by the time this gets unlocked it was deleted from the dictionary, the message was deleted
-        message_was_deleted = not common.message_lock.get(message_id)
+        # If by the time this gets unlocked it was removed from the dictionary, the message was deleted
+        message_was_deleted = common.message_lock.get(message_id) is None
 
         channel_id = payload.channel_id
         if (
@@ -1698,16 +1745,20 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
             or (not await common.wait_until_ready())
             or (not bridges.get_outbound_bridges(channel_id))
         ):
+            common.messages_to_delete.discard(message_id)
             return
 
-        await delete_message_helper(message_id, channel_id)
+        if await delete_message_helper(message_id, channel_id):
+            # Since I deleted at least one message, that means the message had in fact been bridged
+            # so I don't need to worry about deletions prior to bridging
+            common.messages_to_delete.discard(message_id)
 
         del common.message_lock[message_id]
 
 
 @overload
-async def delete_message_helper(message_id: int, channel_id: int):
-    """Delete bridged versions of a message, if possible.
+async def delete_message_helper(message_id: int, channel_id: int) -> bool:
+    """Delete bridged versions of a message, if possible, and return True if at least one deletion was performed.
 
     Parameters
     ----------
@@ -1715,6 +1766,10 @@ async def delete_message_helper(message_id: int, channel_id: int):
         The message ID.
     channel_id : int
         The ID of the channel the message being deleted is in.
+
+    Returns
+    -------
+    bool
 
     Raises
     ------
@@ -1734,7 +1789,7 @@ async def delete_message_helper(
     channel_id: int,
     *,
     session: SQLSession | None,
-): ...
+) -> bool: ...
 
 
 @sql_command
@@ -1744,8 +1799,8 @@ async def delete_message_helper(
     channel_id: int,
     *,
     session: SQLSession,
-):
-    """Delete bridged versions of a message, if possible.
+) -> bool:
+    """Delete bridged versions of a message, if possible, and return True if at least one deletion was performed.
 
     Parameters
     ----------
@@ -1755,6 +1810,10 @@ async def delete_message_helper(
         The ID of the channel the message being deleted is in.
     session : :class:`~sqlalchemy.orm.Session` | None, optional
         An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
+
+    Returns
+    -------
+    bool
 
     Raises
     ------
@@ -1907,6 +1966,8 @@ async def delete_message_helper(
     await asyncio.gather(*async_message_deletes)
 
     logger.debug("Successfully bridged deletion of message with ID %s.", message_id)
+
+    return len(async_message_deletes) > 0
 
 
 @common.client.event
@@ -2915,6 +2976,37 @@ async def bridge_unbridged_messages(*, session: SQLSession):
                 await on_message(message_to_bridge)
             except Exception:
                 break
+
+
+@tasks.loop(hours=1)
+async def clear_locks():
+    """Clear the lock lists hourly."""
+    for channel_id, lock in common.channel_lock.items():
+        if not lock.locked():
+            try:
+                del common.channel_lock[channel_id]
+                del lock
+            except Exception:
+                pass
+
+    for message_id, lock in common.message_lock.items():
+        if not lock.locked():
+            try:
+                del common.message_lock[message_id]
+                del lock
+            except Exception:
+                pass
+
+    common.messages_to_delete = {
+        message_id
+        for message_id in common.messages_to_delete
+        if message_id in common.message_lock
+    }
+    common.messages_to_edit = {
+        message_id: payload
+        for message_id, payload in common.messages_to_edit.items()
+        if message_id in common.message_lock
+    }
 
 
 def register_events():
