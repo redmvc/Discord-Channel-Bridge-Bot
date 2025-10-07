@@ -325,8 +325,13 @@ async def on_message(message: discord.Message):
     ValueError
         The length of embeds was invalid, there was no token associated with one of the webhooks or ephemeral was passed with the improper webhook type or there was no state attached with one of the webhooks when giving it a view.
     """
-    lock = common.message_lock[message.id]
+    message_id = message.id
+    lock = common.message_lock[message_id]
     async with lock:
+        if message_id in common.messages_to_delete:
+            # Received the message delete event prior to bridging the message
+            return
+
         # I'll define each validity check for ease of reading
         invalid_channel_type = not isinstance(
             message.channel,
@@ -1132,6 +1137,9 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
         The length of embeds was invalid, there was no token associated with a webhook or a webhook had no state.
     """
     message_id = payload.message_id
+    if message_id in common.messages_to_delete:
+        # Received the message delete event prior to editing the message
+        return
 
     lock = common.message_lock[message_id]
     async with lock:
@@ -1696,8 +1704,12 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
         A webhook does not have a token associated with it.
     """
     message_id = payload.message_id
+    if (lock := common.message_lock.get(message_id)) is None:
+        # Deleting a message that's not in my list of message locks
+        # This could mean it hasn't been bridged yet and I received the delete event prior to the create event
+        common.messages_to_delete.add(message_id)
+        lock = common.message_lock[message_id]
 
-    lock = common.message_lock[message_id]
     async with lock:
         # If by the time this gets unlocked it was removed from the dictionary, the message was deleted
         message_was_deleted = common.message_lock.get(message_id) is None
@@ -1708,9 +1720,13 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
             or (not await common.wait_until_ready())
             or (not bridges.get_outbound_bridges(channel_id))
         ):
+            common.messages_to_delete.discard(message_id)
             return
 
-        await delete_message_helper(message_id, channel_id)
+        if await delete_message_helper(message_id, channel_id):
+            # Since I deleted at least one message, that means the message had in fact been bridged
+            # so I don't need to worry about deletions prior to bridging
+            common.messages_to_delete.discard(message_id)
 
         del common.message_lock[message_id]
 

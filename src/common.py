@@ -116,6 +116,10 @@ rate_limiter = AsyncLimiter(1, 10)
 # Variable to keep track of messages that are still being bridged/edited before they can be edited/deleted
 message_lock: dict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
 
+# Variable to keep track of messages that need to be deleted
+# mostly used in case we receive a deletion event prior to a message being bridged
+messages_to_delete: set[int] = set()
+
 # Variable to keep track of channels that are being sent messages to to try to preserve ordering
 channel_lock: dict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
 
