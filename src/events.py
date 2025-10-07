@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, NamedTuple, TypedDict, overload
 
 import discord
 from beartype import beartype
+from discord.ext import tasks
 from sqlalchemy import Delete as SQLDelete
 from sqlalchemy import ScalarResult
 from sqlalchemy import Select as SQLSelect
@@ -2975,6 +2976,37 @@ async def bridge_unbridged_messages(*, session: SQLSession):
                 await on_message(message_to_bridge)
             except Exception:
                 break
+
+
+@tasks.loop(hours=1)
+async def clear_locks():
+    """Clear the lock lists hourly."""
+    for channel_id, lock in common.channel_lock.items():
+        if not lock.locked():
+            try:
+                del common.channel_lock[channel_id]
+                del lock
+            except Exception:
+                pass
+
+    for message_id, lock in common.message_lock.items():
+        if not lock.locked():
+            try:
+                del common.message_lock[message_id]
+                del lock
+            except Exception:
+                pass
+
+    common.messages_to_delete = {
+        message_id
+        for message_id in common.messages_to_delete
+        if message_id in common.message_lock
+    }
+    common.messages_to_edit = {
+        message_id: payload
+        for message_id, payload in common.messages_to_edit.items()
+        if message_id in common.message_lock
+    }
 
 
 def register_events():
