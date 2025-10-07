@@ -330,6 +330,7 @@ async def on_message(message: discord.Message):
     async with lock:
         if message_id in common.messages_to_delete:
             # Received the message delete event prior to bridging the message
+            common.messages_to_delete.discard(message_id)
             return
 
         # I'll define each validity check for ease of reading
@@ -392,12 +393,10 @@ async def on_message(message: discord.Message):
 
         await bridge_message_helper(message, message_channel_id)
 
-        pre_bridge_edit_payload = common.messages_to_edit.get(message_id)
-
-    if pre_bridge_edit_payload is not None:
+    if message_id in common.messages_to_edit:
         # We received a message edit event prior to it being bridged
         # so we edit now
-        await on_raw_message_edit(pre_bridge_edit_payload)
+        await on_raw_message_edit(common.messages_to_edit[message_id])
 
         try:
             del common.messages_to_edit[message_id]
