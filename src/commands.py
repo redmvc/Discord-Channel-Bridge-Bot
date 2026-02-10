@@ -9,8 +9,8 @@ from sqlalchemy import Select as SQLSelect
 from sqlalchemy.exc import StatementError as SQLError
 from sqlalchemy.orm import Session as SQLSession
 
+import common
 import emoji_hash_map
-import globals
 from bridge import Bridge, bridges
 from database import (
     DBAppWhitelist,
@@ -28,7 +28,7 @@ if TYPE_CHECKING:
     from sqlalchemy import ScalarResult
 
 
-@globals.command_tree.command(
+@common.command_tree.command(
     name="help",
     description="Return a list of commands or detailed information about a command.",
 )
@@ -57,9 +57,9 @@ async def help(
     )
 
     if (
-        globals.emoji_server
+        common.emoji_server
         and interaction.guild
-        and interaction.guild.id == globals.emoji_server.id
+        and interaction.guild.id == common.emoji_server.id
     ):
         interaction_from_emoji_server = True
     else:
@@ -156,7 +156,7 @@ async def help(
 
 @discord.app_commands.default_permissions(manage_webhooks=True)
 @discord.app_commands.guild_only()
-@globals.command_tree.command(
+@common.command_tree.command(
     name="bridge",
     description="Create a bridge between two channels.",
 )
@@ -204,7 +204,7 @@ async def bridge(
 
     assert isinstance(interaction.user, discord.Member)
     assert interaction.guild
-    target_channel_member = await globals.get_channel_member(
+    target_channel_member = await common.get_channel_member(
         target_channel,
         interaction.user.id,
     )
@@ -349,7 +349,7 @@ async def create_bridges(
     create_public_threads=True,
 )
 @discord.app_commands.guild_only()
-@globals.command_tree.command(
+@common.command_tree.command(
     name="bridge_thread",
     description="Create threads across the bridge matching this one and bridge them.",
 )
@@ -426,7 +426,7 @@ async def bridge_thread(interaction: discord.Interaction):
     create_public_threads=True,
 )
 @discord.app_commands.guild_only()
-@globals.command_tree.command(
+@common.command_tree.command(
     name="auto_bridge_threads",
     description="Enable or disable automatic thread bridging from this channel.",
 )
@@ -568,11 +568,11 @@ async def toggle_auto_bridge_threads(
     -------
     bool
     """
-    if channel_id not in globals.auto_bridge_thread_channels:
+    if channel_id not in common.auto_bridge_thread_channels:
         await sql_retry(
             lambda: session.add(DBAutoBridgeThreadChannels(channel=str(channel_id)))
         )
-        globals.auto_bridge_thread_channels.add(channel_id)
+        common.auto_bridge_thread_channels.add(channel_id)
 
         return True
     else:
@@ -632,7 +632,7 @@ async def bridge_thread_helper(
     session : :class:`~sqlalchemy.orm.Session` | None, optional
         An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
     """
-    thread_parent = await globals.get_channel_parent(thread_to_bridge)
+    thread_parent = await common.get_channel_parent(thread_to_bridge)
 
     outbound_bridges = bridges.get_outbound_bridges(thread_parent.id)
     inbound_bridges = bridges.get_inbound_bridges(thread_parent.id)
@@ -710,14 +710,14 @@ async def bridge_thread_helper(
         pass
 
     for channel_id in outbound_bridges.keys():
-        channel = await globals.get_channel_from_id(channel_id)
+        channel = await common.get_channel_from_id(channel_id)
         if not isinstance(channel, discord.TextChannel):
             # I can't create a thread inside a thread
             if channel:
                 bridged_threads.append(channel.id)
             continue
 
-        channel_member = await globals.get_channel_member(channel, user_id)
+        channel_member = await common.get_channel_member(channel, user_id)
         if (
             not channel_member
             or not channel.permissions_for(channel_member).manage_webhooks
@@ -873,7 +873,7 @@ async def stop_auto_bridging_threads_helper(
         )
     )
 
-    globals.auto_bridge_thread_channels -= channel_ids_to_remove
+    common.auto_bridge_thread_channels -= channel_ids_to_remove
 
 
 @beartype
@@ -904,7 +904,7 @@ async def validate_auto_bridge_thread_channels(
     channel_ids_to_remove = {
         id
         for id in channel_ids_to_check
-        if id in globals.auto_bridge_thread_channels
+        if id in common.auto_bridge_thread_channels
         and not bridges.get_inbound_bridges(id)
         and not bridges.get_outbound_bridges(id)
     }
@@ -916,7 +916,7 @@ async def validate_auto_bridge_thread_channels(
 
 
 @beartype
-async def mention_to_channel(link_or_mention: str) -> globals.DiscordChannel | None:
+async def mention_to_channel(link_or_mention: str) -> common.DiscordChannel | None:
     """Return the channel referenced by a channel mention or a Discord link to a channel, if it's valid, or None if it isn't.
 
     Parameters
@@ -944,12 +944,12 @@ async def mention_to_channel(link_or_mention: str) -> globals.DiscordChannel | N
         except ValueError:
             return None
 
-    return await globals.get_channel_from_id(channel_id)
+    return await common.get_channel_from_id(channel_id)
 
 
 @discord.app_commands.default_permissions(manage_webhooks=True)
 @discord.app_commands.guild_only()
-@globals.command_tree.command(
+@common.command_tree.command(
     name="demolish",
     description="Demolish all bridges between this and target channel.",
 )
@@ -984,7 +984,7 @@ async def demolish(interaction: discord.Interaction, target: str):
 
     assert isinstance(interaction.user, discord.Member)
     assert interaction.guild
-    target_channel_member = await globals.get_channel_member(
+    target_channel_member = await common.get_channel_member(
         target_channel,
         interaction.user.id,
     )
@@ -1102,7 +1102,7 @@ async def demolish_bridges(
 
 @discord.app_commands.default_permissions(manage_webhooks=True)
 @discord.app_commands.guild_only()
-@globals.command_tree.command(
+@common.command_tree.command(
     name="demolish_all",
     description="Demolish all bridges to and from this channel.",
 )
@@ -1315,7 +1315,7 @@ async def demolish_all_bridges(
                     (
                         not isinstance(
                             (
-                                target_channel := await globals.get_channel_from_id(
+                                target_channel := await common.get_channel_from_id(
                                     target_id
                                 )
                             ),
@@ -1324,7 +1324,7 @@ async def demolish_all_bridges(
                     )
                     or (
                         not (
-                            target_channel_member := await globals.get_channel_member(
+                            target_channel_member := await common.get_channel_member(
                                 target_channel,
                                 user_id,
                             )
@@ -1369,7 +1369,7 @@ async def demolish_all_bridges(
 
 @discord.app_commands.default_permissions(manage_webhooks=True)
 @discord.app_commands.guild_only()
-@globals.command_tree.command(
+@common.command_tree.command(
     name="whitelist",
     description="Add or remove bots or applications to or from a whitelist for the current channel.",
 )
@@ -1414,7 +1414,7 @@ async def whitelist(interaction: discord.Interaction, apps: str):
         await interaction.response.send_message("❌ App IDs not valid.", ephemeral=True)
         return
 
-    channel_whitelist: set[int] | None = globals.per_channel_whitelist.get(channel.id)
+    channel_whitelist: set[int] | None = common.per_channel_whitelist.get(channel.id)
     if not channel_whitelist:
         channel_whitelist = set()
 
@@ -1437,7 +1437,7 @@ async def whitelist(interaction: discord.Interaction, apps: str):
         if app_id in channel_whitelist:
             apps_to_remove.add(app_id)
         else:
-            member = await globals.get_channel_member(channel, app_id)
+            member = await common.get_channel_member(channel, app_id)
             if not member:
                 await interaction.followup.send(
                     "❌ At least one app passed is not a member of the current channel.",
@@ -1490,14 +1490,14 @@ async def whitelist(interaction: discord.Interaction, apps: str):
 
             await asyncio.gather(*run_queries)
 
-            if not globals.per_channel_whitelist.get(channel.id):
-                globals.per_channel_whitelist[channel.id] = set()
-            globals.per_channel_whitelist[channel.id] = (
-                globals.per_channel_whitelist[channel.id].union(apps_to_add)
+            if not common.per_channel_whitelist.get(channel.id):
+                common.per_channel_whitelist[channel.id] = set()
+            common.per_channel_whitelist[channel.id] = (
+                common.per_channel_whitelist[channel.id].union(apps_to_add)
                 - apps_to_remove
             )
-            if len(globals.per_channel_whitelist[channel.id]) == 0:
-                del globals.per_channel_whitelist[channel.id]
+            if len(common.per_channel_whitelist[channel.id]) == 0:
+                del common.per_channel_whitelist[channel.id]
     except Exception as e:
         if isinstance(e, SQLError):
             await interaction.followup.send(
@@ -1529,10 +1529,10 @@ async def whitelist(interaction: discord.Interaction, apps: str):
     create_expressions=True,
     manage_expressions=True,
 )
-@globals.command_tree.command(
+@common.command_tree.command(
     name="map_emoji",
     description="Create a mapping between emoji so that the bot considers them equivalent.",
-    guild=globals.emoji_server,
+    guild=common.emoji_server,
 )
 @discord.app_commands.rename(
     internal_emoji_id_str="internal_emoji",
@@ -1555,7 +1555,7 @@ async def map_emoji(
         interaction.id,
     )
 
-    if not globals.settings.get("emoji_server_id"):
+    if not common.settings.get("emoji_server_id"):
         await interaction.response.send_message(
             "❌ Bot doesn't have an emoji server registered.", ephemeral=True
         )
@@ -1575,12 +1575,12 @@ async def map_emoji(
         )
         return
 
-    internal_emoji = globals.client.get_emoji(internal_emoji_id)
+    internal_emoji = common.client.get_emoji(internal_emoji_id)
     if (
         not internal_emoji
         or not internal_emoji.guild
-        or not globals.emoji_server
-        or internal_emoji.guild_id != globals.emoji_server.id
+        or not common.emoji_server
+        or internal_emoji.guild_id != common.emoji_server.id
     ):
         await interaction.response.send_message(
             "❌ The first argument must be an emoji in the bot's registered emoji server.",
@@ -1648,10 +1648,10 @@ async def map_emoji(
     create_expressions=True,
     manage_expressions=True,
 )
-@globals.command_tree.command(
+@common.command_tree.command(
     name="hash_server_emoji",
     description="Load all of the emoji of a server or servers into the bot's hash map for equivalence matching.",
-    guild=globals.emoji_server,
+    guild=common.emoji_server,
 )
 @discord.app_commands.rename(
     server_id_str="server",
@@ -1680,7 +1680,7 @@ async def hash_server_emoji(
             )
             return
 
-        server = globals.client.get_guild(server_id)
+        server = common.client.get_guild(server_id)
         if not server:
             await interaction.response.send_message(
                 "❌ Server ID passed is not an ID of a server the bot is in.",
@@ -1689,7 +1689,7 @@ async def hash_server_emoji(
             return
 
         message = f"Are you sure you want to hash all of the emoji in {server.name}? This may take a bit and make the bot unresponsive in the meantime."
-    elif len(globals.client.guilds) == 0:
+    elif len(common.client.guilds) == 0:
         await interaction.response.send_message(
             "❌ This bot is not in any servers.",
             ephemeral=True,
@@ -1697,7 +1697,7 @@ async def hash_server_emoji(
         return
     else:
         server = None
-        message = f"Are you **sure** you want to hash the emoji of all {len(globals.client.guilds)} servers this bot is in? This may take multiple minutes and make the bot unresponsive in the meantime."
+        message = f"Are you **sure** you want to hash the emoji of all {len(common.client.guilds)} servers this bot is in? This may take multiple minutes and make the bot unresponsive in the meantime."
 
     view = discord.ui.View()
     view.add_item(ConfirmHashServer(interaction, server))
@@ -1776,7 +1776,7 @@ class ConfirmHashServer(discord.ui.Button[Any]):
 
 @discord.app_commands.default_permissions(read_messages=True)
 @discord.app_commands.guild_only()
-@globals.command_tree.context_menu(name="List Reactions")
+@common.command_tree.context_menu(name="List Reactions")
 async def list_reactions(interaction: discord.Interaction, message: discord.Message):
     """List all reactions and users who reacted on all sides of a bridge."""
     logger.debug(
@@ -1787,7 +1787,7 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
         interaction.id,
     )
 
-    if not globals.client.user:
+    if not common.client.user:
         await interaction.response.send_message(
             "❌ Bot is not logged in.",
             ephemeral=True,
@@ -1804,7 +1804,7 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
         )
         return
 
-    bot_user_id = globals.client.user.id
+    bot_user_id = common.client.user.id
     if not (bot_member := message_server.get_member(bot_user_id)):
         await interaction.response.send_message(
             "❌ The bot is not in this server.",
@@ -1865,7 +1865,7 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
                 reacting_users_coro[reaction_emoji_id] = []
 
             reacting_users_coro[reaction_emoji_id].append(
-                globals.get_users_from_iterator(reaction.users())
+                common.get_users_from_iterator(reaction.users())
             )
 
         return reacting_users_coro
@@ -1899,9 +1899,7 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
 
                 if source_channel_id in reachable_channel_ids:
                     # The only way this would not be true would be if the bridge that brought this message here in the first place had been destroyed
-                    source_channel = await globals.get_channel_from_id(
-                        source_channel_id
-                    )
+                    source_channel = await common.get_channel_from_id(source_channel_id)
                     if isinstance(
                         source_channel,
                         (discord.TextChannel, discord.Thread),
@@ -1939,7 +1937,7 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
                     ):
                         continue
 
-                    bridged_channel = await globals.get_channel_from_id(
+                    bridged_channel = await common.get_channel_from_id(
                         target_channel_id
                     )
                     if not isinstance(

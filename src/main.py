@@ -2,8 +2,8 @@ from typing import TYPE_CHECKING, Any, Coroutine, overload
 
 from beartype import beartype
 
+import common
 import events
-import globals
 from validations import logger
 
 if TYPE_CHECKING:
@@ -47,12 +47,12 @@ def start_client(blocking: bool = True) -> Coroutine[Any, Any, None] | None:
     Coroutine[Any, Any, None] | None
     """
     events.register_events()
-    app_token = globals.settings.get("app_token")
+    app_token = common.settings.get("app_token")
     if blocking:
         logger.info("Connecting client...")
-        globals.client.run(app_token, reconnect=True)
+        common.client.run(app_token, reconnect=True)
     else:
-        return globals.client.start(app_token, reconnect=True)
+        return common.client.start(app_token, reconnect=True)
 
 
 if __name__ == "__main__":

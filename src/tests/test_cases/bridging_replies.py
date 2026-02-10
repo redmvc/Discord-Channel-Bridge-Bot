@@ -13,7 +13,7 @@ from test_runner import (
 )
 
 sys.path.append(str(Path(__file__).parent.parent.parent))
-import globals
+import common
 
 
 class BridgingReplies(test_runner.TestCase):
@@ -65,7 +65,7 @@ async def warns_when_original_is_not_bridged(
             },
             {
                 "have_embed": {
-                    "whose_description_contains": globals.truncate(
+                    "whose_description_contains": common.truncate(
                         original_message_content,
                         50,
                     )
@@ -124,7 +124,7 @@ async def warns_when_bridged_message_was_deleted(
             },
             {
                 "have_embed": {
-                    "whose_description_contains": globals.truncate(
+                    "whose_description_contains": common.truncate(
                         original_message_content,
                         50,
                     )
@@ -183,7 +183,7 @@ async def works(
             },
             {
                 "have_embed": {
-                    "whose_description_contains": globals.truncate(
+                    "whose_description_contains": common.truncate(
                         original_message_content,
                         50,
                     )
@@ -210,7 +210,7 @@ async def works(
             },
             {
                 "have_embed": {
-                    "whose_description_contains": globals.truncate(
+                    "whose_description_contains": common.truncate(
                         original_message_content,
                         50,
                     )
@@ -269,7 +269,7 @@ async def truncates_message_length_correctly(
             },
             {
                 "have_embed": {
-                    "whose_description_contains": globals.truncate(
+                    "whose_description_contains": common.truncate(
                         original_message_content,
                         50,
                     )
