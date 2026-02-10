@@ -65,7 +65,7 @@ class EmojiHashMap:
                     row.server_id
                     and (server_id := int(row.server_id))
                     and common.client.get_guild(server_id)
-                    and not emoji_actually_accessible
+                    and (not emoji_actually_accessible)
                 ):
                     # Emoji isn't accessible despite me being in its guild, it was probably deleted
                     logger.debug("Emoji with ID %s was not found.", emoji_id_str)
@@ -325,7 +325,7 @@ class EmojiHashMap:
         tuple[int, str]
         """
         logger.debug("Adding %s to hash map.", emoji if emoji else emoji_id)
-        if not emoji_id or not image_hash:
+        if (not emoji_id) or (not image_hash):
             emoji_id, emoji_name, _, emoji_url = await common.get_emoji_information(
                 emoji,
                 emoji_id,
@@ -450,15 +450,13 @@ class EmojiHashMap:
         image_hash = self._emoji_to_hash[emoji_id]
         del self._emoji_to_hash[emoji_id]
 
-        if (
-            self._hash_to_emoji.get(image_hash)
-            and emoji_id in self._hash_to_emoji[image_hash]
+        if self._hash_to_emoji.get(image_hash) and (
+            emoji_id in self._hash_to_emoji[image_hash]
         ):
             self._hash_to_emoji[image_hash].remove(emoji_id)
 
-        if (
-            self._hash_to_available_emoji.get(image_hash)
-            and emoji_id in self._hash_to_available_emoji[image_hash]
+        if self._hash_to_available_emoji.get(image_hash) and (
+            emoji_id in self._hash_to_available_emoji[image_hash]
         ):
             self._hash_to_available_emoji[image_hash].remove(emoji_id)
 
@@ -620,8 +618,8 @@ class EmojiHashMap:
 
             update_emoji_async: list["Coroutine[Any, Any, UpdateBase]"] = []
 
-            is_internal = (
-                common.emoji_server is not None and server.id == common.emoji_server.id
+            is_internal = (common.emoji_server is not None) and (
+                server.id == common.emoji_server.id
             )
             for emoji in server.emojis:
                 update_emoji_async.append(update_emoji(server.id, is_internal, emoji))
@@ -1154,7 +1152,7 @@ class EmojiHashMap:
         )
 
         if (
-            not skip_self
+            (not skip_self)
             and (emoji := common.client.get_emoji(emoji_id))
             and emoji.is_usable()
         ):

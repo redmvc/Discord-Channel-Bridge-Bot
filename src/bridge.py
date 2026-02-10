@@ -21,6 +21,7 @@ from database import (
 )
 from validations import (
     ArgumentError,
+    TextChannelOrThread,
     WebhookChannelError,
     logger,
     validate_channels,
@@ -58,8 +59,8 @@ class Bridge:
     @classmethod
     async def create(
         cls,
-        source: discord.TextChannel | discord.Thread | int,
-        target: discord.TextChannel | discord.Thread | int,
+        source: TextChannelOrThread | int,
+        target: TextChannelOrThread | int,
     ) -> "Bridge":
         """Create and return an outbound Bridge from source channel to target channel.
 
@@ -103,7 +104,7 @@ class Bridge:
         return self._source_id
 
     @property
-    async def source_channel(self) -> discord.TextChannel | discord.Thread:
+    async def source_channel(self) -> TextChannelOrThread:
         return await common.get_channel_from_id(
             self.source_id,
             ensure_text_or_thread=True,
@@ -115,7 +116,7 @@ class Bridge:
         return self._target_id
 
     @property
-    async def target_channel(self) -> discord.TextChannel | discord.Thread:
+    async def target_channel(self) -> TextChannelOrThread:
         return await common.get_channel_from_id(
             self.target_id,
             ensure_text_or_thread=True,
@@ -182,9 +183,7 @@ class Bridges:
             webhook_id = int(channel_webhook.webhook)
 
             channel = await common.get_channel_from_id(channel_id)
-            if not channel or not isinstance(
-                channel, (discord.TextChannel, discord.Thread)
-            ):
+            if not (channel and isinstance(channel, TextChannelOrThread)):
                 # If I don't have access to the channel, delete bridges from and to it
                 logger.debug(
                     "Couldn't find channel with ID %s when loading webhooks from database.",
@@ -297,14 +296,18 @@ class Bridges:
         channel_ids_with_webhooks_to_delete = {
             channel_id
             for channel_id_str in invalid_channel_ids
-            if (channel_id := int(channel_id_str))
-            and (await self.webhooks.get_webhook(channel_id))
+            if (
+                (channel_id := int(channel_id_str))
+                and (await self.webhooks.get_webhook(channel_id))
+            )
         }.union(
             {
                 channel_id
                 for channel_id, webhook_id in self.webhooks.webhook_by_channel.items()
-                if str(channel_id) not in targets_with_sources
-                or str(webhook_id) in invalid_webhook_ids
+                if (
+                    (str(channel_id) not in targets_with_sources)
+                    or (str(webhook_id) in invalid_webhook_ids)
+                )
             }
         )
         for channel_id in channel_ids_with_webhooks_to_delete:
@@ -315,9 +318,9 @@ class Bridges:
 
         # And update the database with any necessary deletions
         if (
-            len(invalid_channel_ids) > 0
-            or len(channel_ids_with_webhooks_to_delete) > 0
-            or len(invalid_webhook_ids) > 0
+            (len(invalid_channel_ids) > 0)
+            or (len(channel_ids_with_webhooks_to_delete) > 0)
+            or (len(invalid_webhook_ids) > 0)
         ):
             # First fetch the full list of channel IDs to delete
             channel_ids_to_delete = invalid_channel_ids.union(
@@ -349,8 +352,8 @@ class Bridges:
     async def create_bridge(
         self,
         *,
-        source: discord.TextChannel | discord.Thread | int,
-        target: discord.TextChannel | discord.Thread | int,
+        source: TextChannelOrThread | int,
+        target: TextChannelOrThread | int,
         webhook: discord.Webhook | None = None,
         update_db: bool = True,
         session: SQLSession | None = None,
@@ -394,19 +397,29 @@ class Bridges:
             "Creating bridge from #%s:%s (ID: %s) to #%s:%s (ID: %s)...",
             source_channel.guild.name,
             (
-                source_channel.parent.name + ":"
-                if isinstance(source_channel, discord.Thread) and source_channel.parent
-                else ""
-            )
-            + source_channel.name,
+                (
+                    source_channel.parent.name + ":"
+                    if (
+                        isinstance(source_channel, discord.Thread)
+                        and source_channel.parent
+                    )
+                    else ""
+                )
+                + source_channel.name
+            ),
             source_channel.id,
             target_channel.guild.name,
             (
-                target_channel.parent.name + ":"
-                if isinstance(target_channel, discord.Thread) and target_channel.parent
-                else ""
-            )
-            + target_channel.name,
+                (
+                    target_channel.parent.name + ":"
+                    if (
+                        isinstance(target_channel, discord.Thread)
+                        and target_channel.parent
+                    )
+                    else ""
+                )
+                + target_channel.name
+            ),
             target_channel.id,
         )
 
@@ -428,6 +441,7 @@ class Bridges:
                         target_channel.name,
                         target_id,
                     )
+
                     await self.webhooks.add_webhook(target_id, webhook)
                 elif existing_webhook.id != webhook.id:
                     # I already have a webhook registered for the target channel and it is not this one, I'll delete this one
@@ -438,6 +452,7 @@ class Bridges:
                         target_id,
                         existing_webhook.id,
                     )
+
                     try:
                         await webhook.delete()
                     except Exception:
@@ -520,9 +535,9 @@ class Bridges:
     async def _add_bridge_to_db(
         self,
         *,
-        source_channel: discord.TextChannel | discord.Thread,
+        source_channel: TextChannelOrThread,
         source_id: int,
-        target_channel: discord.TextChannel | discord.Thread,
+        target_channel: TextChannelOrThread,
         target_id: int,
         bridge: Bridge,
         session: SQLSession,
@@ -532,9 +547,9 @@ class Bridges:
     async def _add_bridge_to_db(
         self,
         *,
-        source_channel: discord.TextChannel | discord.Thread,
+        source_channel: TextChannelOrThread,
         source_id: int,
-        target_channel: discord.TextChannel | discord.Thread,
+        target_channel: TextChannelOrThread,
         target_id: int,
         bridge: Bridge,
         session: SQLSession | None,
@@ -544,9 +559,9 @@ class Bridges:
     async def _add_bridge_to_db(
         self,
         *,
-        source_channel: discord.TextChannel | discord.Thread,
+        source_channel: TextChannelOrThread,
         source_id: int,
-        target_channel: discord.TextChannel | discord.Thread,
+        target_channel: TextChannelOrThread,
         target_id: int,
         bridge: Bridge,
         session: SQLSession,
@@ -586,8 +601,8 @@ class Bridges:
     async def demolish_bridges(
         self,
         *,
-        source_channel: discord.TextChannel | discord.Thread | int | None = None,
-        target_channel: discord.TextChannel | discord.Thread | int | None = None,
+        source_channel: TextChannelOrThread | int | None = None,
+        target_channel: TextChannelOrThread | int | None = None,
         update_db: bool = True,
         session: SQLSession | None = None,
         one_sided: bool = False,
@@ -618,7 +633,7 @@ class Bridges:
         ValueError
             The webhook does not have a token associated with it.
         """
-        if not source_channel and not target_channel:
+        if (not source_channel) and (not target_channel):
             err = ArgumentError(
                 f"Error in function {inspect.stack()[1][3]}(): at least one of source_channel or target_channel needs to be passed as argument to demolish_bridges()."
             )
@@ -649,25 +664,25 @@ class Bridges:
 
         if (
             source_id
-            and (not target_id or one_sided)
+            and ((not target_id) or one_sided)
             and (
-                not outbound_bridges_from_source
-                or (target_id and not bridge_source_to_target)
+                (not outbound_bridges_from_source)
+                or (target_id and (not bridge_source_to_target))
             )
         ):
             return
 
-        if target_id and not source_id and not inbound_bridges_to_target:
+        if target_id and (not source_id) and (not inbound_bridges_to_target):
             return
 
         if (
             source_id
             and target_id
-            and not one_sided
-            and (not outbound_bridges_from_source or not bridge_source_to_target)
+            and (not one_sided)
+            and ((not outbound_bridges_from_source) or (not bridge_source_to_target))
             and (
-                not outbound_bridges_from_target
-                or not outbound_bridges_from_target.get(source_id)
+                (not outbound_bridges_from_target)
+                or (not outbound_bridges_from_target.get(source_id))
             )
         ):
             return
@@ -841,8 +856,8 @@ class Bridges:
     @beartype
     def get_one_way_bridge(
         self,
-        source: discord.TextChannel | discord.Thread | int,
-        target: discord.TextChannel | discord.Thread | int,
+        source: TextChannelOrThread | int,
+        target: TextChannelOrThread | int,
     ) -> Bridge | None:
         """Return the Bridge from source channel to target channel if it exists, and None otherwise.
 
@@ -869,8 +884,8 @@ class Bridges:
     @beartype
     def get_two_way_bridge(
         self,
-        source: discord.TextChannel | discord.Thread | int,
-        target: discord.TextChannel | discord.Thread | int,
+        source: TextChannelOrThread | int,
+        target: TextChannelOrThread | int,
     ) -> tuple[Bridge | None, Bridge | None]:
         """Return a tuple of Bridges, the first element of which is the Bridge from source to target and the second of which is the Bridge from target to source.
 
@@ -894,7 +909,7 @@ class Bridges:
     @beartype
     def get_outbound_bridges(
         self,
-        source: discord.TextChannel | discord.Thread | int,
+        source: TextChannelOrThread | int,
     ) -> dict[int, Bridge] | None:
         """Return a dict with all Bridges from source channel, identified by the target channel id.
 
@@ -922,7 +937,7 @@ class Bridges:
     @beartype
     def get_inbound_bridges(
         self,
-        target: discord.TextChannel | discord.Thread | int,
+        target: TextChannelOrThread | int,
     ) -> dict[int, Bridge] | None:
         """Return a dict with all Bridges to target channel, identified by the source channel id.
 
@@ -941,7 +956,7 @@ class Bridges:
     @overload
     async def get_reachable_channels(
         self,
-        starting_channel: discord.TextChannel | discord.Thread | int,
+        starting_channel: TextChannelOrThread | int,
         direction: Literal["outbound", "inbound"],
         *,
         include_webhooks: Literal[True],
@@ -967,7 +982,7 @@ class Bridges:
     @overload
     async def get_reachable_channels(
         self,
-        starting_channel: discord.TextChannel | discord.Thread | int,
+        starting_channel: TextChannelOrThread | int,
         direction: Literal["outbound", "inbound"],
         *,
         include_webhooks: Literal[False],
@@ -993,7 +1008,7 @@ class Bridges:
     @overload
     async def get_reachable_channels(
         self,
-        starting_channel: discord.TextChannel | discord.Thread | int,
+        starting_channel: TextChannelOrThread | int,
         direction: Literal["outbound", "inbound"],
         *,
         include_starting: bool = False,
@@ -1018,7 +1033,7 @@ class Bridges:
     @beartype
     async def get_reachable_channels(
         self,
-        starting_channel: discord.TextChannel | discord.Thread | int,
+        starting_channel: TextChannelOrThread | int,
         direction: Literal["outbound", "inbound"],
         *,
         include_webhooks: bool = False,
@@ -1054,9 +1069,7 @@ class Bridges:
             logger.error(err)
             raise err
 
-        get_bridges: """Callable[
-            [discord.TextChannel | discord.Thread | int], dict[int, Bridge] | None
-        ]"""
+        get_bridges: "Callable[[TextChannelOrThread | int], dict[int, Bridge] | None]"
         if direction == "outbound":
             get_bridges = self.get_outbound_bridges
         else:
@@ -1124,7 +1137,7 @@ class Webhooks:
     @beartype
     async def add_webhook(
         self,
-        channel_or_id: discord.TextChannel | discord.Thread | int,
+        channel_or_id: TextChannelOrThread | int,
         webhook: discord.Webhook | None = None,
     ) -> discord.Webhook:
         """Add a webhook to my list of webhooks. If no webhook is provided and the channel is not a thread whose parent already has a webhook, a new webhook is created.
@@ -1146,7 +1159,7 @@ class Webhooks:
             # if I already have a webhook associated with this channel I'm gucci
             return existing_webhook
 
-        if not webhook or not webhook.channel_id:
+        if (not webhook) or (not webhook.channel_id):
             # Webhook wasn't given or wasn't valid
             channel = validate_channels(
                 channel=await common.get_channel_from_id(channel_or_id)
@@ -1156,11 +1169,13 @@ class Webhooks:
                 "Adding new webhook to #%s:%s (ID: %s)...",
                 channel.guild.name,
                 (
-                    channel.parent.name + ":"
-                    if isinstance(channel, discord.Thread) and channel.parent
-                    else ""
-                )
-                + channel.name,
+                    (
+                        channel.parent.name + ":"
+                        if isinstance(channel, discord.Thread) and channel.parent
+                        else ""
+                    )
+                    + channel.name
+                ),
                 channel.id,
             )
 
@@ -1171,7 +1186,7 @@ class Webhooks:
                 # Try to get the webhook associated with a thread or its parent
                 webhook = self._webhooks.get(webhook_id)
 
-            if not webhook or not webhook.channel_id:
+            if (not webhook) or (not webhook.channel_id):
                 # Webhook still doesn't exist, going to create it
                 webhook = await webhook_owner.create_webhook(name="Channel Bridge Bot")
         else:
@@ -1197,7 +1212,7 @@ class Webhooks:
     @beartype
     async def get_webhook(
         self,
-        channel_or_id: discord.TextChannel | discord.Thread | int,
+        channel_or_id: TextChannelOrThread | int,
     ) -> discord.Webhook | None:
         """Return a webhook associated with a channel (or a thread's parent) or None if there isn't one.
 
@@ -1243,7 +1258,7 @@ class Webhooks:
     @beartype
     async def delete_channel(
         self,
-        channel_or_id: discord.TextChannel | discord.Thread | int,
+        channel_or_id: TextChannelOrThread | int,
     ) -> int | None:
         """Delete a channel from the list of webhooks and, if there are no longer any channels associated with its webhook, delete it and return its ID.
 
@@ -1273,9 +1288,9 @@ class Webhooks:
             pass
 
         logger.debug("Channel with ID %s deleted from list of webhooks.", channel_id)
-        if (channels := self._channels_per_webhook.get(webhook_id)) and len(
-            channels
-        ) > 0:
+        if (channels := self._channels_per_webhook.get(webhook_id)) and (
+            len(channels) > 0
+        ):
             # There are still channels associated with this webhook
             return None
 

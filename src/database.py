@@ -281,7 +281,8 @@ async def sql_upsert(
             insert = sqlite.insert(table)
 
         return insert.values(**insert_values).on_conflict_do_update(
-            index_elements=indices, set_=update_values
+            index_elements=indices,
+            set_=update_values,
         )
     else:
         # I'll do a manual update in this case
