@@ -2858,7 +2858,7 @@ async def bridge_unbridged_messages():
 async def bridge_unbridged_messages(*, session: SQLSession | None): ...
 
 
-@sql_command(commit_results=False)
+@sql_command
 @beartype
 async def bridge_unbridged_messages(*, session: SQLSession):
     """Find all messages that were meant to be bridged while the bot was disconnected and bridge them.
