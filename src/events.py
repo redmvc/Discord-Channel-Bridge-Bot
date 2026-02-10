@@ -10,7 +10,7 @@ import discord
 from beartype import beartype
 from discord.ext import tasks
 from sqlalchemy import ScalarResult, sql
-from sqlalchemy.exc import StatementError as SQLError
+from sqlalchemy.exc import StatementError
 from sqlalchemy.orm import Session as SQLSession
 
 import commands
@@ -732,7 +732,7 @@ async def bridge_message_helper(
             )
         )
     except Exception as e:
-        if isinstance(e, SQLError):
+        if isinstance(e, StatementError):
             logger.warning(
                 "Ran into an SQL error while trying to bridge a message: %s", e
             )
@@ -1438,7 +1438,7 @@ async def edit_message_helper(
 
         await asyncio.gather(*async_message_edits)
     except Exception as e:
-        if isinstance(e, SQLError):
+        if isinstance(e, StatementError):
             logger.warning(
                 "Ran into an SQL error while trying to edit a message: %s", e
             )
@@ -1941,7 +1941,7 @@ async def delete_message_helper(
             )
         )
     except Exception as e:
-        if isinstance(e, SQLError):
+        if isinstance(e, StatementError):
             logger.warning(
                 "Ran into an SQL error while trying to delete a message: %s", e
             )
@@ -2342,7 +2342,7 @@ async def bridge_reaction_add(
         reactions_added = await asyncio.gather(*async_add_reactions)
         await sql_retry(lambda: session.add_all([r for r in reactions_added if r]))
     except Exception as e:
-        if isinstance(e, SQLError):
+        if isinstance(e, StatementError):
             logger.warning(
                 "Ran into an SQL error while trying to add a reaction to a message: %s",
                 e,
@@ -2685,7 +2685,7 @@ async def unreact(
             ]
         )
     except Exception as e:
-        if isinstance(e, SQLError):
+        if isinstance(e, StatementError):
             logger.warning(
                 "Ran into an SQL error while running %s(): %s", inspect.stack()[1][3], e
             )

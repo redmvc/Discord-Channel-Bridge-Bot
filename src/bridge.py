@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Literal, overload
 import discord
 from beartype import beartype
 from sqlalchemy import sql
-from sqlalchemy.exc import StatementError as SQLError
+from sqlalchemy.exc import StatementError
 from sqlalchemy.orm import Session as SQLSession
 
 import common
@@ -506,7 +506,7 @@ class Bridges:
                 session=session,
             )
         except Exception as e:
-            if isinstance(e, SQLError):
+            if isinstance(e, StatementError):
                 await self.demolish_bridges(
                     source_channel=source_id,
                     target_channel=target_id,

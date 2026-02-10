@@ -1,8 +1,11 @@
 import inspect
 import logging
-from typing import Any, Literal, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar
 
 import discord
+
+if TYPE_CHECKING:
+    from typing import Literal
 
 T = TypeVar("T", bound=Any)
 
@@ -14,7 +17,7 @@ _existing_loggers: list[str] = []
 def setup_logger(
     name: str,
     log_file: str,
-    level: (
+    level: """(
         Literal[
             "CRITICAL",
             "FATAL",
@@ -26,7 +29,7 @@ def setup_logger(
             "NOTSET",
         ]
         | int
-    ) = logging.INFO,
+    )""" = logging.INFO,
 ) -> logging.Logger:
     """Create a logger. This function allows for the creation of multiple simultaneous loggers writing to multiple files.
 
