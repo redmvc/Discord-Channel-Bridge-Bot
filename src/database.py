@@ -19,10 +19,8 @@ from sqlalchemy import (
     UniqueConstraint,
     UpdateBase,
     create_engine,
+    sql,
 )
-from sqlalchemy import Select as SQLSelect
-from sqlalchemy import Update as SQLUpdate
-from sqlalchemy import insert as other_db_insert
 from sqlalchemy.dialects import mysql, postgresql, sqlite
 from sqlalchemy.exc import StatementError as SQLError
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
@@ -294,16 +292,16 @@ async def sql_upsert(
             upsert: UpdateBase
 
             def select_existing(session: SQLSession):
-                select_table: SQLSelect[tuple[Any]] = SQLSelect(table).where(
+                select_table: sql.Select[tuple[Any]] = sql.Select(table).where(
                     *index_values
                 )
                 return session.execute(select_table).first()
 
             if await sql_retry(lambda: select_existing(session)):
                 # Values with those keys do exist, so I update
-                upsert = SQLUpdate(table).where(*index_values).values(**update_values)
+                upsert = sql.Update(table).where(*index_values).values(**update_values)
             else:
-                upsert = other_db_insert(table).values(**insert_values)
+                upsert = sql.insert(table).values(**insert_values)
 
         return upsert
 
@@ -363,7 +361,7 @@ async def sql_insert_ignore_duplicate(
             insert_unknown: UpdateBase
 
             def select_existing(session: SQLSession):
-                select_table: SQLSelect[tuple[Any]] = SQLSelect(table).where(
+                select_table: sql.Select[tuple[Any]] = sql.Select(table).where(
                     *index_values
                 )
                 return session.execute(select_table).first()
@@ -371,11 +369,11 @@ async def sql_insert_ignore_duplicate(
             if await sql_retry(lambda: select_existing(session)):
                 # Values with those keys do exist, so I do nothing
                 random_index = indices.pop()
-                insert_unknown = SQLUpdate(table).values(
+                insert_unknown = sql.Update(table).values(
                     **{random_index: getattr(table, random_index)}
                 )
             else:
-                insert_unknown = other_db_insert(table).values(**insert_values)
+                insert_unknown = sql.insert(table).values(**insert_values)
 
         return insert_unknown
 

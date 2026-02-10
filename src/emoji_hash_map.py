@@ -4,11 +4,7 @@ from typing import TYPE_CHECKING, overload
 
 import discord
 from beartype import beartype
-from sqlalchemy import Delete as SQLDelete
-from sqlalchemy import Select as SQLSelect
-from sqlalchemy import Update as SQLUpdate
-from sqlalchemy import UpdateBase
-from sqlalchemy import not_ as sql_not
+from sqlalchemy import UpdateBase, sql
 from sqlalchemy.orm import Session as SQLSession
 
 import common
@@ -50,7 +46,7 @@ class EmojiHashMap:
         self._hash_to_internal_emoji: dict[str, int] = {}
 
         try:
-            select_hashed_emoji: SQLSelect[tuple[DBEmoji]] = SQLSelect(DBEmoji)
+            select_hashed_emoji: sql.Select[tuple[DBEmoji]] = sql.Select(DBEmoji)
             hashed_emoji_query_result: "ScalarResult[DBEmoji]" = session.scalars(
                 select_hashed_emoji
             )
@@ -89,14 +85,14 @@ class EmojiHashMap:
 
             if len(emoji_ids_to_delete) > 0:
                 session.execute(
-                    SQLDelete(DBEmoji).where(DBEmoji.id.in_(emoji_ids_to_delete))
+                    sql.Delete(DBEmoji).where(DBEmoji.id.in_(emoji_ids_to_delete))
                 )
 
             if len(accessibility_flips) > 0:
                 session.execute(
-                    SQLUpdate(DBEmoji)
+                    sql.Update(DBEmoji)
                     .where(DBEmoji.id.in_(accessibility_flips))
-                    .values(accessible=sql_not(DBEmoji.accessible))
+                    .values(accessible=~DBEmoji.accessible)
                 )
         except Exception as e:
             logger.error("An error occurred while creating an EmojiHashMap: %s", e)
@@ -496,7 +492,7 @@ class EmojiHashMap:
 
         await sql_retry(
             lambda: session.execute(
-                SQLDelete(DBEmoji).where(DBEmoji.id == str(emoji_id))
+                sql.Delete(DBEmoji).where(DBEmoji.id == str(emoji_id))
             )
         )
 

@@ -4,8 +4,7 @@ from typing import TYPE_CHECKING, Any, Iterable, Literal, overload
 
 import discord
 from beartype import beartype
-from sqlalchemy import Delete as SQLDelete
-from sqlalchemy import Select as SQLSelect
+from sqlalchemy import sql
 from sqlalchemy.exc import StatementError as SQLError
 from sqlalchemy.orm import Session as SQLSession
 
@@ -668,7 +667,7 @@ async def bridge_thread_helper(
     try:
         # I don't need to store it I just need to know whether it exists
         await thread_parent.fetch_message(thread_to_bridge.id)
-        select_message_map: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
+        select_message_map: sql.Select[tuple[DBMessageMap]] = sql.Select(
             DBMessageMap
         ).where(DBMessageMap.target_message == str(thread_to_bridge.id))
         source_starting_message: DBMessageMap | None = await sql_retry(
@@ -683,9 +682,9 @@ async def bridge_thread_helper(
             source_channel_id = thread_parent.id
             source_message_id = thread_to_bridge.id
 
-        select_message_map: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
-            DBMessageMap
-        ).where(DBMessageMap.source_message == str(source_message_id))
+        select_message_map = sql.Select(DBMessageMap).where(
+            DBMessageMap.source_message == str(source_message_id)
+        )
         target_starting_messages: "ScalarResult[DBMessageMap]" = await sql_retry(
             lambda: session.scalars(select_message_map)
         )
@@ -865,7 +864,7 @@ async def stop_auto_bridging_threads_helper(
 
     await sql_retry(
         lambda: session.execute(
-            SQLDelete(DBAutoBridgeThreadChannels).where(
+            sql.Delete(DBAutoBridgeThreadChannels).where(
                 DBAutoBridgeThreadChannels.channel.in_(
                     [str(id) for id in channel_ids_to_remove]
                 )
@@ -1473,7 +1472,7 @@ async def whitelist(interaction: discord.Interaction, apps: str):
                 )
 
             if len(apps_to_remove) > 0:
-                remove_apps = SQLDelete(DBAppWhitelist).where(
+                remove_apps = sql.Delete(DBAppWhitelist).where(
                     DBAppWhitelist.channel == channel_id_str,
                     DBAppWhitelist.application.in_(
                         [str(app_id) for app_id in apps_to_remove]
@@ -1884,7 +1883,7 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
     try:
         with Session.begin() as session:
             # We need to see whether this message is a bridged message and, if so, find its source
-            select_message_map: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
+            select_message_map: sql.Select[tuple[DBMessageMap]] = sql.Select(
                 DBMessageMap
             ).where(
                 DBMessageMap.target_message == str(message.id),
@@ -1923,9 +1922,9 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
             # Then we find all messages bridged from the source
             outbound_bridges = bridges.get_outbound_bridges(source_channel_id)
             if outbound_bridges:
-                select_message_map: SQLSelect[tuple[DBMessageMap]] = SQLSelect(
-                    DBMessageMap
-                ).where(DBMessageMap.source_message == str(source_message_id))
+                select_message_map = sql.Select(DBMessageMap).where(
+                    DBMessageMap.source_message == str(source_message_id)
+                )
                 bridged_messages: "ScalarResult[DBMessageMap]" = await sql_retry(
                     lambda: session.scalars(select_message_map)
                 )

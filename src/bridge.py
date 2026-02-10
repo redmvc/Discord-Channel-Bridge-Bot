@@ -5,10 +5,7 @@ from typing import TYPE_CHECKING, Literal, overload
 
 import discord
 from beartype import beartype
-from sqlalchemy import Delete as SQLDelete
-from sqlalchemy import Select as SQLSelect
-from sqlalchemy import and_ as sql_and
-from sqlalchemy import or_ as sql_or
+from sqlalchemy import sql
 from sqlalchemy.exc import StatementError as SQLError
 from sqlalchemy.orm import Session as SQLSession
 
@@ -175,7 +172,7 @@ class Bridges:
         invalid_channel_ids: set[str] = set()
         invalid_webhook_ids: set[str] = set()
 
-        select_all_webhooks: SQLSelect[tuple[DBWebhook]] = SQLSelect(DBWebhook)
+        select_all_webhooks: sql.Select[tuple[DBWebhook]] = sql.Select(DBWebhook)
         webhook_query_result: "ScalarResult[DBWebhook]" = session.scalars(
             select_all_webhooks
         )
@@ -223,7 +220,7 @@ class Bridges:
         targets_with_sources: set[str] = set()
 
         async_create_bridges: list["Coroutine[Any, Any, Bridge]"] = []
-        select_all_bridges: SQLSelect[tuple[DBBridge]] = SQLSelect(DBBridge)
+        select_all_bridges: sql.Select[tuple[DBBridge]] = sql.Select(DBBridge)
         bridge_query_result: "ScalarResult[DBBridge]" = session.scalars(
             select_all_bridges
         )
@@ -328,27 +325,21 @@ class Bridges:
             )
 
             if len(channel_ids_to_delete) > 0:
-                delete_invalid_bridges = SQLDelete(DBBridge).where(
-                    sql_or(
-                        DBBridge.source.in_(channel_ids_to_delete),
-                        DBBridge.target.in_(channel_ids_to_delete),
-                    )
+                delete_invalid_bridges = sql.Delete(DBBridge).where(
+                    DBBridge.source.in_(channel_ids_to_delete)
+                    | DBBridge.target.in_(channel_ids_to_delete)
                 )
                 session.execute(delete_invalid_bridges)
 
-                delete_invalid_messages = SQLDelete(DBMessageMap).where(
-                    sql_or(
-                        DBMessageMap.source_channel.in_(channel_ids_to_delete),
-                        DBMessageMap.target_channel.in_(channel_ids_to_delete),
-                    )
+                delete_invalid_messages = sql.Delete(DBMessageMap).where(
+                    DBMessageMap.source_channel.in_(channel_ids_to_delete)
+                    | DBMessageMap.target_channel.in_(channel_ids_to_delete)
                 )
                 session.execute(delete_invalid_messages)
 
-            delete_invalid_webhooks = SQLDelete(DBWebhook).where(
-                sql_or(
-                    DBWebhook.channel.in_(channel_ids_to_delete),
-                    DBWebhook.webhook.in_(invalid_webhook_ids),
-                )
+            delete_invalid_webhooks = sql.Delete(DBWebhook).where(
+                DBWebhook.channel.in_(channel_ids_to_delete)
+                | DBWebhook.webhook.in_(invalid_webhook_ids)
             )
             session.execute(delete_invalid_webhooks)
 
@@ -816,29 +807,25 @@ class Bridges:
         """Remove bridges from database."""
         logger.debug("Removing bridge(s) from database...")
 
-        delete_demolished_bridges_and_messages: list[SQLDelete] = []
+        delete_demolished_bridges_and_messages: list[sql.Delete] = []
         for sid, tid in bridges_to_demolish:
             source_id_str = str(sid)
             target_id_str = str(tid)
             delete_demolished_bridges_and_messages.append(
-                SQLDelete(DBBridge).where(
-                    sql_and(
-                        DBBridge.source == source_id_str,
-                        DBBridge.target == target_id_str,
-                    )
+                sql.Delete(DBBridge).where(
+                    (DBBridge.source == source_id_str)
+                    & (DBBridge.target == target_id_str)
                 )
             )
             delete_demolished_bridges_and_messages.append(
-                SQLDelete(DBMessageMap).where(
-                    sql_and(
-                        DBMessageMap.source_channel == source_id_str,
-                        DBMessageMap.target_channel == target_id_str,
-                    )
+                sql.Delete(DBMessageMap).where(
+                    (DBMessageMap.source_channel == source_id_str)
+                    & (DBMessageMap.target_channel == target_id_str)
                 )
             )
 
         if len(webhooks_deleted) > 0:
-            delete_invalid_webhooks = SQLDelete(DBWebhook).where(
+            delete_invalid_webhooks = sql.Delete(DBWebhook).where(
                 DBWebhook.webhook.in_(webhooks_deleted)
             )
         else:
