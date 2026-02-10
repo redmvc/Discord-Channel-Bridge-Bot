@@ -1,10 +1,14 @@
 import inspect
 import logging
-from typing import Any, Literal, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar
 
 import discord
 
+if TYPE_CHECKING:
+    from typing import Literal, TypeAlias
+
 T = TypeVar("T", bound=Any)
+TextChannelOrThread: "TypeAlias" = discord.TextChannel | discord.Thread
 
 # Objects to log events
 formatter = logging.Formatter("%(asctime)s %(levelname)s %(message)s")
@@ -14,7 +18,7 @@ _existing_loggers: list[str] = []
 def setup_logger(
     name: str,
     log_file: str,
-    level: (
+    level: """(
         Literal[
             "CRITICAL",
             "FATAL",
@@ -26,7 +30,7 @@ def setup_logger(
             "NOTSET",
         ]
         | int
-    ) = logging.INFO,
+    )""" = logging.INFO,
 ) -> logging.Logger:
     """Create a logger. This function allows for the creation of multiple simultaneous loggers writing to multiple files.
 
@@ -100,7 +104,7 @@ class ArgumentError(ValueError):
 def validate_channels(
     log_error: bool = True,
     **kwargs: Any,
-) -> dict[str, discord.TextChannel | discord.Thread]:
+) -> dict[str, TextChannelOrThread]:
     """Raise ChannelTypeError if any of the objects passed as arguments is not a `~discord.TextChannel` nor a `~discord.Thread` off one, and otherwise return a dictionary with the arguments cast to the right type.
 
     Parameters
@@ -114,12 +118,14 @@ def validate_channels(
     -------
     dict[str, `~discord.TextChannel` | `~discord.Thread`]
     """
-    cast_channels: dict[str, discord.TextChannel | discord.Thread] = {}
+    cast_channels: dict[str, TextChannelOrThread] = {}
     for channel_name, channel in kwargs.items():
         if (
-            not isinstance(channel, discord.Thread)
-            or not isinstance(channel.parent, discord.TextChannel)
-        ) and not isinstance(channel, discord.TextChannel):
+            not (
+                isinstance(channel, discord.Thread)
+                and isinstance(channel.parent, discord.TextChannel)
+            )
+        ) and (not isinstance(channel, discord.TextChannel)):
             err = ChannelTypeError(
                 f"Invalid channel '{channel_name}' passed to function {inspect.stack()[1][3]}(). It must be text channel or text channel thread, not {type(channel).__name__}."
             )
@@ -132,10 +138,7 @@ def validate_channels(
     return cast_channels
 
 
-def validate_webhook(
-    webhook: discord.Webhook,
-    target_channel: discord.TextChannel | discord.Thread,
-):
+def validate_webhook(webhook: discord.Webhook, target_channel: TextChannelOrThread):
     """Raise WebhookChannelError if the webhook is not attached to the target channel or, if it's a thread, its parent.
 
     Parameters

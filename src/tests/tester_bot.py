@@ -15,40 +15,18 @@ import common
 from validations import setup_logger
 
 if TYPE_CHECKING:
-    from typing import Any, Coroutine, SupportsInt, TypedDict
+    from typing import Any, Coroutine
 
-    class Settings(TypedDict):
-        """A TypedDict with the bot's settings. The `settings.json` file must contain a `"tests"` entry with the attributes below. For example:
-
-        .. code-block:: json
-            {
-                "...",
-                "tests": {
-                    "app_token": "...",
-                    "testing_server_id": "..."
-                }
-            }
-
-        Furthermore, this bot must be in the Bridge Bot's whitelist.
-
-        Attributes
-        ----------
-        app_token : str
-            The token used by the Discord developers API.
-        testing_server_id : SupportsInt | str
-            The ID of a Discord server to run testing. The Bridge Bot itself must have administrator permissions in it but the unit testing bot must not.
-        """
-
-        app_token: str
-        testing_server_id: "SupportsInt | str"
+    from common import SettingsRoot
 
 
 logger = setup_logger("test_logger", "test_logs.log", "INFO")
 
 MISSING = discord.utils.MISSING
 
-settings_root: "dict[str, str | Settings]" = json.load(open("settings.json"))
-settings: "Settings" = cast("Settings", settings_root["tests"])
+settings_root: "SettingsRoot" = json.load(open("settings.json"))
+assert "tests" in settings_root
+settings = settings_root["tests"]
 
 # Variables for connection to the Discord client
 client = discord.Client(
