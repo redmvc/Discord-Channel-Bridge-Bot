@@ -4,7 +4,7 @@ import io
 import json
 from collections import defaultdict
 from hashlib import md5
-from typing import TYPE_CHECKING, Any, AsyncIterator, Callable, TypeVar, cast, overload
+from typing import TYPE_CHECKING, Any, AsyncIterator, Callable, TypeVar, overload
 
 import aiohttp
 import discord
@@ -16,8 +16,45 @@ from validations import ArgumentError, ChannelTypeError, HTTPResponseError, logg
 if TYPE_CHECKING:
     from typing import Literal, NotRequired, SupportsInt, TypedDict
 
-    class Settings(TypedDict):
-        """A TypedDict with the bot's settings. The `settings.json` file must contain a `"context"` entry whose value is another key in the file with the attributes below. For example:
+    class SettingsRoot(TypedDict):
+        """
+        A TypedDict with the bot's settings. The `settings.json` file must contain a `"context"` entry whose value is another key in the file with the attributes defined in the `BridgeBotSettings` typed dictionary below. For example:
+
+        .. code-block:: json
+            {
+                "context": "production",
+                "production": {
+                    "app_token": "...",
+                    "db_dialect": "...",
+                    ...
+                },
+                "development": {
+                    "app_token": "...",
+                    "db_dialect": "...",
+                    ...
+                }
+            }
+
+        Attributes
+        ----------
+        context : Literal['production', 'development']
+            The current execution context of the bot. The default template includes "production" and "development" entries.
+        production : BridgeBotSettings
+            The production bot settings.
+        development : BridgeBotSettings
+            The development bot settings.
+        tests : NotRequired[TestBotSettings]
+            Optionally, settings for the bot set up for unit/integration testing, if such a bot is set up.
+        """
+
+        context: Literal["production", "development"]
+        production: "BridgeBotSettings"
+        development: "BridgeBotSettings"
+        tests: NotRequired["TestBotSettings"]
+
+    class BridgeBotSettings(TypedDict):
+        """
+        A TypedDict with the bot's settings. The `settings.json` file must contain a `"context"` entry whose value is another key in the file with the attributes below. For example:
 
         .. code-block:: json
             {
@@ -59,21 +96,44 @@ if TYPE_CHECKING:
         """
 
         app_token: str
-        db_dialect: "Literal['mysql', 'postgresql', 'sqlite']"
-        db_driver: "Literal['pymysql', 'psycopg2', 'pysqlite']"
+        db_dialect: Literal["mysql", "postgresql", "sqlite"]
+        db_driver: Literal["pymysql", "psycopg2", "pysqlite"]
         db_host: str
         db_port: int
         db_user: str
         db_pwd: str
         db_name: str
-        emoji_server_id: "NotRequired[SupportsInt | str]"
-        whitelisted_apps: "NotRequired[list[SupportsInt | str]]"
+        emoji_server_id: NotRequired[SupportsInt | str]
+        whitelisted_apps: NotRequired[list[SupportsInt | str]]
+
+    class TestBotSettings(TypedDict):
+        """A TypedDict with the bot's settings. The `settings.json` file may contain a `"tests"` entry with the attributes below. For example:
+
+        .. code-block:: json
+            {
+                "...",
+                "tests": {
+                    "app_token": "...",
+                    "testing_server_id": "..."
+                }
+            }
+
+        Furthermore, this bot must be in the Bridge Bot's whitelist.
+
+        Attributes
+        ----------
+        app_token : str
+            The token used by the Discord developers API.
+        testing_server_id : SupportsInt | str
+            The ID of a Discord server to run testing. The Bridge Bot itself must have administrator permissions in it but the unit testing bot must not.
+        """
+
+        app_token: str
+        testing_server_id: SupportsInt | str
 
 
-settings_root: "dict[str, str | Settings]" = json.load(open("settings.json"))
-assert isinstance(settings_root["context"], str)
-context = settings_root["context"]
-settings: "Settings" = cast("Settings", settings_root[context])
+settings_root: "SettingsRoot" = json.load(open("settings.json"))
+settings = settings_root[settings_root["context"]]
 if whitelisted_apps := settings.get("whitelisted_apps"):
     settings["whitelisted_apps"] = [int(app_id) for app_id in whitelisted_apps]
 
