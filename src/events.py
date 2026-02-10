@@ -2217,8 +2217,8 @@ async def bridge_reaction_add(
         select_reaction_map: sql.Select[tuple[DBReactionMap]] = sql.Select(
             DBReactionMap
         ).where(
-            DBReactionMap.source_message == source_message_id_str,
-            DBReactionMap.source_emoji == emoji_id_str,
+            (DBReactionMap.source_message == source_message_id_str)
+            & (DBReactionMap.source_emoji == emoji_id_str)
         )
         already_bridged_reactions: ScalarResult[DBReactionMap] = await sql_retry(
             lambda: session.scalars(select_reaction_map)
@@ -2293,7 +2293,7 @@ async def bridge_reaction_add(
             .where(
                 DBMessageMap.target_channel.in_(
                     [str(id) for id in reachable_channel_ids]
-                ),
+                )
             )
             .join(
                 max_message_subq,

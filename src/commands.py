@@ -1473,10 +1473,10 @@ async def whitelist(interaction: discord.Interaction, apps: str):
 
             if len(apps_to_remove) > 0:
                 remove_apps = sql.Delete(DBAppWhitelist).where(
-                    DBAppWhitelist.channel == channel_id_str,
-                    DBAppWhitelist.application.in_(
+                    (DBAppWhitelist.channel == channel_id_str)
+                    & DBAppWhitelist.application.in_(
                         [str(app_id) for app_id in apps_to_remove]
-                    ),
+                    )
                 )
                 run_queries.append(sql_retry(lambda: session.execute(remove_apps)))
 
