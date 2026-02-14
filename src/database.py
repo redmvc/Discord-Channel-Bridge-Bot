@@ -267,7 +267,7 @@ def sql_select(
 
 
 @beartype
-def sql_upsert(
+def get_sql_upsert_query(
     table: type[Table],
     *,
     indices: Iterable[str],
@@ -353,7 +353,7 @@ def sql_upsert(
 
 
 @beartype
-def sql_insert_ignore_duplicate(
+def get_sql_insert_ignore_duplicate_query(
     table: type[Table],
     *,
     indices: Iterable[str],
