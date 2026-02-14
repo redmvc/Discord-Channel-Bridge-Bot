@@ -8,7 +8,7 @@ from sqlalchemy import UpdateBase, sql
 from sqlalchemy.orm import Session as SQLSession
 
 import common
-from database import DBEmoji, sql_command, sql_retry, sql_upsert
+from database import DBEmoji, sql_command, sql_upsert
 from validations import ArgumentError, logger
 
 if TYPE_CHECKING:
@@ -46,9 +46,8 @@ class EmojiHashMap:
         self._hash_to_internal_emoji: dict[str, int] = {}
 
         try:
-            select_hashed_emoji: sql.Select[tuple[DBEmoji]] = sql.Select(DBEmoji)
             hashed_emoji_query_result: "ScalarResult[DBEmoji]" = session.scalars(
-                select_hashed_emoji
+                sql.select(DBEmoji)
             )
             emoji_ids_to_delete: set[str] = set()
             accessibility_flips: set[str] = set()
@@ -265,7 +264,7 @@ class EmojiHashMap:
                 )
             image_hash = common.hash_image(image)
 
-        upsert_emoji = await self.upsert_emoji(
+        upsert_emoji = self.upsert_emoji(
             emoji_id=emoji_id,
             emoji_name=emoji_name,
             emoji_server_id=emoji_server_id,
@@ -273,7 +272,7 @@ class EmojiHashMap:
             image_hash=image_hash,
             accessible=accessible,
         )
-        await sql_retry(lambda: session.execute(upsert_emoji))
+        session.execute(upsert_emoji)
 
         logger.debug("Emoji with ID %s added to database.", emoji_id)
 
@@ -372,7 +371,7 @@ class EmojiHashMap:
         return (emoji_id, image_hash)
 
     @beartype
-    async def upsert_emoji(
+    def upsert_emoji(
         self,
         *,
         emoji_id: int | str,
@@ -408,8 +407,8 @@ class EmojiHashMap:
         else:
             upsert_server_id = {}
 
-        return await sql_upsert(
-            table=DBEmoji,
+        return sql_upsert(
+            DBEmoji,
             indices={"id"},
             ignored_cols={"animated"},
             id=str(emoji_id),
@@ -421,7 +420,7 @@ class EmojiHashMap:
         )
 
     @beartype
-    async def delete_emoji(
+    def delete_emoji(
         self,
         emoji_id: int,
         update_db: bool = False,
@@ -466,13 +465,13 @@ class EmojiHashMap:
         logger.debug("Emoji with ID %s deleted from map.", emoji_id)
 
         if update_db or session:
-            await self._delete_emoji_from_db(emoji_id, session=session)
+            self._delete_emoji_from_db(emoji_id, session=session)
 
     @overload
-    async def _delete_emoji_from_db(self, emoji_id: int): ...
+    def _delete_emoji_from_db(self, emoji_id: int): ...
 
     @overload
-    async def _delete_emoji_from_db(
+    def _delete_emoji_from_db(
         self,
         emoji_id: int,
         *,
@@ -480,7 +479,7 @@ class EmojiHashMap:
     ): ...
 
     @sql_command
-    async def _delete_emoji_from_db(
+    def _delete_emoji_from_db(
         self,
         emoji_id: int,
         *,
@@ -488,11 +487,7 @@ class EmojiHashMap:
     ):
         logger.debug("Deleting emoji with ID %s from database...", emoji_id)
 
-        await sql_retry(
-            lambda: session.execute(
-                sql.Delete(DBEmoji).where(DBEmoji.id == str(emoji_id))
-            )
-        )
+        session.execute(sql.Delete(DBEmoji).where(DBEmoji.id == str(emoji_id)))
 
         logger.debug("Emoji with ID %s deleted from database.", emoji_id)
 
@@ -593,7 +588,7 @@ class EmojiHashMap:
             is_internal: bool,
             emoji: discord.Emoji,
         ):
-            await self.delete_emoji(emoji.id)
+            self.delete_emoji(emoji.id)
 
             image = await common.get_emoji_image(emoji)
             image_hash = common.hash_image(image)
@@ -604,7 +599,7 @@ class EmojiHashMap:
                 is_internal=is_internal,
             )
 
-            return await self.upsert_emoji(
+            return self.upsert_emoji(
                 emoji_id=emoji.id,
                 emoji_name=emoji.name,
                 emoji_server_id=server_id,
@@ -794,7 +789,7 @@ class EmojiHashMap:
                 "Deleting an emoji from database that was deleted from the server..."
             )
             try:
-                await self.delete_emoji(emoji_to_delete_id, session=session)
+                self.delete_emoji(emoji_to_delete_id, session=session)
             except Exception as e:
                 logger.error(
                     "An error occurred when trying to delete an emoji from the hash map while running copy_emoji_into_server(): %s",

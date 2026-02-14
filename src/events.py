@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, NamedTuple, TypedDict, overload
 import discord
 from beartype import beartype
 from discord.ext import tasks
-from sqlalchemy import ScalarResult, sql
+from sqlalchemy import sql
 from sqlalchemy.exc import StatementError
 from sqlalchemy.orm import Session as SQLSession
 
@@ -23,7 +23,7 @@ from database import (
     DBMessageMap,
     DBReactionMap,
     sql_command,
-    sql_retry,
+    sql_select,
 )
 from validations import (
     ChannelTypeError,
@@ -130,12 +130,7 @@ async def setup_bot(*, session: SQLSession):
 
         # -----
         logger.info("Loading whitelisted apps...")
-        select_whitelisted_apps: sql.Select[tuple[DBAppWhitelist]] = sql.Select(
-            DBAppWhitelist
-        )
-        whitelisted_apps_query_result: ScalarResult[DBAppWhitelist] = session.scalars(
-            select_whitelisted_apps
-        )
+        whitelisted_apps_query_result = sql_select(DBAppWhitelist, session=session)
         accessible_channels: set[int] = set()
         inaccessible_channels: set[int] = set()
         for whitelisted_app in whitelisted_apps_query_result:
@@ -179,11 +174,9 @@ async def setup_bot(*, session: SQLSession):
 
         # -----
         logger.info("Loading automatically-thread-bridging channels...")
-        select_auto_bridge_thread_channels: sql.Select[
-            tuple[DBAutoBridgeThreadChannels]
-        ] = sql.Select(DBAutoBridgeThreadChannels)
-        auto_thread_query_result: ScalarResult[DBAutoBridgeThreadChannels] = (
-            session.scalars(select_auto_bridge_thread_channels)
+        auto_thread_query_result = sql_select(
+            DBAutoBridgeThreadChannels,
+            session=session,
         )
         common.auto_bridge_thread_channels = common.auto_bridge_thread_channels.union(
             {
@@ -598,12 +591,11 @@ async def bridge_message_helper(
                 )
 
             # First, check whether the message replied to was itself bridged from a different channel
-            select_message_map: sql.Select[tuple[DBMessageMap]] = sql.Select(
-                DBMessageMap
-            ).where(DBMessageMap.target_message == str(message_reference_id))
-            local_replied_to_message_map: DBMessageMap | None = await sql_retry(
-                lambda: session.scalars(select_message_map).first()
-            )
+            local_replied_to_message_map = sql_select(
+                DBMessageMap,
+                where=(DBMessageMap.target_message == str(message_reference_id)),
+                session=session,
+            ).first()
             if isinstance(local_replied_to_message_map, DBMessageMap):
                 # So the message replied to was bridged from elsewhere
                 reply_source_channel_id = int(
@@ -629,11 +621,10 @@ async def bridge_message_helper(
                 source_replied_to_id = message_reference_id
 
             # Now find all other bridged versions of the message we're replying to
-            select_bridged_reply_to: sql.Select[tuple[DBMessageMap]] = sql.Select(
-                DBMessageMap
-            ).where(DBMessageMap.source_message == str(source_replied_to_id))
-            query_result: ScalarResult[DBMessageMap] = await sql_retry(
-                lambda: session.scalars(select_bridged_reply_to)
+            query_result = sql_select(
+                DBMessageMap,
+                where=(DBMessageMap.source_message == str(source_replied_to_id)),
+                session=session,
             )
             for message_map in query_result:
                 bridged_reply_to[int(message_map.target_channel)] = int(
@@ -717,21 +708,19 @@ async def bridge_message_helper(
         ]
         source_message_id_str = str(message.id)
         source_channel_id_str = str(message_channel_id)
-        await sql_retry(
-            lambda: session.add_all(
-                [
-                    DBMessageMap(
-                        source_message=source_message_id_str,
-                        source_channel=source_channel_id_str,
-                        target_message=bridged_message.id,
-                        target_channel=bridged_message.channel_id,
-                        forward_header_message=bridged_message.forwarded_header_id,
-                        target_message_order=bridged_message.message_order,
-                        webhook=bridged_message.webhook_id,
-                    )
-                    for bridged_message in bridged_messages
-                ]
-            )
+        session.add_all(
+            [
+                DBMessageMap(
+                    source_message=source_message_id_str,
+                    source_channel=source_channel_id_str,
+                    target_message=bridged_message.id,
+                    target_channel=bridged_message.channel_id,
+                    forward_header_message=bridged_message.forwarded_header_id,
+                    target_message_order=bridged_message.message_order,
+                    webhook=bridged_message.webhook_id,
+                )
+                for bridged_message in bridged_messages
+            ]
         )
     except Exception as e:
         if isinstance(e, StatementError):
@@ -1337,16 +1326,14 @@ async def edit_message_helper(
                     )
 
             # Find all bridged messages associated with this one (there might be multiple if the original message was split due to length)
-            select_message_map: sql.Select[tuple[DBMessageMap]] = (
-                sql.Select(DBMessageMap)
-                .where(
+            bridged_messages = sql_select(
+                DBMessageMap,
+                where=(
                     (DBMessageMap.source_message == message_id)
                     & (DBMessageMap.target_channel == str(bridged_channel_id))
-                )
-                .order_by(DBMessageMap.target_message_order)
-            )
-            bridged_messages: ScalarResult[DBMessageMap] = await sql_retry(
-                lambda: session.scalars(select_message_map)
+                ),
+                order_by=(DBMessageMap.target_message_order),
+                session=session,
             )
 
             for message_row in bridged_messages:
@@ -1672,20 +1659,19 @@ async def replace_discord_links(
             continue
 
         # The message being linked is from a channel that is bridged to the current channel
-        select_message_map: sql.Select[tuple[DBMessageMap]] = sql.Select(
-            DBMessageMap
-        ).where(
-            (
-                (DBMessageMap.source_message == link_message_id)
-                & DBMessageMap.target_channel.in_(channel_ids_to_check)
-            )
-            | (
-                (DBMessageMap.target_message == link_message_id)
-                & DBMessageMap.source_channel.in_(channel_ids_to_check)
-            )
-        )
-        bridged_messages: ScalarResult[DBMessageMap] = await sql_retry(
-            lambda: session.scalars(select_message_map)
+        bridged_messages = sql_select(
+            DBMessageMap,
+            where=(
+                (
+                    (DBMessageMap.source_message == link_message_id)
+                    & DBMessageMap.target_channel.in_(channel_ids_to_check)
+                )
+                | (
+                    (DBMessageMap.target_message == link_message_id)
+                    & DBMessageMap.source_channel.in_(channel_ids_to_check)
+                )
+            ),
+            session=session,
         )
         for message_row in bridged_messages:
             if message_row.source_message == link_message_id:
@@ -1831,11 +1817,10 @@ async def delete_message_helper(
     try:
         async_message_deletes: list["Coroutine[Any, Any, None]"] = []
 
-        select_message_map: sql.Select[tuple[DBMessageMap]] = sql.Select(
-            DBMessageMap
-        ).where(DBMessageMap.source_message == message_id)
-        bridged_messages: ScalarResult[DBMessageMap] = await sql_retry(
-            lambda: session.scalars(select_message_map)
+        bridged_messages = sql_select(
+            DBMessageMap,
+            where=(DBMessageMap.source_message == message_id),
+            session=session,
         )
         for message_row in bridged_messages:
             target_channel_id = int(message_row.target_channel)
@@ -1932,12 +1917,10 @@ async def delete_message_helper(
 
         # If the message was bridged, delete its row
         # If it was a source of bridged messages, delete all rows of its bridged versions
-        await sql_retry(
-            lambda: session.execute(
-                sql.Delete(DBMessageMap).where(
-                    (DBMessageMap.source_message == str(message_id))
-                    | (DBMessageMap.target_message == str(message_id))
-                )
+        session.execute(
+            sql.Delete(DBMessageMap).where(
+                (DBMessageMap.source_message == str(message_id))
+                | (DBMessageMap.target_message == str(message_id))
             )
         )
     except Exception as e:
@@ -2216,14 +2199,13 @@ async def bridge_reaction_add(
             )
 
         # Let me check whether I've already reacted to bridged messages in some of these channels
-        select_reaction_map: sql.Select[tuple[DBReactionMap]] = sql.Select(
-            DBReactionMap
-        ).where(
-            (DBReactionMap.source_message == source_message_id_str)
-            & (DBReactionMap.source_emoji == emoji_id_str)
-        )
-        already_bridged_reactions: ScalarResult[DBReactionMap] = await sql_retry(
-            lambda: session.scalars(select_reaction_map)
+        already_bridged_reactions = sql_select(
+            DBReactionMap,
+            where=(
+                (DBReactionMap.source_message == source_message_id_str)
+                & (DBReactionMap.source_emoji == emoji_id_str)
+            ),
+            session=session,
         )
         already_bridged_reaction_channels = {
             int(bridged_reaction.target_channel)
@@ -2238,14 +2220,11 @@ async def bridge_reaction_add(
             return
 
         # First, check whether this message is bridged, in which case I need to find its source
-        select_message_map: sql.Select[tuple[DBMessageMap]] = sql.Select(
-            DBMessageMap
-        ).where(
-            DBMessageMap.target_message == source_message_id_str,
-        )
-        source_message_map: DBMessageMap | None = await sql_retry(
-            lambda: session.scalars(select_message_map).first()
-        )
+        source_message_map = sql_select(
+            DBMessageMap,
+            where=(DBMessageMap.target_message == source_message_id_str),
+            session=session,
+        ).first()
         if isinstance(source_message_map, DBMessageMap):
             # This message was bridged, so find the original one, react to it, and then find any other bridged messages from it
             try:
@@ -2281,17 +2260,17 @@ async def bridge_reaction_add(
 
         # Bridge reactions to the last bridged message of a group of split bridged messages
         max_message_subq = (
-            sql.Select(
+            sql.select(
                 DBMessageMap.target_channel,
                 DBMessageMap.source_message,
                 sql.func.max(DBMessageMap.target_message_order).label("max_order"),
             )
             .where(DBMessageMap.source_message == str(source_message_id))
             .group_by(DBMessageMap.target_channel, DBMessageMap.source_message)
-            .subquery()
+            .cte("max_message_subq")
         )
         select_message_map = (
-            sql.Select(DBMessageMap)
+            sql.select(DBMessageMap)
             .where(
                 DBMessageMap.target_channel.in_(
                     [str(id) for id in reachable_channel_ids]
@@ -2309,9 +2288,7 @@ async def bridge_reaction_add(
                 ),
             )
         )
-        bridged_messages_query_result: ScalarResult[DBMessageMap] = await sql_retry(
-            lambda: session.scalars(select_message_map)
-        )
+        bridged_messages_query_result = session.scalars(select_message_map)
         for message_row in bridged_messages_query_result:
             bridged_channel = await common.get_channel_from_id(
                 int(message_row.target_channel)
@@ -2339,7 +2316,7 @@ async def bridge_reaction_add(
                 return
 
         reactions_added = await asyncio.gather(*async_add_reactions)
-        await sql_retry(lambda: session.add_all([r for r in reactions_added if r]))
+        session.add_all([r for r in reactions_added if r])
     except Exception as e:
         if isinstance(e, StatementError):
             logger.warning(
@@ -2551,15 +2528,14 @@ async def unreact(
 
     try:
         # First I find all of the messages that got this reaction bridged to them
-        conditions = [DBReactionMap.source_message == str(message_id)]
+        conditions = DBReactionMap.source_message == str(message_id)
         if removed_emoji_id:
-            conditions.append(DBReactionMap.source_emoji == removed_emoji_id)
+            conditions = conditions & (DBReactionMap.source_emoji == removed_emoji_id)
 
-        select_bridged_reactions: sql.Select[tuple[DBReactionMap]] = sql.Select(
-            DBReactionMap
-        ).where(*conditions)
-        bridged_reactions: ScalarResult[DBReactionMap] = await sql_retry(
-            lambda: session.scalars(select_bridged_reactions)
+        bridged_reactions = sql_select(
+            DBReactionMap,
+            where=conditions,
+            session=session,
         )
         bridged_messages = {
             (
@@ -2582,9 +2558,7 @@ async def unreact(
             return
 
         # Then I remove them from the database
-        await sql_retry(
-            lambda: session.execute(sql.Delete(DBReactionMap).where(*conditions))
-        )
+        session.execute(sql.Delete(DBReactionMap).where(*conditions))
 
         # Next I find the messages that still have reactions of this type in them even after I removed the ones above
         conditions = [
@@ -2594,9 +2568,10 @@ async def unreact(
         ]
         if equivalent_emoji_ids:
             conditions.append(DBReactionMap.source_emoji.in_(equivalent_emoji_ids))
-        select_bridged_reactions = sql.Select(DBReactionMap).where(*conditions)
-        remaining_reactions: ScalarResult[DBReactionMap] = await sql_retry(
-            lambda: session.scalars(select_bridged_reactions)
+        remaining_reactions = sql_select(
+            DBReactionMap,
+            where=sql.and_(*conditions),
+            session=session,
         )
 
         # And I get rid of my reactions from the messages that aren't on that list
@@ -2870,24 +2845,23 @@ async def bridge_unbridged_messages(*, session: SQLSession):
     """
     # Find the latest bridged messages from each channel
     logger.debug("Looking for latest bridged message in each channel.")
-    subquery = (
-        session.query(
+    max_id_table = (
+        sql.select(
             DBMessageMap.source_channel,
             sql.func.max(DBMessageMap.id).label("max_id"),
         )
         .group_by(DBMessageMap.source_channel)
-        .subquery()
-    )
-    select_latest_bridged_messages: sql.Select[tuple[DBMessageMap]] = sql.Select(
-        DBMessageMap
-    ).join(
-        subquery,
-        (DBMessageMap.source_channel == subquery.c.source_channel)
-        & (DBMessageMap.id == subquery.c.max_id),
+        .cte("max_id_table")
     )
 
-    bridged_messages_query_result: ScalarResult[DBMessageMap] = session.scalars(
-        select_latest_bridged_messages
+    bridged_messages_query_result = session.scalars(
+        sql.select(DBMessageMap).join(
+            max_id_table,
+            (
+                (DBMessageMap.source_channel == max_id_table.c.source_channel)
+                & (DBMessageMap.id == max_id_table.c.max_id)
+            ),
+        )
     )
 
     logger.debug("Checking each channel with bridges...")
@@ -2913,15 +2887,14 @@ async def bridge_unbridged_messages(*, session: SQLSession):
             )
             continue
 
-        messages_with_id_query: sql.Select[tuple[DBMessageMap]] = sql.Select(
-            DBMessageMap
-        ).where(
-            (DBMessageMap.source_message == str(latest_bridged_message_id))
-            | (DBMessageMap.target_message == str(latest_bridged_message_id))
-        )
-        messages_with_id_result: DBMessageMap | None = await sql_retry(
-            lambda: session.scalars(messages_with_id_query).first()
-        )
+        messages_with_id_result = sql_select(
+            DBMessageMap,
+            where=(
+                (DBMessageMap.source_message == str(latest_bridged_message_id))
+                | (DBMessageMap.target_message == str(latest_bridged_message_id))
+            ),
+            session=session,
+        ).first()
         if isinstance(messages_with_id_result, DBMessageMap):
             # Most recent message in the channel has been bridged
             logger.debug(
