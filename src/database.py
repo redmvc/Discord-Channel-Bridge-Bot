@@ -14,7 +14,9 @@ from typing import (
 from beartype import beartype
 from sqlalchemy import (
     Boolean,
+    ColumnExpressionArgument,
     Integer,
+    ScalarResult,
     String,
     UniqueConstraint,
     UpdateBase,
@@ -229,6 +231,40 @@ Table = (
     | DBEmoji
     | DBAppWhitelist
 )
+TableType = TypeVar("TableType", bound=Table)
+
+
+async def sql_select(
+    from_: type[TableType],
+    *,
+    where: ColumnExpressionArgument[bool] | None = None,
+    order_by: ColumnExpressionArgument[Any] | str | None = None,
+    session: SQLSession,
+) -> ScalarResult[TableType]:
+    """Return an iterator with the results of a "select" expression on a table, optionally with some conditions.
+
+    Parameters
+    ----------
+    from_ : type[:class:`~database.DBBridge`] | type[:class:`~database.DBWebhook`] | type[:class:`~database.DBMessageMap`] | type[:class:`~database.DBReactionMap`] | type[:class:`~database.DBAutoBridgeThreadChannels`] | type[:class:`~database.DBEmoji`]
+        The table to select from.
+    where : :class:`~sqlalchemyColumnExpressionArgument`[bool] | None, optional
+        Any conditions to use to select from the table. Defaults to None, in which case no filtering will be done.
+    order_by : :class:`~sqlalchemyColumnExpressionArgument`[Any] | str | None, optional
+        Any column to be used to order the results by. Defaults to None, in which case no ordering will be done.
+    session : :class:`~sqlalchemy.orm.SQLSession`
+        An SQLAlchemy ORM Session connecting to the database.
+
+    Returns
+    -------
+    :class:`~sqlalchemy.ScalarResult`[:class:`~database.DBBridge` | :class:`~database.DBWebhook` | :class:`~database.DBMessageMap` | :class:`~database.DBReactionMap` | :class:`~database.DBAutoBridgeThreadChannels` | :class:`~database.DBEmoji`]
+    """
+    select = sql.select(from_)
+    if where is not None:
+        select = select.where(where)
+    if order_by is not None:
+        select = select.order_by(order_by)
+
+    return await sql_retry(lambda: session.scalars(select))
 
 
 @beartype

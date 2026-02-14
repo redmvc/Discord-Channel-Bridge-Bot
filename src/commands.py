@@ -18,6 +18,7 @@ from database import (
     Session,
     sql_command,
     sql_retry,
+    sql_select,
 )
 from validations import (
     ChannelTypeError,
@@ -28,8 +29,6 @@ from validations import (
 
 if TYPE_CHECKING:
     from typing import Coroutine
-
-    from sqlalchemy import ScalarResult
 
 
 @common.command_tree.command(
@@ -672,13 +671,13 @@ async def bridge_thread_helper(
     try:
         # I don't need to store it I just need to know whether it exists
         await thread_parent.fetch_message(thread_to_bridge.id)
-        source_starting_message: DBMessageMap | None = await sql_retry(
-            lambda: session.scalars(
-                sql.select(DBMessageMap).where(
-                    DBMessageMap.target_message == str(thread_to_bridge.id)
-                )
-            ).first()
-        )
+        source_starting_message = (
+            await sql_select(
+                DBMessageMap,
+                where=(DBMessageMap.target_message == str(thread_to_bridge.id)),
+                session=session,
+            )
+        ).first()
         if isinstance(source_starting_message, DBMessageMap):
             # The message that's starting this thread is bridged
             source_channel_id = int(source_starting_message.source_channel)
@@ -688,12 +687,10 @@ async def bridge_thread_helper(
             source_channel_id = thread_parent.id
             source_message_id = thread_to_bridge.id
 
-        target_starting_messages: "ScalarResult[DBMessageMap]" = await sql_retry(
-            lambda: session.scalars(
-                sql.select(DBMessageMap).where(
-                    DBMessageMap.source_message == str(source_message_id)
-                )
-            )
+        target_starting_messages = await sql_select(
+            DBMessageMap,
+            where=(DBMessageMap.source_message == str(source_message_id)),
+            session=session,
         )
         for target_starting_message in target_starting_messages:
             matching_starting_messages[int(target_starting_message.target_channel)] = (
@@ -1893,13 +1890,13 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
     try:
         with Session.begin() as session:
             # We need to see whether this message is a bridged message and, if so, find its source
-            source_message_map: DBMessageMap | None = await sql_retry(
-                lambda: session.scalars(
-                    sql.select(DBMessageMap).where(
-                        DBMessageMap.target_message == str(message.id)
-                    )
-                ).first()
-            )
+            source_message_map = (
+                await sql_select(
+                    DBMessageMap,
+                    where=(DBMessageMap.target_message == str(message.id)),
+                    session=session,
+                )
+            ).first()
             if isinstance(source_message_map, DBMessageMap):
                 # This message was bridged, so find the original one and then find any other bridged messages from it
                 source_channel_id = int(source_message_map.source_channel)
@@ -1928,12 +1925,10 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
             # Then we find all messages bridged from the source
             outbound_bridges = bridges.get_outbound_bridges(source_channel_id)
             if outbound_bridges:
-                bridged_messages: "ScalarResult[DBMessageMap]" = await sql_retry(
-                    lambda: session.scalars(
-                        sql.select(DBMessageMap).where(
-                            DBMessageMap.source_message == str(source_message_id)
-                        )
-                    )
+                bridged_messages = await sql_select(
+                    DBMessageMap,
+                    where=(DBMessageMap.source_message == str(source_message_id)),
+                    session=session,
                 )
                 for message_row in bridged_messages:
                     target_channel_id = int(message_row.target_channel)

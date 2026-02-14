@@ -17,6 +17,7 @@ from database import (
     sql_command,
     sql_insert_ignore_duplicate,
     sql_retry,
+    sql_select,
     sql_upsert,
 )
 from validations import (
@@ -30,8 +31,6 @@ from validations import (
 
 if TYPE_CHECKING:
     from typing import Any, Callable, Coroutine
-
-    from sqlalchemy import ScalarResult
 
 
 class Bridge:
@@ -173,9 +172,7 @@ class Bridges:
         invalid_channel_ids: set[str] = set()
         invalid_webhook_ids: set[str] = set()
 
-        webhook_query_result: "ScalarResult[DBWebhook]" = session.scalars(
-            sql.select(DBWebhook)
-        )
+        webhook_query_result = await sql_select(DBWebhook, session=session)
         add_webhook_async: list["Coroutine[Any, Any, discord.Webhook]"] = []
         for channel_webhook in webhook_query_result:
             channel_id = int(channel_webhook.channel)
@@ -218,9 +215,7 @@ class Bridges:
         targets_with_sources: set[str] = set()
 
         async_create_bridges: list["Coroutine[Any, Any, Bridge]"] = []
-        bridge_query_result: "ScalarResult[DBBridge]" = session.scalars(
-            sql.select(DBBridge)
-        )
+        bridge_query_result = await sql_select(DBBridge, session=session)
         for bridge in bridge_query_result:
             target_id_str = bridge.target
             if target_id_str in invalid_channel_ids:
