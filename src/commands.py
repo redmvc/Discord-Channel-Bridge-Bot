@@ -17,7 +17,6 @@ from database import (
     DBMessageMap,
     Session,
     sql_command,
-    sql_retry,
     sql_select,
 )
 from validations import (
@@ -493,7 +492,7 @@ async def auto_bridge_threads(interaction: discord.Interaction):
     await interaction.response.defer(thinking=True, ephemeral=True)
 
     try:
-        if await toggle_auto_bridge_threads(message_channel.id):
+        if toggle_auto_bridge_threads(message_channel.id):
             response = "✅ Threads will now be automatically created across bridges when they are created in this channel."
         else:
             response = "✅ Threads will no longer be automatically created across bridges when they are created in this channel."
@@ -528,7 +527,7 @@ async def auto_bridge_threads(interaction: discord.Interaction):
 
 
 @overload
-async def toggle_auto_bridge_threads(message_channel_id: int) -> bool:
+def toggle_auto_bridge_threads(message_channel_id: int) -> bool:
     """Toggle thread auto-bridging for the channel identified by `channel_id` and return True if auto-bridging was enabled and False otherwise.
 
     Parameters
@@ -544,7 +543,7 @@ async def toggle_auto_bridge_threads(message_channel_id: int) -> bool:
 
 
 @overload
-async def toggle_auto_bridge_threads(
+def toggle_auto_bridge_threads(
     message_channel_id: int,
     *,
     session: SQLSession | None,
@@ -553,7 +552,7 @@ async def toggle_auto_bridge_threads(
 
 @sql_command
 @beartype
-async def toggle_auto_bridge_threads(
+def toggle_auto_bridge_threads(
     channel_id: int,
     *,
     session: SQLSession,
@@ -572,14 +571,12 @@ async def toggle_auto_bridge_threads(
     bool
     """
     if channel_id not in common.auto_bridge_thread_channels:
-        await sql_retry(
-            lambda: session.add(DBAutoBridgeThreadChannels(channel=str(channel_id)))
-        )
+        session.add(DBAutoBridgeThreadChannels(channel=str(channel_id)))
         common.auto_bridge_thread_channels.add(channel_id)
 
         return True
     else:
-        await stop_auto_bridging_threads_helper(channel_id, session=session)
+        stop_auto_bridging_threads_helper(channel_id, session=session)
 
         return False
 
@@ -672,7 +669,7 @@ async def bridge_thread_helper(
         # I don't need to store it I just need to know whether it exists
         await thread_parent.fetch_message(thread_to_bridge.id)
         source_starting_message = (
-            await sql_select(
+            sql_select(
                 DBMessageMap,
                 where=(DBMessageMap.target_message == str(thread_to_bridge.id)),
                 session=session,
@@ -687,7 +684,7 @@ async def bridge_thread_helper(
             source_channel_id = thread_parent.id
             source_message_id = thread_to_bridge.id
 
-        target_starting_messages = await sql_select(
+        target_starting_messages = sql_select(
             DBMessageMap,
             where=(DBMessageMap.source_message == str(source_message_id)),
             session=session,
@@ -817,7 +814,7 @@ async def bridge_thread_helper(
 
 
 @overload
-async def stop_auto_bridging_threads_helper(
+def stop_auto_bridging_threads_helper(
     channel_ids_to_remove: int | Iterable[int],
 ):
     """Remove a group of channels from the auto_bridge_thread_channels table and list.
@@ -836,7 +833,7 @@ async def stop_auto_bridging_threads_helper(
 
 
 @overload
-async def stop_auto_bridging_threads_helper(
+def stop_auto_bridging_threads_helper(
     channel_ids_to_remove: int | Iterable[int],
     *,
     session: SQLSession | None = None,
@@ -845,7 +842,7 @@ async def stop_auto_bridging_threads_helper(
 
 @sql_command
 @beartype
-async def stop_auto_bridging_threads_helper(
+def stop_auto_bridging_threads_helper(
     channel_ids_to_remove: int | Iterable[int],
     *,
     session: SQLSession,
@@ -870,12 +867,10 @@ async def stop_auto_bridging_threads_helper(
         else:
             channel_ids_to_remove = set(channel_ids_to_remove)
 
-    await sql_retry(
-        lambda: session.execute(
-            sql.Delete(DBAutoBridgeThreadChannels).where(
-                DBAutoBridgeThreadChannels.channel.in_(
-                    [str(id) for id in channel_ids_to_remove]
-                )
+    session.execute(
+        sql.Delete(DBAutoBridgeThreadChannels).where(
+            DBAutoBridgeThreadChannels.channel.in_(
+                [str(id) for id in channel_ids_to_remove]
             )
         )
     )
@@ -921,7 +916,7 @@ async def validate_auto_bridge_thread_channels(
     if len(channel_ids_to_remove) == 0:
         return
 
-    await stop_auto_bridging_threads_helper(channel_ids_to_remove, session=session)
+    stop_auto_bridging_threads_helper(channel_ids_to_remove, session=session)
 
 
 @beartype
@@ -1448,20 +1443,12 @@ async def whitelist(interaction: discord.Interaction, apps: str):
     try:
         channel_id_str = str(channel.id)
         with Session.begin() as session:
-            run_queries: list["Coroutine[Any, Any, Any]"] = []
             if len(apps_to_add) > 0:
-                run_queries.append(
-                    sql_retry(
-                        lambda: session.add_all(
-                            [
-                                DBAppWhitelist(
-                                    channel=channel_id_str,
-                                    application=str(app_id),
-                                )
-                                for app_id in apps_to_add
-                            ]
-                        )
-                    )
+                session.add_all(
+                    [
+                        DBAppWhitelist(channel=channel_id_str, application=str(app_id))
+                        for app_id in apps_to_add
+                    ]
                 )
 
                 apps_to_add_str = ", ".join([f"<@{app_id}>" for app_id in apps_to_add])
@@ -1476,7 +1463,7 @@ async def whitelist(interaction: discord.Interaction, apps: str):
                         [str(app_id) for app_id in apps_to_remove]
                     )
                 )
-                run_queries.append(sql_retry(lambda: session.execute(remove_apps)))
+                session.execute(remove_apps)
 
                 apps_to_remove_str = ", ".join(
                     [f"<@{app_id}>" for app_id in apps_to_remove]
@@ -1484,8 +1471,6 @@ async def whitelist(interaction: discord.Interaction, apps: str):
                 response.append(
                     f"✅ Removed the following app(s) from this channel's whitelist: {apps_to_remove_str}."
                 )
-
-            await asyncio.gather(*run_queries)
 
             if not common.per_channel_whitelist.get(channel.id):
                 common.per_channel_whitelist[channel.id] = set()
@@ -1890,12 +1875,10 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
     try:
         with Session.begin() as session:
             # We need to see whether this message is a bridged message and, if so, find its source
-            source_message_map = (
-                await sql_select(
-                    DBMessageMap,
-                    where=(DBMessageMap.target_message == str(message.id)),
-                    session=session,
-                )
+            source_message_map = sql_select(
+                DBMessageMap,
+                where=(DBMessageMap.target_message == str(message.id)),
+                session=session,
             ).first()
             if isinstance(source_message_map, DBMessageMap):
                 # This message was bridged, so find the original one and then find any other bridged messages from it
@@ -1925,7 +1908,7 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
             # Then we find all messages bridged from the source
             outbound_bridges = bridges.get_outbound_bridges(source_channel_id)
             if outbound_bridges:
-                bridged_messages = await sql_select(
+                bridged_messages = sql_select(
                     DBMessageMap,
                     where=(DBMessageMap.source_message == str(source_message_id)),
                     session=session,

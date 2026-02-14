@@ -24,11 +24,10 @@ from sqlalchemy import (
     sql,
 )
 from sqlalchemy.dialects import mysql, postgresql, sqlite
-from sqlalchemy.exc import StatementError as SQLError
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 from sqlalchemy.orm import Session as SQLSession
 
-from common import run_retries, settings
+from common import settings
 from validations import logger
 
 if TYPE_CHECKING:
@@ -234,7 +233,7 @@ Table = (
 TableType = TypeVar("TableType", bound=Table)
 
 
-async def sql_select(
+def sql_select(
     from_: type[TableType],
     *,
     where: ColumnExpressionArgument[bool] | None = None,
@@ -264,11 +263,11 @@ async def sql_select(
     if order_by is not None:
         select = select.order_by(order_by)
 
-    return await sql_retry(lambda: session.scalars(select))
+    return session.scalars(select)
 
 
 @beartype
-async def sql_upsert(
+def sql_upsert(
     table: type[Table],
     *,
     indices: Iterable[str],
@@ -344,7 +343,7 @@ async def sql_upsert(
             def select_existing(session: SQLSession):
                 return session.execute(sql.select(table).where(*index_values)).first()
 
-            if await sql_retry(lambda: select_existing(session)):
+            if select_existing(session):
                 # Values with those keys do exist, so I update
                 upsert = sql.Update(table).where(*index_values).values(**update_values)
             else:
@@ -354,7 +353,7 @@ async def sql_upsert(
 
 
 @beartype
-async def sql_insert_ignore_duplicate(
+def sql_insert_ignore_duplicate(
     table: type[Table],
     *,
     indices: Iterable[str],
@@ -410,7 +409,7 @@ async def sql_insert_ignore_duplicate(
             def select_existing(session: SQLSession):
                 return session.execute(sql.select(table).where(*index_values)).first()
 
-            if await sql_retry(lambda: select_existing(session)):
+            if select_existing(session):
                 # Values with those keys do exist, so I do nothing
                 random_index = indices.pop()
                 insert_unknown = sql.Update(table).values(
@@ -420,30 +419,6 @@ async def sql_insert_ignore_duplicate(
                 insert_unknown = sql.insert(table).values(**insert_values)
 
         return insert_unknown
-
-
-@beartype
-async def sql_retry(
-    fun: Callable[..., T],
-    num_retries: int = 5,
-    time_to_wait: float | int = 10,
-) -> T:
-    """Run an SQL function and retry it every time an :class:`~sqlalchemy.exc.StatementError` occurs up to a certain maximum number of tries. If it succeeds, return its result; otherwise, raise the error.
-
-    Parameters
-    ----------
-    fun : Callable[..., T]
-        The function to run.
-    num_retries : int, optional
-        The number of times to try the function again. If set to 0 or less, will be set to 1.
-    time_to_wait : float | int, optional
-        Time in seconds to wait between retries; only used if `num_retries` is greater than 1. If set to 0 or less, will set `num_retries` to 1. Defaults to 5.
-
-    Returns
-    -------
-    T
-    """
-    return await run_retries(fun, num_retries, time_to_wait, SQLError)
 
 
 @overload

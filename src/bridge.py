@@ -16,7 +16,6 @@ from database import (
     DBWebhook,
     sql_command,
     sql_insert_ignore_duplicate,
-    sql_retry,
     sql_select,
     sql_upsert,
 )
@@ -172,7 +171,7 @@ class Bridges:
         invalid_channel_ids: set[str] = set()
         invalid_webhook_ids: set[str] = set()
 
-        webhook_query_result = await sql_select(DBWebhook, session=session)
+        webhook_query_result = sql_select(DBWebhook, session=session)
         add_webhook_async: list["Coroutine[Any, Any, discord.Webhook]"] = []
         for channel_webhook in webhook_query_result:
             channel_id = int(channel_webhook.channel)
@@ -215,7 +214,7 @@ class Bridges:
         targets_with_sources: set[str] = set()
 
         async_create_bridges: list["Coroutine[Any, Any, Bridge]"] = []
-        bridge_query_result = await sql_select(DBBridge, session=session)
+        bridge_query_result = sql_select(DBBridge, session=session)
         for bridge in bridge_query_result:
             target_id_str = bridge.target
             if target_id_str in invalid_channel_ids:
@@ -567,7 +566,7 @@ class Bridges:
         )
 
         target_id_str = str(target_id)
-        insert_bridge_row = await sql_insert_ignore_duplicate(
+        insert_bridge_row = sql_insert_ignore_duplicate(
             DBBridge,
             indices={"source", "target"},
             source=str(source_id),
@@ -575,15 +574,15 @@ class Bridges:
         )
 
         bridge_webhook = await bridge.webhook
-        insert_webhook_row = await sql_upsert(
+        insert_webhook_row = sql_upsert(
             DBWebhook,
             indices={"channel"},
             channel=target_id_str,
             webhook=str(bridge_webhook.id),
         )
 
-        await sql_retry(lambda: session.execute(insert_bridge_row))
-        await sql_retry(lambda: session.execute(insert_webhook_row))
+        session.execute(insert_bridge_row)
+        session.execute(insert_webhook_row)
 
         logger.debug(
             "Bridge from #%s to #%s inserted into database.",
@@ -782,14 +781,14 @@ class Bridges:
             logger.debug("Bridge(s) demolished.")
             return
 
-        await self._remove_bridges_from_db(
+        self._remove_bridges_from_db(
             bridges_to_demolish=bridges_to_demolish,
             webhooks_deleted=webhooks_deleted,
             session=session,
         )
 
     @overload
-    async def _remove_bridges_from_db(
+    def _remove_bridges_from_db(
         self,
         *,
         bridges_to_demolish: list[tuple[int, int]],
@@ -798,7 +797,7 @@ class Bridges:
     ): ...
 
     @overload
-    async def _remove_bridges_from_db(
+    def _remove_bridges_from_db(
         self,
         *,
         bridges_to_demolish: list[tuple[int, int]],
@@ -807,7 +806,7 @@ class Bridges:
     ): ...
 
     @sql_command
-    async def _remove_bridges_from_db(
+    def _remove_bridges_from_db(
         self,
         *,
         bridges_to_demolish: list[tuple[int, int]],
@@ -842,9 +841,9 @@ class Bridges:
             delete_invalid_webhooks = None
 
         for delete_query in delete_demolished_bridges_and_messages:
-            await sql_retry(lambda: session.execute(delete_query))
+            session.execute(delete_query)
         if delete_invalid_webhooks is not None:
-            await sql_retry(lambda: session.execute(delete_invalid_webhooks))
+            session.execute(delete_invalid_webhooks)
 
         logger.debug("Bridge(s) removed from database.")
 
