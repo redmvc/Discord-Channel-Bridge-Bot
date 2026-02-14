@@ -15,7 +15,6 @@ from database import (
     DBAppWhitelist,
     DBAutoBridgeThreadChannels,
     DBMessageMap,
-    Session,
     sql_command,
     sql_select,
 )
@@ -1424,7 +1423,11 @@ async def whitelist(interaction: discord.Interaction, apps: str):
     response: list[str] = []
     try:
         channel_id_str = str(channel.id)
-        with Session.begin() as session:
+
+        @sql_command
+        def _toggle_whitelist(*, session: SQLSession | None = None):
+            assert session is not None
+
             if len(apps_to_add) > 0:
                 session.add_all(
                     [
@@ -1462,6 +1465,8 @@ async def whitelist(interaction: discord.Interaction, apps: str):
             )
             if len(common.per_channel_whitelist[channel.id]) == 0:
                 del common.per_channel_whitelist[channel.id]
+
+        _toggle_whitelist()
     except Exception as e:
         if isinstance(e, SQLError):
             await interaction.followup.send(
@@ -1487,7 +1492,8 @@ async def whitelist(interaction: discord.Interaction, apps: str):
     await interaction.followup.send("\n".join(response), ephemeral=True)
 
     logger.debug(
-        "Call to /whitelist with interaction ID %s successful.", interaction.id
+        "Call to /whitelist with interaction ID %s successful.",
+        interaction.id,
     )
 
 
@@ -1862,14 +1868,23 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
     # Then get the bridged ones
     at_least_one_inaccessible_bridge = False
     try:
-        with Session.begin() as session:
+
+        @sql_command
+        async def _get_bridged_reactions(
+            all_reactions_async: dict[str, list["Coroutine[Any, Any, set[int]]"]],
+            at_least_one_inaccessible_bridge: bool,
+            *,
+            session: SQLSession | None = None,
+        ) -> tuple[dict[str, list["Coroutine[Any, Any, set[int]]"]], bool]:
+            assert session is not None
+
             # We need to see whether this message is a bridged message and, if so, find its source
             source_message_map = sql_select(
                 DBMessageMap,
                 where=(DBMessageMap.target_message == str(message.id)),
                 session=session,
             ).first()
-            if isinstance(source_message_map, DBMessageMap):
+            if source_message_map is not None:
                 # This message was bridged, so find the original one and then find any other bridged messages from it
                 source_channel_id = int(source_message_map.source_channel)
                 source_message_id = int(source_message_map.source_message)
@@ -1928,6 +1943,16 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
                         )
                     except discord.Forbidden:
                         at_least_one_inaccessible_bridge = True
+
+            return all_reactions_async, at_least_one_inaccessible_bridge
+
+        (
+            all_reactions_async,
+            at_least_one_inaccessible_bridge,
+        ) = await _get_bridged_reactions(
+            all_reactions_async,
+            at_least_one_inaccessible_bridge,
+        )
     except Exception as e:
         if isinstance(e, SQLError):
             await interaction.followup.send(
