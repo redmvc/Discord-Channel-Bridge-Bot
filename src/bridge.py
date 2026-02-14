@@ -586,7 +586,9 @@ class Bridges:
         await sql_retry(lambda: session.execute(insert_webhook_row))
 
         logger.debug(
-            "Bridge from #%s to #%s created.", source_channel.name, target_channel.name
+            "Bridge from #%s to #%s inserted into database.",
+            source_channel.name,
+            target_channel.name,
         )
         return bridge
 
