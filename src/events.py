@@ -2283,7 +2283,7 @@ async def bridge_reaction_add(
             )
             .where(DBMessageMap.source_message == str(source_message_id))
             .group_by(DBMessageMap.target_channel, DBMessageMap.source_message)
-            .subquery()
+            .cte("max_message_subq")
         )
         select_message_map = (
             sql.select(DBMessageMap)
