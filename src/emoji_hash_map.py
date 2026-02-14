@@ -408,7 +408,7 @@ class EmojiHashMap:
             upsert_server_id = {}
 
         return await sql_upsert(
-            table=DBEmoji,
+            DBEmoji,
             indices={"id"},
             ignored_cols={"animated"},
             id=str(emoji_id),

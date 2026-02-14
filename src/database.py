@@ -32,6 +32,7 @@ from validations import logger
 if TYPE_CHECKING:
     from typing import cast
 
+
 T = TypeVar("T", bound=Any)
 P = ParamSpec("P")
 
@@ -218,10 +219,22 @@ class DBAppWhitelist(DBBase):
     application: Mapped[str] = mapped_column(String(32), nullable=False)
 
 
+Table = (
+    DBBridge
+    | DBWebhook
+    | DBMessageMap
+    | DBReactionMap
+    | DBReactionMap
+    | DBAutoBridgeThreadChannels
+    | DBEmoji
+    | DBAppWhitelist
+)
+
+
 @beartype
 async def sql_upsert(
+    table: type[Table],
     *,
-    table: Any,
     indices: Iterable[str],
     ignored_cols: Iterable[str] | None = None,
     **kwargs: Any,
@@ -230,7 +243,7 @@ async def sql_upsert(
 
     Parameters
     ----------
-    table : :class:`~sqlalchemy.sql._typing._DMLTableArgument`
+    table : type[:class:`~database.DBBridge`] | type[:class:`~database.DBWebhook`] | type[:class:`~database.DBMessageMap`] | type[:class:`~database.DBReactionMap`] | type[:class:`~database.DBAutoBridgeThreadChannels`] | type[:class:`~database.DBEmoji`]
         The table to insert into.
     indices : Iterable[str]
         A list with the names of the indices (i.e. the columns whose uniqueness will be checked).
@@ -306,8 +319,8 @@ async def sql_upsert(
 
 @beartype
 async def sql_insert_ignore_duplicate(
+    table: type[Table],
     *,
-    table: Any,
     indices: Iterable[str],
     **kwargs: Any,
 ) -> UpdateBase:
@@ -315,7 +328,7 @@ async def sql_insert_ignore_duplicate(
 
     Parameters
     ----------
-    table : :class:`~sqlalchemy.sql._typing._DMLTableArgument`
+    table : type[:class:`~database.DBBridge`] | type[:class:`~database.DBWebhook`] | type[:class:`~database.DBMessageMap`] | type[:class:`~database.DBReactionMap`] | type[:class:`~database.DBAutoBridgeThreadChannels`] | type[:class:`~database.DBEmoji`]
         The table to insert into.
     indices : Iterable[str]
         A list with the names of the indices (i.e. the columns whose uniqueness will be checked).

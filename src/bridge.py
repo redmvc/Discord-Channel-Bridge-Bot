@@ -573,7 +573,7 @@ class Bridges:
 
         target_id_str = str(target_id)
         insert_bridge_row = await sql_insert_ignore_duplicate(
-            table=DBBridge,
+            DBBridge,
             indices={"source", "target"},
             source=str(source_id),
             target=target_id_str,
@@ -581,7 +581,7 @@ class Bridges:
 
         bridge_webhook = await bridge.webhook
         insert_webhook_row = await sql_upsert(
-            table=DBWebhook,
+            DBWebhook,
             indices={"channel"},
             channel=target_id_str,
             webhook=str(bridge_webhook.id),
