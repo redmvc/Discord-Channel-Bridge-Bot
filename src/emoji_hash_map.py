@@ -8,7 +8,7 @@ from sqlalchemy import UpdateBase, sql
 from sqlalchemy.orm import Session as SQLSession
 
 import common
-from database import DBEmoji, sql_command, sql_upsert
+from database import DBEmoji, sql_command, get_sql_upsert_query
 from validations import ArgumentError, logger
 
 if TYPE_CHECKING:
@@ -264,7 +264,7 @@ class EmojiHashMap:
                 )
             image_hash = common.hash_image(image)
 
-        upsert_emoji = self.upsert_emoji(
+        upsert_emoji_query = self.get_emoji_upsert_query(
             emoji_id=emoji_id,
             emoji_name=emoji_name,
             emoji_server_id=emoji_server_id,
@@ -272,7 +272,7 @@ class EmojiHashMap:
             image_hash=image_hash,
             accessible=accessible,
         )
-        session.execute(upsert_emoji)
+        session.execute(upsert_emoji_query)
 
         logger.debug("Emoji with ID %s added to database.", emoji_id)
 
@@ -371,7 +371,7 @@ class EmojiHashMap:
         return (emoji_id, image_hash)
 
     @beartype
-    def upsert_emoji(
+    def get_emoji_upsert_query(
         self,
         *,
         emoji_id: int | str,
@@ -407,7 +407,7 @@ class EmojiHashMap:
         else:
             upsert_server_id = {}
 
-        return sql_upsert(
+        return get_sql_upsert_query(
             DBEmoji,
             indices={"id"},
             ignored_cols={"animated"},
@@ -583,7 +583,7 @@ class EmojiHashMap:
             logger.info("Loading emoji from all available servers into hash map...")
             ending_info_message = "Emoji from all available servers loaded."
 
-        async def update_emoji(
+        async def get_emoji_update_query(
             server_id: int | str,
             is_internal: bool,
             emoji: discord.Emoji,
@@ -599,7 +599,7 @@ class EmojiHashMap:
                 is_internal=is_internal,
             )
 
-            return self.upsert_emoji(
+            return self.get_emoji_upsert_query(
                 emoji_id=emoji.id,
                 emoji_name=emoji.name,
                 emoji_server_id=server_id,
@@ -611,16 +611,18 @@ class EmojiHashMap:
         for server in servers:
             logger.debug("Loading server %s...", server.name)
 
-            update_emoji_async: list["Coroutine[Any, Any, UpdateBase]"] = []
+            update_emoji_queries: list["Coroutine[Any, Any, UpdateBase]"] = []
 
             is_internal = (common.emoji_server is not None) and (
                 server.id == common.emoji_server.id
             )
             for emoji in server.emojis:
-                update_emoji_async.append(update_emoji(server.id, is_internal, emoji))
+                update_emoji_queries.append(
+                    get_emoji_update_query(server.id, is_internal, emoji)
+                )
 
             # I'll gather the requests one server at a time
-            upserts = await asyncio.gather(*update_emoji_async)
+            upserts = await asyncio.gather(*update_emoji_queries)
             for upsert in upserts:
                 session.execute(upsert)
 

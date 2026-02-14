@@ -642,9 +642,8 @@ async def bridge_message_helper(
         )
 
         # Send a message out to each target webhook
-        async_bridged_messages: list[
-            "Coroutine[Any, Any, list[BridgedMessage] | None]"
-        ] = []
+        bridged_messages: list[BridgedMessage] = []
+        error_occurred = False
         for target_id, webhook in reachable_channels.items():
             if not webhook:
                 continue
@@ -671,8 +670,8 @@ async def bridge_message_helper(
                 thread_splat = {"thread": target_channel}
 
             # Create an async version of bridging this message to gather at the end
-            async_bridged_messages.append(
-                bridge_message_to_target_channel(
+            try:
+                bridged_message_list = await bridge_message_to_target_channel(
                     message,
                     message_content,
                     message_attachments,
@@ -691,21 +690,27 @@ async def bridge_message_helper(
                     thread_splat,
                     session,
                 )
-            )
+
+                if bridged_message_list is None:
+                    continue
+
+                bridged_messages += bridged_message_list
+            except Exception as e:
+                logger.error(
+                    "Ran into an error while trying to bridge message with ID %s from channel with ID %s to channel with ID %s: %s",
+                    message.id,
+                    message_channel_id,
+                    target_channel.id,
+                    e,
+                )
+                error_occurred = True
+                continue
+
             people_to_ping.difference_update(
                 {member.id for member in webhook_channel.members}
             )
 
-        if len(async_bridged_messages) == 0:
-            return
-
         # Insert references to the linked messages into the message_mappings table
-        bridged_messages: list[BridgedMessage] = [
-            bridged_message
-            for bridged_message_list in (await asyncio.gather(*async_bridged_messages))
-            if bridged_message_list
-            for bridged_message in bridged_message_list
-        ]
         source_message_id_str = str(message.id)
         source_channel_id_str = str(message_channel_id)
         session.add_all(
@@ -736,7 +741,18 @@ async def bridge_message_helper(
 
         raise
 
-    logger.debug("Message with ID %s successfully bridged.", message.id)
+    if not bridged_messages:
+        logger.warning(
+            "Message with ID %s was not bridged; errors occurred or no valid webhooks were found.",
+            message.id,
+        )
+    elif error_occurred:
+        logger.debug(
+            "Message with ID %s was successfully bridged but there were errors.",
+            message.id,
+        )
+    else:
+        logger.debug("Message with ID %s successfully bridged.", message.id)
 
 
 class BridgedMessage(NamedTuple):
@@ -1286,11 +1302,10 @@ async def edit_message_helper(
 
     # Find all messages matching this one
     try:
-        async_message_edits: list["Coroutine[Any, Any, None]"] = []
-
         # Ensure that the message has emoji I have access to
         message_content = await replace_missing_emoji(message_content, session=session)
 
+        at_least_one_edit = False
         for bridged_channel_id, webhook in reachable_channels.items():
             # Iterate through the target channels and edit the bridged messages
             bridged_channel = await common.get_channel_from_id(bridged_channel_id)
@@ -1407,24 +1422,23 @@ async def edit_message_helper(
                                     e,
                                 )
 
-                    async_message_edits.append(
-                        edit_message(
-                            message_row,
-                            channel_specific_embeds,
-                            bridged_channel,
-                            truncated_content,
-                            webhook,
-                            thread_splat,
-                            len(channel_specific_message_content) == 0,
-                        )
+                    await edit_message(
+                        message_row,
+                        channel_specific_embeds,
+                        bridged_channel,
+                        truncated_content,
+                        webhook,
+                        thread_splat,
+                        len(channel_specific_message_content) == 0,
                     )
+
+                    at_least_one_edit = True
                 except discord.HTTPException as e:
                     logger.warning(
                         "Ran into a Discord exception while trying to edit a message across a bridge:\n"
                         + str(e)
                     )
 
-        await asyncio.gather(*async_message_edits)
     except Exception as e:
         if isinstance(e, StatementError):
             logger.warning(
@@ -1441,7 +1455,7 @@ async def edit_message_helper(
 
     logger.debug("Successfully bridged edit to message with ID %s.", message_id)
 
-    return len(async_message_edits) > 0
+    return at_least_one_edit
 
 
 @overload
@@ -1815,13 +1829,12 @@ async def delete_message_helper(
 
     # Find all messages matching this one
     try:
-        async_message_deletes: list["Coroutine[Any, Any, None]"] = []
-
         bridged_messages = sql_select(
             DBMessageMap,
             where=(DBMessageMap.source_message == message_id),
             session=session,
         )
+        at_least_one_delete = False
         for message_row in bridged_messages:
             target_channel_id = int(message_row.target_channel)
             if target_channel_id not in reachable_channels:
@@ -1901,14 +1914,13 @@ async def delete_message_helper(
                         # This should never happen
                         return
 
-                async_message_deletes.append(
-                    delete_message(
-                        message_row,
-                        target_channel_id,
-                        thread_splat,
-                        bridged_channel,
-                    )
+                await delete_message(
+                    message_row,
+                    target_channel_id,
+                    thread_splat,
+                    bridged_channel,
                 )
+                at_least_one_delete = True
             except discord.HTTPException as e:
                 logger.warning(
                     "Ran into a Discord exception while trying to delete a message across a bridge: %s",
@@ -1937,11 +1949,9 @@ async def delete_message_helper(
 
         raise
 
-    await asyncio.gather(*async_message_deletes)
-
     logger.debug("Successfully bridged deletion of message with ID %s.", message_id)
 
-    return len(async_message_deletes) > 0
+    return at_least_one_delete
 
 
 @common.client.event
@@ -2630,7 +2640,8 @@ async def unreact(
             if emoji_to_remove:
                 try:
                     await target_message.remove_reaction(
-                        emoji_to_remove, target_channel.guild.me
+                        emoji_to_remove,
+                        target_channel.guild.me,
                     )
                 except Exception:
                     pass

@@ -15,9 +15,9 @@ from database import (
     DBMessageMap,
     DBWebhook,
     sql_command,
-    sql_insert_ignore_duplicate,
+    get_sql_insert_ignore_duplicate_query,
     sql_select,
-    sql_upsert,
+    get_sql_upsert_query,
 )
 from validations import (
     ArgumentError,
@@ -566,7 +566,7 @@ class Bridges:
         )
 
         target_id_str = str(target_id)
-        insert_bridge_row = sql_insert_ignore_duplicate(
+        insert_bridge_row = get_sql_insert_ignore_duplicate_query(
             DBBridge,
             indices={"source", "target"},
             source=str(source_id),
@@ -574,7 +574,7 @@ class Bridges:
         )
 
         bridge_webhook = await bridge.webhook
-        insert_webhook_row = sql_upsert(
+        insert_webhook_row = get_sql_upsert_query(
             DBWebhook,
             indices={"channel"},
             channel=target_id_str,

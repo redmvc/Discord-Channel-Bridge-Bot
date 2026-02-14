@@ -15,7 +15,6 @@ from database import (
     DBAppWhitelist,
     DBAutoBridgeThreadChannels,
     DBMessageMap,
-    Session,
     sql_command,
     sql_select,
 )
@@ -326,25 +325,18 @@ async def create_bridges(
     session : :class:`~sqlalchemy.orm.Session` | None, optional
         An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
     """
-    create_bridges: list["Coroutine[Any, Any, Bridge]"] = []
     if direction != "inbound":
-        create_bridges.append(
-            bridges.create_bridge(
-                source=source_channel,
-                target=target_channel,
-                session=session,
-            )
+        await bridges.create_bridge(
+            source=source_channel,
+            target=target_channel,
+            session=session,
         )
     if direction != "outbound":
-        create_bridges.append(
-            bridges.create_bridge(
-                source=target_channel,
-                target=source_channel,
-                session=session,
-            )
+        await bridges.create_bridge(
+            source=target_channel,
+            target=source_channel,
+            session=session,
         )
-
-    await asyncio.gather(*create_bridges)
 
 
 @discord.app_commands.default_permissions(
@@ -702,7 +694,6 @@ async def bridge_thread_helper(
     bridged_threads: list[int] = []
     failed_channels: list[int] = []
 
-    create_bridges: list["Coroutine[Any, Any, Bridge]"] = []
     add_user_to_threads: list["Coroutine[Any, Any, None]"] = []
     try:
         add_user_to_threads.append(thread_to_bridge.join())
@@ -770,23 +761,19 @@ async def bridge_thread_helper(
                     pass
 
         threads_created[channel_id] = new_thread
-        create_bridges.append(
-            bridges.create_bridge(
-                source=thread_to_bridge,
-                target=new_thread,
-                session=session,
-            )
+        await bridges.create_bridge(
+            source=thread_to_bridge,
+            target=new_thread,
+            session=session,
         )
         if inbound_bridges and inbound_bridges[channel_id]:
-            create_bridges.append(
-                bridges.create_bridge(
-                    source=new_thread,
-                    target=thread_to_bridge,
-                    session=session,
-                )
+            await bridges.create_bridge(
+                source=new_thread,
+                target=thread_to_bridge,
+                session=session,
             )
         succeeded_at_least_once = True
-    await asyncio.gather(*(create_bridges + add_user_to_threads))
+    await asyncio.gather(*add_user_to_threads)
 
     if interaction:
         if succeeded_at_least_once:
@@ -1302,7 +1289,6 @@ async def demolish_all_bridges(
     -------
     bool
     """
-    bridges_being_demolished: list["Coroutine[Any, Any, None]"] = []
     demolished_all = True
 
     for channel_to_demolish_id, (
@@ -1341,20 +1327,15 @@ async def demolish_all_bridges(
 
         channels_affected = channels_affected.union(paired_channels)
 
-        bridges_being_demolished.append(
-            bridges.demolish_bridges(
-                source_channel=channel_to_demolish_id,
-                session=session,
-            )
+        await bridges.demolish_bridges(
+            source_channel=channel_to_demolish_id,
+            session=session,
         )
-        bridges_being_demolished.append(
-            bridges.demolish_bridges(
-                target_channel=channel_to_demolish_id,
-                session=session,
-            )
+        await bridges.demolish_bridges(
+            target_channel=channel_to_demolish_id,
+            session=session,
         )
 
-    await asyncio.gather(*bridges_being_demolished)
     await validate_auto_bridge_thread_channels(channels_affected, session)
 
     return demolished_all
@@ -1442,7 +1423,11 @@ async def whitelist(interaction: discord.Interaction, apps: str):
     response: list[str] = []
     try:
         channel_id_str = str(channel.id)
-        with Session.begin() as session:
+
+        @sql_command
+        def _toggle_whitelist(*, session: SQLSession | None = None):
+            assert session is not None
+
             if len(apps_to_add) > 0:
                 session.add_all(
                     [
@@ -1480,6 +1465,8 @@ async def whitelist(interaction: discord.Interaction, apps: str):
             )
             if len(common.per_channel_whitelist[channel.id]) == 0:
                 del common.per_channel_whitelist[channel.id]
+
+        _toggle_whitelist()
     except Exception as e:
         if isinstance(e, SQLError):
             await interaction.followup.send(
@@ -1505,7 +1492,8 @@ async def whitelist(interaction: discord.Interaction, apps: str):
     await interaction.followup.send("\n".join(response), ephemeral=True)
 
     logger.debug(
-        "Call to /whitelist with interaction ID %s successful.", interaction.id
+        "Call to /whitelist with interaction ID %s successful.",
+        interaction.id,
     )
 
 
@@ -1577,17 +1565,24 @@ async def map_emoji(
 
     try:
         image_hash = await emoji_hash_map.map.get_hash(emoji=internal_emoji)
-        map_emojis = await asyncio.gather(
-            *[
-                emoji_hash_map.map.map_emoji(
-                    external_emoji_id=id,
-                    external_emoji_name=name,
-                    internal_emoji=internal_emoji,
-                    image_hash=image_hash,
+
+        @sql_command
+        async def _map_all_emoji(*, session: SQLSession | None = None) -> list[bool]:
+            assert session is not None
+            emoji_mapped = []
+            for name, id in external_emojis_set:
+                emoji_mapped.append(
+                    await emoji_hash_map.map.map_emoji(
+                        external_emoji_id=id,
+                        external_emoji_name=name,
+                        internal_emoji=internal_emoji,
+                        image_hash=image_hash,
+                        session=session,
+                    )
                 )
-                for name, id in external_emojis_set
-            ]
-        )
+            return emoji_mapped
+
+        map_emojis = await _map_all_emoji()
     except Exception as e:
         if isinstance(e, SQLError):
             await interaction.followup.send(
@@ -1873,14 +1868,23 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
     # Then get the bridged ones
     at_least_one_inaccessible_bridge = False
     try:
-        with Session.begin() as session:
+
+        @sql_command
+        async def _get_bridged_reactions(
+            all_reactions_async: dict[str, list["Coroutine[Any, Any, set[int]]"]],
+            at_least_one_inaccessible_bridge: bool,
+            *,
+            session: SQLSession | None = None,
+        ) -> tuple[dict[str, list["Coroutine[Any, Any, set[int]]"]], bool]:
+            assert session is not None
+
             # We need to see whether this message is a bridged message and, if so, find its source
             source_message_map = sql_select(
                 DBMessageMap,
                 where=(DBMessageMap.target_message == str(message.id)),
                 session=session,
             ).first()
-            if isinstance(source_message_map, DBMessageMap):
+            if source_message_map is not None:
                 # This message was bridged, so find the original one and then find any other bridged messages from it
                 source_channel_id = int(source_message_map.source_channel)
                 source_message_id = int(source_message_map.source_message)
@@ -1939,6 +1943,16 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
                         )
                     except discord.Forbidden:
                         at_least_one_inaccessible_bridge = True
+
+            return all_reactions_async, at_least_one_inaccessible_bridge
+
+        (
+            all_reactions_async,
+            at_least_one_inaccessible_bridge,
+        ) = await _get_bridged_reactions(
+            all_reactions_async,
+            at_least_one_inaccessible_bridge,
+        )
     except Exception as e:
         if isinstance(e, SQLError):
             await interaction.followup.send(
