@@ -4,20 +4,63 @@ import io
 import json
 from collections import defaultdict
 from hashlib import md5
-from typing import TYPE_CHECKING, Any, AsyncIterator, Callable, TypeVar, cast, overload
+from typing import TYPE_CHECKING, Any, AsyncIterator, Callable, TypeVar, overload
 
 import aiohttp
 import discord
 from aiolimiter import AsyncLimiter
 from beartype import beartype
 
-from validations import ArgumentError, ChannelTypeError, HTTPResponseError, logger
+from validations import (
+    ArgumentError,
+    ChannelTypeError,
+    HTTPResponseError,
+    TextChannelOrThread,
+    logger,
+)
 
 if TYPE_CHECKING:
-    from typing import Literal, NotRequired, SupportsInt, TypedDict
+    from typing import Literal, NotRequired, SupportsInt, TypeAlias, TypedDict
 
-    class Settings(TypedDict):
-        """A TypedDict with the bot's settings. The `settings.json` file must contain a `"context"` entry whose value is another key in the file with the attributes below. For example:
+    class SettingsRoot(TypedDict):
+        """
+        A TypedDict with the bot's settings. The `settings.json` file must contain a `"context"` entry whose value is another key in the file with the attributes defined in the `BridgeBotSettings` typed dictionary below. For example:
+
+        .. code-block:: json
+            {
+                "context": "production",
+                "production": {
+                    "app_token": "...",
+                    "db_dialect": "...",
+                    ...
+                },
+                "development": {
+                    "app_token": "...",
+                    "db_dialect": "...",
+                    ...
+                }
+            }
+
+        Attributes
+        ----------
+        context : Literal['production', 'development']
+            The current execution context of the bot. The default template includes "production" and "development" entries.
+        production : BridgeBotSettings
+            The production bot settings.
+        development : BridgeBotSettings
+            The development bot settings.
+        tests : NotRequired[TestBotSettings]
+            Optionally, settings for the bot set up for unit/integration testing, if such a bot is set up.
+        """
+
+        context: Literal["production", "development"]
+        production: "BridgeBotSettings"
+        development: "BridgeBotSettings"
+        tests: NotRequired["TestBotSettings"]
+
+    class BridgeBotSettings(TypedDict):
+        """
+        A TypedDict with the bot's settings. The `settings.json` file must contain a `"context"` entry whose value is another key in the file with the attributes below. For example:
 
         .. code-block:: json
             {
@@ -59,21 +102,44 @@ if TYPE_CHECKING:
         """
 
         app_token: str
-        db_dialect: "Literal['mysql', 'postgresql', 'sqlite']"
-        db_driver: "Literal['pymysql', 'psycopg2', 'pysqlite']"
+        db_dialect: Literal["mysql", "postgresql", "sqlite"]
+        db_driver: Literal["pymysql", "psycopg2", "pysqlite"]
         db_host: str
         db_port: int
         db_user: str
         db_pwd: str
         db_name: str
-        emoji_server_id: "NotRequired[SupportsInt | str]"
-        whitelisted_apps: "NotRequired[list[SupportsInt | str]]"
+        emoji_server_id: NotRequired[SupportsInt | str]
+        whitelisted_apps: NotRequired[list[SupportsInt | str]]
+
+    class TestBotSettings(TypedDict):
+        """A TypedDict with the bot's settings. The `settings.json` file may contain a `"tests"` entry with the attributes below. For example:
+
+        .. code-block:: json
+            {
+                "...",
+                "tests": {
+                    "app_token": "...",
+                    "testing_server_id": "..."
+                }
+            }
+
+        Furthermore, this bot must be in the Bridge Bot's whitelist.
+
+        Attributes
+        ----------
+        app_token : str
+            The token used by the Discord developers API.
+        testing_server_id : SupportsInt | str
+            The ID of a Discord server to run testing. The Bridge Bot itself must have administrator permissions in it but the unit testing bot must not.
+        """
+
+        app_token: str
+        testing_server_id: SupportsInt | str
 
 
-settings_root: "dict[str, str | Settings]" = json.load(open("settings.json"))
-assert isinstance(settings_root["context"], str)
-context = settings_root["context"]
-settings: "Settings" = cast("Settings", settings_root[context])
+settings_root: "SettingsRoot" = json.load(open("settings.json"))
+settings = settings_root[settings_root["context"]]
 if whitelisted_apps := settings.get("whitelisted_apps"):
     settings["whitelisted_apps"] = [int(app_id) for app_id in whitelisted_apps]
 
@@ -130,7 +196,7 @@ channel_lock: dict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
 # Type wildcard
 T = TypeVar("T", bound=Any)
 
-DiscordChannel = (
+DiscordChannel: "TypeAlias" = (
     discord.abc.GuildChannel
     | discord.abc.PrivateChannel
     | discord.Thread
@@ -214,7 +280,7 @@ async def get_channel_from_id(
     *,
     ensure_text_or_thread: "Literal[True]",
     bot_client: discord.Client | None = None,
-) -> discord.TextChannel | discord.Thread:
+) -> TextChannelOrThread:
     """Return the TextChannel or Thread with the ID passed as argument, or None if it couldn't be found.
 
     Parameters
@@ -299,7 +365,7 @@ async def get_channel_from_id(
     *,
     ensure_text_or_thread: "Literal[True]",
     bot_client: discord.Client | None = None,
-) -> discord.TextChannel | discord.Thread:
+) -> TextChannelOrThread:
     """Return the channel passed as argument.
 
     Parameters
@@ -358,7 +424,7 @@ async def get_channel_from_id(
     :class:`~discord.Forbidden`
         The client does not not have permission to fetch the channel with that ID.
     """
-    if (bot_client is not None) and not isinstance(channel_or_id, int):
+    if (bot_client is not None) and (not isinstance(channel_or_id, int)):
         channel_or_id = channel_or_id.id
     global client
     bot_client = bot_client or client
@@ -375,7 +441,7 @@ async def get_channel_from_id(
 
     if ensure_text_or_thread:
         try:
-            assert isinstance(channel, discord.TextChannel | discord.Thread)
+            assert isinstance(channel, TextChannelOrThread)
         except AssertionError:
             raise ChannelTypeError(
                 "`ensure_text_or_thread` was set to True but the channel or ID passed as argument does not refer to a Discord text channel or a Thread."
@@ -1122,7 +1188,7 @@ def truncate(msg: str, length: int) -> str:
     str
         _description_
     """
-    return msg if len(msg) < length else msg[: length - 1] + "…"
+    return msg if (len(msg) < length) else msg[: length - 1] + "…"
 
 
 @beartype
@@ -1151,7 +1217,7 @@ async def wait_until_ready(
     time_to_wait = max(time_to_wait, 0.0)
     polling_rate = max(polling_rate, 1.0)
     time_waited = 0.0
-    while not is_ready and time_waited < time_to_wait:
+    while (not is_ready) and (time_waited < time_to_wait):
         await asyncio.sleep(polling_rate)
         time_waited += polling_rate
 
@@ -1194,8 +1260,8 @@ async def run_retries(
         try:
             return fun()
         except Exception as e:
-            if retry < num_retries - 1 and (
-                not exceptions_to_catch or isinstance(e, exceptions_to_catch)
+            if (retry < num_retries - 1) and (
+                (not exceptions_to_catch) or isinstance(e, exceptions_to_catch)
             ):
                 await asyncio.sleep(time_to_wait)
             else:

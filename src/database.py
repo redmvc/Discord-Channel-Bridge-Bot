@@ -14,25 +14,25 @@ from typing import (
 from beartype import beartype
 from sqlalchemy import (
     Boolean,
+    ColumnExpressionArgument,
     Integer,
+    ScalarResult,
     String,
     UniqueConstraint,
     UpdateBase,
     create_engine,
+    sql,
 )
-from sqlalchemy import Select as SQLSelect
-from sqlalchemy import Update as SQLUpdate
-from sqlalchemy import insert as other_db_insert
 from sqlalchemy.dialects import mysql, postgresql, sqlite
-from sqlalchemy.exc import StatementError as SQLError
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 from sqlalchemy.orm import Session as SQLSession
 
-from common import run_retries, settings
+from common import settings
 from validations import logger
 
 if TYPE_CHECKING:
     from typing import cast
+
 
 T = TypeVar("T", bound=Any)
 P = ParamSpec("P")
@@ -220,10 +220,56 @@ class DBAppWhitelist(DBBase):
     application: Mapped[str] = mapped_column(String(32), nullable=False)
 
 
-@beartype
-async def sql_upsert(
+Table = (
+    DBBridge
+    | DBWebhook
+    | DBMessageMap
+    | DBReactionMap
+    | DBReactionMap
+    | DBAutoBridgeThreadChannels
+    | DBEmoji
+    | DBAppWhitelist
+)
+TableType = TypeVar("TableType", bound=Table)
+
+
+def sql_select(
+    from_: type[TableType],
     *,
-    table: Any,
+    where: ColumnExpressionArgument[bool] | None = None,
+    order_by: ColumnExpressionArgument[Any] | str | None = None,
+    session: SQLSession,
+) -> ScalarResult[TableType]:
+    """Return an iterator with the results of a "select" expression on a table, optionally with some conditions.
+
+    Parameters
+    ----------
+    from_ : type[:class:`~database.DBBridge`] | type[:class:`~database.DBWebhook`] | type[:class:`~database.DBMessageMap`] | type[:class:`~database.DBReactionMap`] | type[:class:`~database.DBAutoBridgeThreadChannels`] | type[:class:`~database.DBEmoji`]
+        The table to select from.
+    where : :class:`~sqlalchemyColumnExpressionArgument`[bool] | None, optional
+        Any conditions to use to select from the table. Defaults to None, in which case no filtering will be done.
+    order_by : :class:`~sqlalchemyColumnExpressionArgument`[Any] | str | None, optional
+        Any column to be used to order the results by. Defaults to None, in which case no ordering will be done.
+    session : :class:`~sqlalchemy.orm.SQLSession`
+        An SQLAlchemy ORM Session connecting to the database.
+
+    Returns
+    -------
+    :class:`~sqlalchemy.ScalarResult`[:class:`~database.DBBridge` | :class:`~database.DBWebhook` | :class:`~database.DBMessageMap` | :class:`~database.DBReactionMap` | :class:`~database.DBAutoBridgeThreadChannels` | :class:`~database.DBEmoji`]
+    """
+    select = sql.select(from_)
+    if where is not None:
+        select = select.where(where)
+    if order_by is not None:
+        select = select.order_by(order_by)
+
+    return session.scalars(select)
+
+
+@beartype
+def get_sql_upsert_query(
+    table: type[Table],
+    *,
     indices: Iterable[str],
     ignored_cols: Iterable[str] | None = None,
     **kwargs: Any,
@@ -232,7 +278,7 @@ async def sql_upsert(
 
     Parameters
     ----------
-    table : :class:`~sqlalchemy.sql._typing._DMLTableArgument`
+    table : type[:class:`~database.DBBridge`] | type[:class:`~database.DBWebhook`] | type[:class:`~database.DBMessageMap`] | type[:class:`~database.DBReactionMap`] | type[:class:`~database.DBAutoBridgeThreadChannels`] | type[:class:`~database.DBEmoji`]
         The table to insert into.
     indices : Iterable[str]
         A list with the names of the indices (i.e. the columns whose uniqueness will be checked).
@@ -283,7 +329,8 @@ async def sql_upsert(
             insert = sqlite.insert(table)
 
         return insert.values(**insert_values).on_conflict_do_update(
-            index_elements=indices, set_=update_values
+            index_elements=indices,
+            set_=update_values,
         )
     else:
         # I'll do a manual update in this case
@@ -294,24 +341,21 @@ async def sql_upsert(
             upsert: UpdateBase
 
             def select_existing(session: SQLSession):
-                select_table: SQLSelect[tuple[Any]] = SQLSelect(table).where(
-                    *index_values
-                )
-                return session.execute(select_table).first()
+                return session.execute(sql.select(table).where(*index_values)).first()
 
-            if await sql_retry(lambda: select_existing(session)):
+            if select_existing(session):
                 # Values with those keys do exist, so I update
-                upsert = SQLUpdate(table).where(*index_values).values(**update_values)
+                upsert = sql.Update(table).where(*index_values).values(**update_values)
             else:
-                upsert = other_db_insert(table).values(**insert_values)
+                upsert = sql.insert(table).values(**insert_values)
 
         return upsert
 
 
 @beartype
-async def sql_insert_ignore_duplicate(
+def get_sql_insert_ignore_duplicate_query(
+    table: type[Table],
     *,
-    table: Any,
     indices: Iterable[str],
     **kwargs: Any,
 ) -> UpdateBase:
@@ -319,7 +363,7 @@ async def sql_insert_ignore_duplicate(
 
     Parameters
     ----------
-    table : :class:`~sqlalchemy.sql._typing._DMLTableArgument`
+    table : type[:class:`~database.DBBridge`] | type[:class:`~database.DBWebhook`] | type[:class:`~database.DBMessageMap`] | type[:class:`~database.DBReactionMap`] | type[:class:`~database.DBAutoBridgeThreadChannels`] | type[:class:`~database.DBEmoji`]
         The table to insert into.
     indices : Iterable[str]
         A list with the names of the indices (i.e. the columns whose uniqueness will be checked).
@@ -363,45 +407,18 @@ async def sql_insert_ignore_duplicate(
             insert_unknown: UpdateBase
 
             def select_existing(session: SQLSession):
-                select_table: SQLSelect[tuple[Any]] = SQLSelect(table).where(
-                    *index_values
-                )
-                return session.execute(select_table).first()
+                return session.execute(sql.select(table).where(*index_values)).first()
 
-            if await sql_retry(lambda: select_existing(session)):
+            if select_existing(session):
                 # Values with those keys do exist, so I do nothing
                 random_index = indices.pop()
-                insert_unknown = SQLUpdate(table).values(
+                insert_unknown = sql.Update(table).values(
                     **{random_index: getattr(table, random_index)}
                 )
             else:
-                insert_unknown = other_db_insert(table).values(**insert_values)
+                insert_unknown = sql.insert(table).values(**insert_values)
 
         return insert_unknown
-
-
-@beartype
-async def sql_retry(
-    fun: Callable[..., T],
-    num_retries: int = 5,
-    time_to_wait: float | int = 10,
-) -> T:
-    """Run an SQL function and retry it every time an :class:`~sqlalchemy.exc.StatementError` occurs up to a certain maximum number of tries. If it succeeds, return its result; otherwise, raise the error.
-
-    Parameters
-    ----------
-    fun : Callable[..., T]
-        The function to run.
-    num_retries : int, optional
-        The number of times to try the function again. If set to 0 or less, will be set to 1.
-    time_to_wait : float | int, optional
-        Time in seconds to wait between retries; only used if `num_retries` is greater than 1. If set to 0 or less, will set `num_retries` to 1. Defaults to 5.
-
-    Returns
-    -------
-    T
-    """
-    return await run_retries(fun, num_retries, time_to_wait, SQLError)
 
 
 @overload
