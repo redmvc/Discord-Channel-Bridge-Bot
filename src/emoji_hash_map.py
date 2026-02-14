@@ -46,9 +46,8 @@ class EmojiHashMap:
         self._hash_to_internal_emoji: dict[str, int] = {}
 
         try:
-            select_hashed_emoji: sql.Select[tuple[DBEmoji]] = sql.Select(DBEmoji)
             hashed_emoji_query_result: "ScalarResult[DBEmoji]" = session.scalars(
-                select_hashed_emoji
+                sql.select(DBEmoji)
             )
             emoji_ids_to_delete: set[str] = set()
             accessibility_flips: set[str] = set()

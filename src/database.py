@@ -293,10 +293,7 @@ async def sql_upsert(
             upsert: UpdateBase
 
             def select_existing(session: SQLSession):
-                select_table: sql.Select[tuple[Any]] = sql.Select(table).where(
-                    *index_values
-                )
-                return session.execute(select_table).first()
+                return session.execute(sql.select(table).where(*index_values)).first()
 
             if await sql_retry(lambda: select_existing(session)):
                 # Values with those keys do exist, so I update
@@ -362,10 +359,7 @@ async def sql_insert_ignore_duplicate(
             insert_unknown: UpdateBase
 
             def select_existing(session: SQLSession):
-                select_table: sql.Select[tuple[Any]] = sql.Select(table).where(
-                    *index_values
-                )
-                return session.execute(select_table).first()
+                return session.execute(sql.select(table).where(*index_values)).first()
 
             if await sql_retry(lambda: select_existing(session)):
                 # Values with those keys do exist, so I do nothing

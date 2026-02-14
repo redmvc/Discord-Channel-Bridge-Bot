@@ -173,9 +173,8 @@ class Bridges:
         invalid_channel_ids: set[str] = set()
         invalid_webhook_ids: set[str] = set()
 
-        select_all_webhooks: sql.Select[tuple[DBWebhook]] = sql.Select(DBWebhook)
         webhook_query_result: "ScalarResult[DBWebhook]" = session.scalars(
-            select_all_webhooks
+            sql.select(DBWebhook)
         )
         add_webhook_async: list["Coroutine[Any, Any, discord.Webhook]"] = []
         for channel_webhook in webhook_query_result:
@@ -219,9 +218,8 @@ class Bridges:
         targets_with_sources: set[str] = set()
 
         async_create_bridges: list["Coroutine[Any, Any, Bridge]"] = []
-        select_all_bridges: sql.Select[tuple[DBBridge]] = sql.Select(DBBridge)
         bridge_query_result: "ScalarResult[DBBridge]" = session.scalars(
-            select_all_bridges
+            sql.select(DBBridge)
         )
         for bridge in bridge_query_result:
             target_id_str = bridge.target
