@@ -496,15 +496,35 @@ def sql_command(
 
             @wraps(func)
             async def wrapper_func_async(*args, **kwargs) -> T:
-                if isinstance(kwargs.get(session_keyword), SQLSession):
-                    return await func(*args, **kwargs)
+                # Try to fetch the session if it already existed
+                session_already_existed = isinstance(
+                    session := kwargs.get(session_keyword),
+                    SQLSession,
+                )
 
-                with Session() as session:
+                # It didn't exist, create a new one and add it to the kwargs
+                if not session_already_existed:
+                    session = Session()
                     kwargs[session_keyword] = session
+
+                try:
+                    # Run the function and get the result
                     if commit_results:
-                        with session.begin():
-                            return await func(*args, **kwargs)
-                    return await func(*args, **kwargs)
+                        if not session.in_transaction():
+                            with session.begin():
+                                result = await func(*args, **kwargs)
+                        else:
+                            # If the session was already in a transaction, I begin a nested transaction
+                            with session.begin_nested():
+                                result = await func(*args, **kwargs)
+                    else:
+                        result = await func(*args, **kwargs)
+                finally:
+                    # If the session was new, I close it here, but not otherwise
+                    if not session_already_existed:
+                        session.close()
+
+                return result
 
             wrapper_func = wrapper_func_async
         else:
@@ -513,15 +533,35 @@ def sql_command(
 
             @wraps(func)
             def wrapper_func_sync(*args, **kwargs) -> T:
-                if isinstance(kwargs.get(session_keyword), SQLSession):
-                    return func(*args, **kwargs)
+                # Try to fetch the session if it already existed
+                session_already_existed = isinstance(
+                    session := kwargs.get(session_keyword),
+                    SQLSession,
+                )
 
-                with Session() as session:
+                # It didn't exist, create a new one and add it to the kwargs
+                if not session_already_existed:
+                    session = Session()
                     kwargs[session_keyword] = session
+
+                try:
+                    # Run the function and get the result
                     if commit_results:
-                        with session.begin():
-                            return func(*args, **kwargs)
-                    return func(*args, **kwargs)
+                        if not session.in_transaction():
+                            with session.begin():
+                                result = func(*args, **kwargs)
+                        else:
+                            # If the session was already in a transaction, I begin a nested transaction
+                            with session.begin_nested():
+                                result = func(*args, **kwargs)
+                    else:
+                        result = func(*args, **kwargs)
+                finally:
+                    # If the session was new, I close it here, but not otherwise
+                    if not session_already_existed:
+                        session.close()
+
+                return result
 
             wrapper_func = wrapper_func_sync
 
