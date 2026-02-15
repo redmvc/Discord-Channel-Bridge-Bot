@@ -8,13 +8,11 @@ from sqlalchemy import UpdateBase, sql
 from sqlalchemy.orm import Session as SQLSession
 
 import common
-from database import DBEmoji, sql_command, get_sql_upsert_query
+from database import DBEmoji, get_sql_upsert_query, sql_command, sql_select
 from validations import ArgumentError, logger
 
 if TYPE_CHECKING:
     from typing import Any, Coroutine, Literal, Sequence
-
-    from sqlalchemy import ScalarResult
 
 
 class EmojiHashMap:
@@ -46,9 +44,7 @@ class EmojiHashMap:
         self._hash_to_internal_emoji: dict[str, int] = {}
 
         try:
-            hashed_emoji_query_result: "ScalarResult[DBEmoji]" = session.scalars(
-                sql.select(DBEmoji)
-            )
+            hashed_emoji_query_result = sql_select(DBEmoji, session=session)
             emoji_ids_to_delete: set[str] = set()
             accessibility_flips: set[str] = set()
             for row in hashed_emoji_query_result:
