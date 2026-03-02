@@ -5,20 +5,20 @@ from typing import TYPE_CHECKING, Literal, overload
 
 import discord
 from beartype import beartype
-from sqlalchemy import sql
 from sqlalchemy.exc import StatementError
 from sqlalchemy.orm import Session as SQLSession
 
 import common
 from database import (
+    DataFrame,
     DBBridge,
     DBMessageMap,
     DBWebhook,
-    sql_command,
     get_sql_insert_ignore_duplicate_query,
-    sql_select,
     get_sql_upsert_query,
+    sql_command,
 )
+from database import functions as F
 from validations import (
     ArgumentError,
     TextChannelOrThread,
@@ -171,7 +171,7 @@ class Bridges:
         invalid_channel_ids: set[str] = set()
         invalid_webhook_ids: set[str] = set()
 
-        webhook_query_result = sql_select(DBWebhook, session=session)
+        webhook_query_result = DataFrame(session, DBWebhook).collect()
         add_webhook_async: list["Coroutine[Any, Any, discord.Webhook]"] = []
         for channel_webhook in webhook_query_result:
             channel_id = int(channel_webhook.channel)
@@ -214,7 +214,7 @@ class Bridges:
         targets_with_sources: set[str] = set()
 
         async_create_bridges: list["Coroutine[Any, Any, Bridge]"] = []
-        bridge_query_result = sql_select(DBBridge, session=session)
+        bridge_query_result = DataFrame(session, DBBridge).collect()
         for bridge in bridge_query_result:
             target_id_str = bridge.target
             if target_id_str in invalid_channel_ids:
@@ -320,23 +320,32 @@ class Bridges:
             )
 
             if len(channel_ids_to_delete) > 0:
-                delete_invalid_bridges = sql.Delete(DBBridge).where(
-                    DBBridge.source.in_(channel_ids_to_delete)
-                    | DBBridge.target.in_(channel_ids_to_delete)
+                (
+                    DataFrame(session, DBBridge)
+                    .where(
+                        F.col("source").isin(channel_ids_to_delete)
+                        | F.col("target").isin(channel_ids_to_delete)
+                    )
+                    .delete()
                 )
-                session.execute(delete_invalid_bridges)
 
-                delete_invalid_messages = sql.Delete(DBMessageMap).where(
-                    DBMessageMap.source_channel.in_(channel_ids_to_delete)
-                    | DBMessageMap.target_channel.in_(channel_ids_to_delete)
+                (
+                    DataFrame(session, DBMessageMap)
+                    .where(
+                        F.col("source_channel").isin(channel_ids_to_delete)
+                        | F.col("target_channel").isin(channel_ids_to_delete)
+                    )
+                    .delete()
                 )
-                session.execute(delete_invalid_messages)
 
-            delete_invalid_webhooks = sql.Delete(DBWebhook).where(
-                DBWebhook.channel.in_(channel_ids_to_delete)
-                | DBWebhook.webhook.in_(invalid_webhook_ids)
+            (
+                DataFrame(session, DBWebhook)
+                .where(
+                    F.col("channel").isin(channel_ids_to_delete)
+                    | F.col("webhook").isin(invalid_webhook_ids)
+                )
+                .delete()
             )
-            session.execute(delete_invalid_webhooks)
 
         logger.info("Bridges successfully loaded from database!")
 
@@ -816,34 +825,32 @@ class Bridges:
         """Remove bridges from database."""
         logger.debug("Removing bridge(s) from database...")
 
-        delete_demolished_bridges_and_messages: list[sql.Delete] = []
         for sid, tid in bridges_to_demolish:
             source_id_str = str(sid)
             target_id_str = str(tid)
-            delete_demolished_bridges_and_messages.append(
-                sql.Delete(DBBridge).where(
-                    (DBBridge.source == source_id_str)
-                    & (DBBridge.target == target_id_str)
+            (
+                DataFrame(session, DBBridge)
+                .where(
+                    (F.col("source") == F.lit(source_id_str))
+                    & (F.col("target") == F.lit(target_id_str))
                 )
+                .delete()
             )
-            delete_demolished_bridges_and_messages.append(
-                sql.Delete(DBMessageMap).where(
-                    (DBMessageMap.source_channel == source_id_str)
-                    & (DBMessageMap.target_channel == target_id_str)
+            (
+                DataFrame(session, DBMessageMap)
+                .where(
+                    (F.col("source_channel") == F.lit(source_id_str))
+                    & (F.col("target_channel") == F.lit(target_id_str))
                 )
+                .delete()
             )
 
         if len(webhooks_deleted) > 0:
-            delete_invalid_webhooks = sql.Delete(DBWebhook).where(
-                DBWebhook.webhook.in_(webhooks_deleted)
+            (
+                DataFrame(session, DBWebhook)
+                .where(F.col("webhook").isin(webhooks_deleted))
+                .delete()
             )
-        else:
-            delete_invalid_webhooks = None
-
-        for delete_query in delete_demolished_bridges_and_messages:
-            session.execute(delete_query)
-        if delete_invalid_webhooks is not None:
-            session.execute(delete_invalid_webhooks)
 
         logger.debug("Bridge(s) removed from database.")
 

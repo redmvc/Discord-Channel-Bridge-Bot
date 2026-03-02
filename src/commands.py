@@ -4,7 +4,6 @@ from typing import TYPE_CHECKING, Any, Iterable, Literal, overload
 
 import discord
 from beartype import beartype
-from sqlalchemy import sql
 from sqlalchemy.exc import StatementError as SQLError
 from sqlalchemy.orm import Session as SQLSession
 
@@ -12,12 +11,13 @@ import common
 import emoji_hash_map
 from bridge import Bridge, bridges
 from database import (
+    DataFrame,
     DBAppWhitelist,
     DBAutoBridgeThreadChannels,
     DBMessageMap,
     sql_command,
-    sql_select,
 )
+from database import functions as F
 from validations import (
     ChannelTypeError,
     TextChannelOrThread,
@@ -661,13 +661,11 @@ async def bridge_thread_helper(
         # I don't need to store it I just need to know whether it exists
         await thread_parent.fetch_message(thread_to_bridge.id)
         source_starting_message = (
-            sql_select(
-                DBMessageMap,
-                where=(DBMessageMap.target_message == str(thread_to_bridge.id)),
-                session=session,
-            )
-        ).first()
-        if isinstance(source_starting_message, DBMessageMap):
+            DataFrame(session, DBMessageMap)
+            .where(F.col("target_message") == F.lit(thread_to_bridge.id))
+            .first()
+        )
+        if source_starting_message is not None:
             # The message that's starting this thread is bridged
             source_channel_id = int(source_starting_message.source_channel)
             source_message_id = int(source_starting_message.source_message)
@@ -676,10 +674,10 @@ async def bridge_thread_helper(
             source_channel_id = thread_parent.id
             source_message_id = thread_to_bridge.id
 
-        target_starting_messages = sql_select(
-            DBMessageMap,
-            where=(DBMessageMap.source_message == str(source_message_id)),
-            session=session,
+        target_starting_messages = (
+            DataFrame(session, DBMessageMap)
+            .where(F.col("source_message") == F.lit(source_message_id))
+            .collect()
         )
         for target_starting_message in target_starting_messages:
             matching_starting_messages[int(target_starting_message.target_channel)] = (
@@ -854,12 +852,10 @@ def stop_auto_bridging_threads_helper(
         else:
             channel_ids_to_remove = set(channel_ids_to_remove)
 
-    session.execute(
-        sql.Delete(DBAutoBridgeThreadChannels).where(
-            DBAutoBridgeThreadChannels.channel.in_(
-                [str(id) for id in channel_ids_to_remove]
-            )
-        )
+    (
+        DataFrame(session, DBAutoBridgeThreadChannels)
+        .where(F.col("channel").isin(channel_ids_to_remove))
+        .delete()
     )
 
     common.auto_bridge_thread_channels -= channel_ids_to_remove
@@ -1442,13 +1438,12 @@ async def whitelist(interaction: discord.Interaction, apps: str):
                 )
 
             if len(apps_to_remove) > 0:
-                remove_apps = sql.Delete(DBAppWhitelist).where(
-                    (DBAppWhitelist.channel == channel_id_str)
-                    & DBAppWhitelist.application.in_(
-                        [str(app_id) for app_id in apps_to_remove]
+                (
+                    DataFrame(session, DBAppWhitelist).where(
+                        (F.col("channel") == F.lit(channel_id_str))
+                        & F.col("application").isin(apps_to_remove)
                     )
                 )
-                session.execute(remove_apps)
 
                 apps_to_remove_str = ", ".join(
                     [f"<@{app_id}>" for app_id in apps_to_remove]
@@ -1879,11 +1874,11 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
             assert session is not None
 
             # We need to see whether this message is a bridged message and, if so, find its source
-            source_message_map = sql_select(
-                DBMessageMap,
-                where=(DBMessageMap.target_message == str(message.id)),
-                session=session,
-            ).first()
+            source_message_map = (
+                DataFrame(session, DBMessageMap)
+                .where(F.col("target_message") == F.lit(message.id))
+                .first()
+            )
             if source_message_map is not None:
                 # This message was bridged, so find the original one and then find any other bridged messages from it
                 source_channel_id = int(source_message_map.source_channel)
@@ -1912,10 +1907,10 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
             # Then we find all messages bridged from the source
             outbound_bridges = bridges.get_outbound_bridges(source_channel_id)
             if outbound_bridges:
-                bridged_messages = sql_select(
-                    DBMessageMap,
-                    where=(DBMessageMap.source_message == str(source_message_id)),
-                    session=session,
+                bridged_messages = (
+                    DataFrame(session, DBMessageMap)
+                    .where(F.col("source_message") == F.lit(source_message_id))
+                    .collect()
                 )
                 for message_row in bridged_messages:
                     target_channel_id = int(message_row.target_channel)

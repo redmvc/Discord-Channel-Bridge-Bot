@@ -4,11 +4,12 @@ from typing import TYPE_CHECKING, overload
 
 import discord
 from beartype import beartype
-from sqlalchemy import UpdateBase, sql
+from sqlalchemy import UpdateBase
 from sqlalchemy.orm import Session as SQLSession
 
 import common
-from database import DBEmoji, get_sql_upsert_query, sql_command, sql_select
+from database import DataFrame, DBEmoji, get_sql_upsert_query, sql_command
+from database import functions as F
 from validations import ArgumentError, logger
 
 if TYPE_CHECKING:
@@ -44,7 +45,7 @@ class EmojiHashMap:
         self._hash_to_internal_emoji: dict[str, int] = {}
 
         try:
-            hashed_emoji_query_result = sql_select(DBEmoji, session=session)
+            hashed_emoji_query_result = DataFrame(session, DBEmoji).collect()
             emoji_ids_to_delete: set[str] = set()
             accessibility_flips: set[str] = set()
             for row in hashed_emoji_query_result:
@@ -79,15 +80,17 @@ class EmojiHashMap:
                 )
 
             if len(emoji_ids_to_delete) > 0:
-                session.execute(
-                    sql.Delete(DBEmoji).where(DBEmoji.id.in_(emoji_ids_to_delete))
+                (
+                    DataFrame(session, DBEmoji)
+                    .where(F.col("id").isin(emoji_ids_to_delete))
+                    .delete()
                 )
 
             if len(accessibility_flips) > 0:
-                session.execute(
-                    sql.Update(DBEmoji)
-                    .where(DBEmoji.id.in_(accessibility_flips))
-                    .values(accessible=~DBEmoji.accessible)
+                (
+                    DataFrame(session, DBEmoji)
+                    .where(F.col("id").isin(accessibility_flips))
+                    .update(set_={"accessible": ~F.col("accessible")})
                 )
         except Exception as e:
             logger.error("An error occurred while creating an EmojiHashMap: %s", e)
@@ -260,15 +263,16 @@ class EmojiHashMap:
                 )
             image_hash = common.hash_image(image)
 
-        upsert_emoji_query = self.get_emoji_upsert_query(
-            emoji_id=emoji_id,
-            emoji_name=emoji_name,
-            emoji_server_id=emoji_server_id,
-            emoji_animated=emoji_animated,
-            image_hash=image_hash,
-            accessible=accessible,
+        session.execute(
+            self.get_emoji_upsert_query(
+                emoji_id=emoji_id,
+                emoji_name=emoji_name,
+                emoji_server_id=emoji_server_id,
+                emoji_animated=emoji_animated,
+                image_hash=image_hash,
+                accessible=accessible,
+            )
         )
-        session.execute(upsert_emoji_query)
 
         logger.debug("Emoji with ID %s added to database.", emoji_id)
 
@@ -483,7 +487,7 @@ class EmojiHashMap:
     ):
         logger.debug("Deleting emoji with ID %s from database...", emoji_id)
 
-        session.execute(sql.Delete(DBEmoji).where(DBEmoji.id == str(emoji_id)))
+        DataFrame(session, DBEmoji).where(F.col("id") == F.lit(emoji_id)).delete()
 
         logger.debug("Emoji with ID %s deleted from database.", emoji_id)
 
