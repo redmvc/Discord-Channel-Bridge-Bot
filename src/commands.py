@@ -3,7 +3,6 @@ import re
 from typing import TYPE_CHECKING, Any, Iterable, Literal, overload
 
 import discord
-from beartype import beartype
 from sqlalchemy.exc import StatementError as SQLError
 from sqlalchemy.orm import Session as SQLSession
 
@@ -224,15 +223,14 @@ async def bridge(
 
     await interaction.response.defer(thinking=True, ephemeral=True)
 
-    join_threads: list["Coroutine[Any, Any, None]"] = []
     if isinstance(message_channel, discord.Thread) and (not message_channel.me):
         try:
-            join_threads.append(message_channel.join())
+            await message_channel.join()
         except Exception:
             pass
     if isinstance(target_channel, discord.Thread) and (not target_channel.me):
         try:
-            join_threads.append(target_channel.join())
+            await target_channel.join()
         except Exception:
             pass
 
@@ -268,8 +266,6 @@ async def bridge(
         ephemeral=True,
     )
 
-    await asyncio.gather(*join_threads)
-
     logger.debug("Call to /bridge with interaction ID %s successful.", interaction.id)
 
 
@@ -304,7 +300,6 @@ async def create_bridges(
 
 
 @sql_command
-@beartype
 async def create_bridges(
     source_channel: TextChannelOrThread,
     target_channel: TextChannelOrThread,
@@ -543,7 +538,6 @@ def toggle_auto_bridge_threads(
 
 
 @sql_command
-@beartype
 def toggle_auto_bridge_threads(
     channel_id: int,
     *,
@@ -692,9 +686,8 @@ async def bridge_thread_helper(
     bridged_threads: list[int] = []
     failed_channels: list[int] = []
 
-    add_user_to_threads: list["Coroutine[Any, Any, None]"] = []
     try:
-        add_user_to_threads.append(thread_to_bridge.join())
+        await thread_to_bridge.join()
     except Exception:
         pass
 
@@ -748,13 +741,13 @@ async def bridge_thread_helper(
 
         if not thread_already_existed:
             try:
-                add_user_to_threads.append(new_thread.join())
+                await new_thread.join()
             except Exception:
                 pass
 
             if channel_member:
                 try:
-                    add_user_to_threads.append(new_thread.add_user(channel_member))
+                    await new_thread.add_user(channel_member)
                 except Exception:
                     pass
 
@@ -771,7 +764,6 @@ async def bridge_thread_helper(
                 session=session,
             )
         succeeded_at_least_once = True
-    await asyncio.gather(*add_user_to_threads)
 
     if interaction:
         if succeeded_at_least_once:
@@ -826,7 +818,6 @@ def stop_auto_bridging_threads_helper(
 
 
 @sql_command
-@beartype
 def stop_auto_bridging_threads_helper(
     channel_ids_to_remove: int | Iterable[int],
     *,
@@ -861,7 +852,6 @@ def stop_auto_bridging_threads_helper(
     common.auto_bridge_thread_channels -= channel_ids_to_remove
 
 
-@beartype
 async def validate_auto_bridge_thread_channels(
     channel_ids_to_check: int | Iterable[int],
     session: SQLSession | None = None,
@@ -902,7 +892,6 @@ async def validate_auto_bridge_thread_channels(
     stop_auto_bridging_threads_helper(channel_ids_to_remove, session=session)
 
 
-@beartype
 async def mention_to_channel(link_or_mention: str) -> common.DiscordChannel | None:
     """Return the channel referenced by a channel mention or a Discord link to a channel, if it's valid, or None if it isn't.
 
@@ -1060,7 +1049,6 @@ async def demolish_bridges(
 
 
 @sql_command
-@beartype
 async def demolish_bridges(
     source_channel: TextChannelOrThread,
     target_channel: TextChannelOrThread,
@@ -1257,7 +1245,6 @@ async def demolish_all_bridges(
 
 
 @sql_command
-@beartype
 async def demolish_all_bridges(
     user_id: int,
     lists_of_bridges: dict[

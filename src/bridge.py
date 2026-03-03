@@ -1,10 +1,8 @@
-import asyncio
 import inspect
 from copy import deepcopy
 from typing import TYPE_CHECKING, Literal, overload
 
 import discord
-from beartype import beartype
 from sqlalchemy.exc import StatementError
 from sqlalchemy.orm import Session as SQLSession
 
@@ -29,7 +27,7 @@ from validations import (
 )
 
 if TYPE_CHECKING:
-    from typing import Any, Callable, Coroutine
+    from typing import Callable
 
 
 class Bridge:
@@ -53,7 +51,6 @@ class Bridge:
         A webhook connecting those channels
     """
 
-    @beartype
     @classmethod
     async def create(
         cls,
@@ -151,7 +148,6 @@ class Bridges:
     async def load_from_database(self): ...
 
     @sql_command
-    @beartype
     async def load_from_database(self, *, session: SQLSession):
         """Load all bridges saved in the bot's connected database.
 
@@ -172,7 +168,6 @@ class Bridges:
         invalid_webhook_ids: set[str] = set()
 
         webhook_query_result = DataFrame(session, DBWebhook).collect()
-        add_webhook_async: list["Coroutine[Any, Any, discord.Webhook]"] = []
         for channel_webhook in webhook_query_result:
             channel_id = int(channel_webhook.channel)
             webhook_id = int(channel_webhook.webhook)
@@ -206,14 +201,12 @@ class Bridges:
                 continue
 
             # Webhook and channel are valid
-            add_webhook_async.append(self.webhooks.add_webhook(channel_id, webhook))
-        await asyncio.gather(*add_webhook_async)
+            await self.webhooks.add_webhook(channel_id, webhook)
 
         # I will make a list of all target channels that have at least one source and delete the ones that don't
         all_target_channels: set[str] = set()
         targets_with_sources: set[str] = set()
 
-        async_create_bridges: list["Coroutine[Any, Any, Bridge]"] = []
         bridge_query_result = DataFrame(session, DBBridge).collect()
         for bridge in bridge_query_result:
             target_id_str = bridge.target
@@ -261,13 +254,11 @@ class Bridges:
                 # so I can add this channel to my list of Bridges
                 targets_with_sources.add(target_id_str)
                 try:
-                    async_create_bridges.append(
-                        self.create_bridge(
-                            source=source_id,
-                            target=target_id,
-                            webhook=target_webhook,
-                            update_db=False,
-                        )
+                    await self.create_bridge(
+                        source=source_id,
+                        target=target_id,
+                        webhook=target_webhook,
+                        update_db=False,
                     )
                 except Exception as e:
                     logger.error(
@@ -304,9 +295,6 @@ class Bridges:
         )
         for channel_id in channel_ids_with_webhooks_to_delete:
             await self.webhooks.delete_channel(channel_id)
-
-        # Gather bridge creation and webhook deletion
-        await asyncio.gather(*async_create_bridges)
 
         # And update the database with any necessary deletions
         if (
@@ -349,7 +337,6 @@ class Bridges:
 
         logger.info("Bridges successfully loaded from database!")
 
-    @beartype
     async def create_bridge(
         self,
         *,
@@ -600,7 +587,6 @@ class Bridges:
         )
         return bridge
 
-    @beartype
     async def demolish_bridges(
         self,
         *,
@@ -854,7 +840,6 @@ class Bridges:
 
         logger.debug("Bridge(s) removed from database.")
 
-    @beartype
     def get_one_way_bridge(
         self,
         source: TextChannelOrThread | int,
@@ -882,7 +867,6 @@ class Bridges:
 
         return bridges_from_source.get(target_id)
 
-    @beartype
     def get_two_way_bridge(
         self,
         source: TextChannelOrThread | int,
@@ -907,7 +891,6 @@ class Bridges:
             self.get_one_way_bridge(target, source),
         )
 
-    @beartype
     def get_outbound_bridges(
         self,
         source: TextChannelOrThread | int,
@@ -935,7 +918,6 @@ class Bridges:
         """
         return set(self._outbound_bridges.keys())
 
-    @beartype
     def get_inbound_bridges(
         self,
         target: TextChannelOrThread | int,
@@ -1031,7 +1013,6 @@ class Bridges:
         """
         ...
 
-    @beartype
     async def get_reachable_channels(
         self,
         starting_channel: TextChannelOrThread | int,
@@ -1135,7 +1116,6 @@ class Webhooks:
         # The webhook used by a parent channel
         self._webhook_by_parent: dict[int, int] = {}
 
-    @beartype
     async def add_webhook(
         self,
         channel_or_id: TextChannelOrThread | int,
@@ -1210,7 +1190,6 @@ class Webhooks:
         logger.debug("Webhook added to channel with ID %s.", channel_id)
         return webhook
 
-    @beartype
     async def get_webhook(
         self,
         channel_or_id: TextChannelOrThread | int,
@@ -1256,7 +1235,6 @@ class Webhooks:
         # The channel doesn't have its own webhook associated, nor is it a thread so we can't find its parent
         return None
 
-    @beartype
     async def delete_channel(
         self,
         channel_or_id: TextChannelOrThread | int,
