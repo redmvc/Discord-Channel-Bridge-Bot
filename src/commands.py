@@ -224,15 +224,14 @@ async def bridge(
 
     await interaction.response.defer(thinking=True, ephemeral=True)
 
-    join_threads: list["Coroutine[Any, Any, None]"] = []
     if isinstance(message_channel, discord.Thread) and (not message_channel.me):
         try:
-            join_threads.append(message_channel.join())
+            await message_channel.join()
         except Exception:
             pass
     if isinstance(target_channel, discord.Thread) and (not target_channel.me):
         try:
-            join_threads.append(target_channel.join())
+            await target_channel.join()
         except Exception:
             pass
 
@@ -267,8 +266,6 @@ async def bridge(
         f"✅ Bridge created! Try sending a message from {direction_str} channel 😁",
         ephemeral=True,
     )
-
-    await asyncio.gather(*join_threads)
 
     logger.debug("Call to /bridge with interaction ID %s successful.", interaction.id)
 
@@ -694,9 +691,8 @@ async def bridge_thread_helper(
     bridged_threads: list[int] = []
     failed_channels: list[int] = []
 
-    add_user_to_threads: list["Coroutine[Any, Any, None]"] = []
     try:
-        add_user_to_threads.append(thread_to_bridge.join())
+        await thread_to_bridge.join()
     except Exception:
         pass
 
@@ -750,13 +746,13 @@ async def bridge_thread_helper(
 
         if not thread_already_existed:
             try:
-                add_user_to_threads.append(new_thread.join())
+                await new_thread.join()
             except Exception:
                 pass
 
             if channel_member:
                 try:
-                    add_user_to_threads.append(new_thread.add_user(channel_member))
+                    await new_thread.add_user(channel_member)
                 except Exception:
                     pass
 
@@ -773,7 +769,6 @@ async def bridge_thread_helper(
                 session=session,
             )
         succeeded_at_least_once = True
-    await asyncio.gather(*add_user_to_threads)
 
     if interaction:
         if succeeded_at_least_once:
