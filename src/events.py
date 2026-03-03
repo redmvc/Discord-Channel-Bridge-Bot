@@ -669,7 +669,6 @@ async def bridge_message_helper(
                     continue
                 thread_splat = {"thread": target_channel}
 
-            # Create an async version of bridging this message to gather at the end
             try:
                 bridged_message_list = await bridge_message_to_target_channel(
                     message,
@@ -1012,12 +1011,9 @@ async def _bridge_message_to_target_channel(
     else:
         reply_embed = []
 
-    attachments = await asyncio.gather(
-        *[
-            attachment.to_file(spoiler=attachment.is_spoiler())
-            for attachment in message_attachments
-        ]
-    )
+    attachments: list["discord.File"] = []
+    for attachment in message_attachments:
+        attachments.append(await attachment.to_file(spoiler=attachment.is_spoiler()))
 
     target_channel_id = target_channel.id
     webhook_id = webhook.id
@@ -2125,10 +2121,9 @@ async def bridge_reaction_add(
 
     # Find and react to all messages matching this one
     try:
-        # Create a function to add reactions to messages asynchronously and gather them all at the end
         source_message_id_str = str(message_id)
         source_channel_id_str = str(channel_id)
-        async_add_reactions: list["Coroutine[Any, Any, DBReactionMap | None]"] = []
+        reactions_added: list["DBReactionMap"] = []
 
         async def add_reaction_helper(
             bridged_channel: TextChannelOrThread,
@@ -2227,6 +2222,11 @@ async def bridge_reaction_add(
         )
         if len(reachable_channel_ids) == 0:
             # I've already bridged this reaction to all reachable channels
+            logger.debug(
+                "Already bridged %s to all channels reachable from message with ID %s.",
+                emoji,
+                message_id,
+            )
             return
 
         # First, check whether this message is bridged, in which case I need to find its source
@@ -2243,15 +2243,22 @@ async def bridge_reaction_add(
                     ensure_text_or_thread=True,
                 )
             except ChannelTypeError:
+                logger.debug(
+                    "Message with ID %s was bridged from a channel that could not be found (ID %s).",
+                    message_id,
+                    int(source_message_map.source_channel),
+                )
                 return
 
             source_channel_id = source_channel.id
             source_message_id = int(source_message_map.source_message)
             if source_channel_id in reachable_channel_ids:
                 try:
-                    async_add_reactions.append(
-                        add_reaction_helper(source_channel, source_message_id)
-                    )
+                    if added_reaction := await add_reaction_helper(
+                        source_channel,
+                        source_message_id,
+                    ):
+                        reactions_added.append(added_reaction)
                     reachable_channel_ids.discard(source_channel_id)
                 except discord.HTTPException as e:
                     logger.warning(
@@ -2307,12 +2314,11 @@ async def bridge_reaction_add(
                 continue
 
             try:
-                async_add_reactions.append(
-                    add_reaction_helper(
-                        bridged_channel,
-                        int(message_row.target_message),
-                    )
-                )
+                if added_reaction := await add_reaction_helper(
+                    bridged_channel,
+                    int(message_row.target_message),
+                ):
+                    reactions_added.append(added_reaction)
             except discord.HTTPException as e:
                 logger.warning(
                     "Ran into a Discord exception while trying to add a reaction across a bridge: %s",
@@ -2325,7 +2331,6 @@ async def bridge_reaction_add(
                 )
                 return
 
-        reactions_added = await asyncio.gather(*async_add_reactions)
         session.add_all([r for r in reactions_added if r])
     except Exception as e:
         if isinstance(e, StatementError):
@@ -2646,26 +2651,20 @@ async def unreact(
                 except Exception:
                     pass
 
-        compacted_messages_to_remove_reaction_from = {
-            (
-                target_message_id,
+        for (
+            target_message_id,
+            target_channel_id,
+            target_emoji_id,
+            target_emoji_name,
+            _,
+        ) in messages_to_remove_reaction_from:
+            await remove_reactions_with_emoji(
                 target_channel_id,
+                target_message_id,
                 target_emoji_id,
                 target_emoji_name,
             )
-            for target_message_id, target_channel_id, target_emoji_id, target_emoji_name, _ in messages_to_remove_reaction_from
-        }
-        await asyncio.gather(
-            *[
-                remove_reactions_with_emoji(
-                    target_channel_id,
-                    target_message_id,
-                    target_emoji_id,
-                    target_emoji_name,
-                )
-                for target_message_id, target_channel_id, target_emoji_id, target_emoji_name in compacted_messages_to_remove_reaction_from
-            ]
-        )
+
     except Exception as e:
         if isinstance(e, StatementError):
             logger.warning(
