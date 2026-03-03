@@ -2259,6 +2259,13 @@ async def bridge_reaction_add(
                         source_message_id,
                     ):
                         reactions_added.append(added_reaction)
+                    else:
+                        logger.debug(
+                            "Attemtping to bridge %s from message with ID %s somehow failed to generate a valid DB insert entry when bridging to channel with ID %s.",
+                            emoji,
+                            message_id,
+                            source_channel,
+                        )
                     reachable_channel_ids.discard(source_channel_id)
                 except discord.HTTPException as e:
                     logger.warning(
@@ -2325,6 +2332,13 @@ async def bridge_reaction_add(
                     int(message_row.target_message),
                 ):
                     reactions_added.append(added_reaction)
+                else:
+                    logger.debug(
+                        "Attemtping to bridge %s from message with ID %s somehow failed to generate a valid DB insert entry when bridging to channel with ID %s.",
+                        emoji,
+                        message_id,
+                        int(message_row.target_message),
+                    )
             except discord.HTTPException as e:
                 logger.warning(
                     "Ran into a Discord exception while trying to add a reaction across a bridge: %s",
@@ -2337,7 +2351,7 @@ async def bridge_reaction_add(
                 )
                 return
 
-        session.add_all([r for r in reactions_added if r])
+        session.add_all([r for r in reactions_added])
     except Exception as e:
         if isinstance(e, StatementError):
             logger.warning(
