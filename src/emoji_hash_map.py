@@ -1,4 +1,3 @@
-import asyncio
 import random
 from typing import TYPE_CHECKING, overload
 
@@ -12,7 +11,7 @@ from database import DBEmoji, get_sql_upsert_query, sql_command, sql_select
 from validations import ArgumentError, logger
 
 if TYPE_CHECKING:
-    from typing import Any, Coroutine, Literal, Sequence
+    from typing import Literal, Sequence
 
 
 class EmojiHashMap:
@@ -607,20 +606,13 @@ class EmojiHashMap:
         for server in servers:
             logger.debug("Loading server %s...", server.name)
 
-            update_emoji_queries: list["Coroutine[Any, Any, UpdateBase]"] = []
-
             is_internal = (common.emoji_server is not None) and (
                 server.id == common.emoji_server.id
             )
             for emoji in server.emojis:
-                update_emoji_queries.append(
-                    get_emoji_update_query(server.id, is_internal, emoji)
+                session.execute(
+                    await get_emoji_update_query(server.id, is_internal, emoji)
                 )
-
-            # I'll gather the requests one server at a time
-            upserts = await asyncio.gather(*update_emoji_queries)
-            for upsert in upserts:
-                session.execute(upsert)
 
             logger.debug("Server %s loaded.", server.name)
 

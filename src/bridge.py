@@ -1,4 +1,3 @@
-import asyncio
 import inspect
 from copy import deepcopy
 from typing import TYPE_CHECKING, Literal, overload
@@ -14,10 +13,10 @@ from database import (
     DBBridge,
     DBMessageMap,
     DBWebhook,
-    sql_command,
     get_sql_insert_ignore_duplicate_query,
-    sql_select,
     get_sql_upsert_query,
+    sql_command,
+    sql_select,
 )
 from validations import (
     ArgumentError,
@@ -29,7 +28,7 @@ from validations import (
 )
 
 if TYPE_CHECKING:
-    from typing import Any, Callable, Coroutine
+    from typing import Callable
 
 
 class Bridge:
@@ -172,7 +171,6 @@ class Bridges:
         invalid_webhook_ids: set[str] = set()
 
         webhook_query_result = sql_select(DBWebhook, session=session)
-        add_webhook_async: list["Coroutine[Any, Any, discord.Webhook]"] = []
         for channel_webhook in webhook_query_result:
             channel_id = int(channel_webhook.channel)
             webhook_id = int(channel_webhook.webhook)
@@ -206,14 +204,12 @@ class Bridges:
                 continue
 
             # Webhook and channel are valid
-            add_webhook_async.append(self.webhooks.add_webhook(channel_id, webhook))
-        await asyncio.gather(*add_webhook_async)
+            await self.webhooks.add_webhook(channel_id, webhook)
 
         # I will make a list of all target channels that have at least one source and delete the ones that don't
         all_target_channels: set[str] = set()
         targets_with_sources: set[str] = set()
 
-        async_create_bridges: list["Coroutine[Any, Any, Bridge]"] = []
         bridge_query_result = sql_select(DBBridge, session=session)
         for bridge in bridge_query_result:
             target_id_str = bridge.target
@@ -261,13 +257,11 @@ class Bridges:
                 # so I can add this channel to my list of Bridges
                 targets_with_sources.add(target_id_str)
                 try:
-                    async_create_bridges.append(
-                        self.create_bridge(
-                            source=source_id,
-                            target=target_id,
-                            webhook=target_webhook,
-                            update_db=False,
-                        )
+                    await self.create_bridge(
+                        source=source_id,
+                        target=target_id,
+                        webhook=target_webhook,
+                        update_db=False,
                     )
                 except Exception as e:
                     logger.error(
@@ -304,9 +298,6 @@ class Bridges:
         )
         for channel_id in channel_ids_with_webhooks_to_delete:
             await self.webhooks.delete_channel(channel_id)
-
-        # Gather bridge creation and webhook deletion
-        await asyncio.gather(*async_create_bridges)
 
         # And update the database with any necessary deletions
         if (
