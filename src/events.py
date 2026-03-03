@@ -2227,6 +2227,11 @@ async def bridge_reaction_add(
         )
         if len(reachable_channel_ids) == 0:
             # I've already bridged this reaction to all reachable channels
+            logger.debug(
+                "Already bridged %s to all channels reachable from message with ID %s.",
+                emoji,
+                message_id,
+            )
             return
 
         # First, check whether this message is bridged, in which case I need to find its source
@@ -2243,6 +2248,11 @@ async def bridge_reaction_add(
                     ensure_text_or_thread=True,
                 )
             except ChannelTypeError:
+                logger.debug(
+                    "Message with ID %s was bridged from a channel that could not be found (ID %s).",
+                    message_id,
+                    int(source_message_map.source_channel),
+                )
                 return
 
             source_channel_id = source_channel.id
