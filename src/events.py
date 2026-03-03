@@ -2311,6 +2311,12 @@ async def bridge_reaction_add(
                 int(message_row.target_channel)
             )
             if not isinstance(bridged_channel, TextChannelOrThread):
+                logger.debug(
+                    "Attemtping to bridge %s from message with ID %s ran into a bridged channel that was not a text channel or a thread off one (ID %s).",
+                    emoji,
+                    message_id,
+                    int(message_row.target_channel),
+                )
                 continue
 
             try:
