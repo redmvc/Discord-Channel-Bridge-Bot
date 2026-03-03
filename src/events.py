@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple, TypedDict, overload
 
 import discord
-from beartype import beartype
 from discord.ext import tasks
 from sqlalchemy import sql
 from sqlalchemy.exc import StatementError
@@ -431,7 +430,6 @@ async def bridge_message_helper(
 
 
 @sql_command
-@beartype
 async def bridge_message_helper(
     message: discord.Message,
     message_channel_id: int,
@@ -775,7 +773,6 @@ class ReplyEmbedThumbnailDict(TypedDict):
     width: int
 
 
-@beartype
 async def bridge_message_to_target_channel(
     sent_message: discord.Message,
     message_content: str,
@@ -1247,7 +1244,6 @@ async def edit_message_helper(
 
 
 @sql_command(commit_results=False)
-@beartype
 async def edit_message_helper(
     *,
     message_content: str,
@@ -1490,7 +1486,6 @@ async def replace_missing_emoji(
 
 
 @sql_command
-@beartype
 async def replace_missing_emoji(
     message_content: str,
     *,
@@ -1589,7 +1584,6 @@ async def replace_discord_links(
 ) -> str: ...
 
 
-@beartype
 async def replace_discord_links(
     content: str | None,
     channel: TextChannelOrThread,
@@ -1783,7 +1777,6 @@ async def delete_message_helper(
 
 
 @sql_command
-@beartype
 async def delete_message_helper(
     message_id: int,
     channel_id: int,
@@ -2032,7 +2025,6 @@ async def bridge_reaction_add(
 
 
 @sql_command
-@beartype
 async def bridge_reaction_add(
     *,
     message_id: int,
@@ -2531,7 +2523,6 @@ async def unreact(
 
 
 @sql_command
-@beartype
 async def unreact(
     *,
     message_id: int,
@@ -2760,7 +2751,6 @@ async def auto_bridge_thread(thread: discord.Thread, *, session: SQLSession | No
 
 
 @sql_command
-@beartype
 async def auto_bridge_thread(thread: discord.Thread, *, session: SQLSession):
     """Create matching threads across a bridge if the created thread's parent channel has auto-bridge-threads enabled.
 
@@ -2864,7 +2854,6 @@ async def bridge_unbridged_messages(*, session: SQLSession | None): ...
 
 
 @sql_command
-@beartype
 async def bridge_unbridged_messages(*, session: SQLSession):
     """Find all messages that were meant to be bridged while the bot was disconnected and bridge them.
 

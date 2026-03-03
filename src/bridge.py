@@ -3,7 +3,6 @@ from copy import deepcopy
 from typing import TYPE_CHECKING, Literal, overload
 
 import discord
-from beartype import beartype
 from sqlalchemy import sql
 from sqlalchemy.exc import StatementError
 from sqlalchemy.orm import Session as SQLSession
@@ -52,7 +51,6 @@ class Bridge:
         A webhook connecting those channels
     """
 
-    @beartype
     @classmethod
     async def create(
         cls,
@@ -150,7 +148,6 @@ class Bridges:
     async def load_from_database(self): ...
 
     @sql_command
-    @beartype
     async def load_from_database(self, *, session: SQLSession):
         """Load all bridges saved in the bot's connected database.
 
@@ -331,7 +328,6 @@ class Bridges:
 
         logger.info("Bridges successfully loaded from database!")
 
-    @beartype
     async def create_bridge(
         self,
         *,
@@ -582,7 +578,6 @@ class Bridges:
         )
         return bridge
 
-    @beartype
     async def demolish_bridges(
         self,
         *,
@@ -838,7 +833,6 @@ class Bridges:
 
         logger.debug("Bridge(s) removed from database.")
 
-    @beartype
     def get_one_way_bridge(
         self,
         source: TextChannelOrThread | int,
@@ -866,7 +860,6 @@ class Bridges:
 
         return bridges_from_source.get(target_id)
 
-    @beartype
     def get_two_way_bridge(
         self,
         source: TextChannelOrThread | int,
@@ -891,7 +884,6 @@ class Bridges:
             self.get_one_way_bridge(target, source),
         )
 
-    @beartype
     def get_outbound_bridges(
         self,
         source: TextChannelOrThread | int,
@@ -919,7 +911,6 @@ class Bridges:
         """
         return set(self._outbound_bridges.keys())
 
-    @beartype
     def get_inbound_bridges(
         self,
         target: TextChannelOrThread | int,
@@ -1015,7 +1006,6 @@ class Bridges:
         """
         ...
 
-    @beartype
     async def get_reachable_channels(
         self,
         starting_channel: TextChannelOrThread | int,
@@ -1119,7 +1109,6 @@ class Webhooks:
         # The webhook used by a parent channel
         self._webhook_by_parent: dict[int, int] = {}
 
-    @beartype
     async def add_webhook(
         self,
         channel_or_id: TextChannelOrThread | int,
@@ -1194,7 +1183,6 @@ class Webhooks:
         logger.debug("Webhook added to channel with ID %s.", channel_id)
         return webhook
 
-    @beartype
     async def get_webhook(
         self,
         channel_or_id: TextChannelOrThread | int,
@@ -1240,7 +1228,6 @@ class Webhooks:
         # The channel doesn't have its own webhook associated, nor is it a thread so we can't find its parent
         return None
 
-    @beartype
     async def delete_channel(
         self,
         channel_or_id: TextChannelOrThread | int,

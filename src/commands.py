@@ -3,7 +3,6 @@ import re
 from typing import TYPE_CHECKING, Any, Iterable, Literal, overload
 
 import discord
-from beartype import beartype
 from sqlalchemy import sql
 from sqlalchemy.exc import StatementError as SQLError
 from sqlalchemy.orm import Session as SQLSession
@@ -301,7 +300,6 @@ async def create_bridges(
 
 
 @sql_command
-@beartype
 async def create_bridges(
     source_channel: TextChannelOrThread,
     target_channel: TextChannelOrThread,
@@ -540,7 +538,6 @@ def toggle_auto_bridge_threads(
 
 
 @sql_command
-@beartype
 def toggle_auto_bridge_threads(
     channel_id: int,
     *,
@@ -823,7 +820,6 @@ def stop_auto_bridging_threads_helper(
 
 
 @sql_command
-@beartype
 def stop_auto_bridging_threads_helper(
     channel_ids_to_remove: int | Iterable[int],
     *,
@@ -860,7 +856,6 @@ def stop_auto_bridging_threads_helper(
     common.auto_bridge_thread_channels -= channel_ids_to_remove
 
 
-@beartype
 async def validate_auto_bridge_thread_channels(
     channel_ids_to_check: int | Iterable[int],
     session: SQLSession | None = None,
@@ -901,7 +896,6 @@ async def validate_auto_bridge_thread_channels(
     stop_auto_bridging_threads_helper(channel_ids_to_remove, session=session)
 
 
-@beartype
 async def mention_to_channel(link_or_mention: str) -> common.DiscordChannel | None:
     """Return the channel referenced by a channel mention or a Discord link to a channel, if it's valid, or None if it isn't.
 
@@ -1059,7 +1053,6 @@ async def demolish_bridges(
 
 
 @sql_command
-@beartype
 async def demolish_bridges(
     source_channel: TextChannelOrThread,
     target_channel: TextChannelOrThread,
@@ -1256,7 +1249,6 @@ async def demolish_all_bridges(
 
 
 @sql_command
-@beartype
 async def demolish_all_bridges(
     user_id: int,
     lists_of_bridges: dict[

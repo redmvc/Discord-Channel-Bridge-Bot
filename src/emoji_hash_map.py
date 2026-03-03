@@ -2,7 +2,6 @@ import random
 from typing import TYPE_CHECKING, overload
 
 import discord
-from beartype import beartype
 from sqlalchemy import UpdateBase, sql
 from sqlalchemy.orm import Session as SQLSession
 
@@ -26,7 +25,6 @@ class EmojiHashMap:
     def __init__(self, *, session: SQLSession | None): ...
 
     @sql_command
-    @beartype
     def __init__(self, *, session: SQLSession):
         """Initialise the emoji hash map from the emoji table.
 
@@ -94,7 +92,6 @@ class EmojiHashMap:
 
         logger.info("Emoji hash map initialised.")
 
-    @beartype
     def _add_emoji_to_map(
         self,
         emoji_id: int,
@@ -185,7 +182,6 @@ class EmojiHashMap:
     ): ...
 
     @sql_command
-    @beartype
     async def _add_emoji_to_database(
         self,
         *,
@@ -271,7 +267,6 @@ class EmojiHashMap:
 
         logger.debug("Emoji with ID %s added to database.", emoji_id)
 
-    @beartype
     async def add_emoji(
         self,
         *,
@@ -365,7 +360,6 @@ class EmojiHashMap:
 
         return (emoji_id, image_hash)
 
-    @beartype
     def get_emoji_upsert_query(
         self,
         *,
@@ -414,7 +408,6 @@ class EmojiHashMap:
             **upsert_server_id,
         )
 
-    @beartype
     def delete_emoji(
         self,
         emoji_id: int,
@@ -536,7 +529,6 @@ class EmojiHashMap:
     ): ...
 
     @sql_command
-    @beartype
     async def load_server_emoji(
         self,
         server_id: int | None = None,
@@ -618,7 +610,6 @@ class EmojiHashMap:
 
         logger.info(ending_info_message)
 
-    @beartype
     async def copy_emoji_into_server(
         self,
         *,
@@ -806,7 +797,6 @@ class EmojiHashMap:
         logger.debug("%s added to emoji server.", emoji)
         return emoji
 
-    @beartype
     async def map_emoji(
         self,
         *,
@@ -965,7 +955,6 @@ class EmojiHashMap:
         """
         ...
 
-    @beartype
     def get_matches(
         self,
         emoji: discord.PartialEmoji | int | str,
@@ -1028,7 +1017,6 @@ class EmojiHashMap:
         emoji_set = frozenset({str(id) for id in hash_to_emoji})
         return emoji_set
 
-    @beartype
     def get_internal_equivalent(self, emoji_id: int) -> int | None:
         """Return the ID of an internal emoji matching the one passed, if available.
 
@@ -1110,7 +1098,6 @@ class EmojiHashMap:
         """
         ...
 
-    @beartype
     def get_accessible_emoji(
         self,
         emoji_id: int,
@@ -1286,7 +1273,6 @@ class EmojiHashMap:
         """
         ...
 
-    @beartype
     async def get_hash(
         self,
         *,
@@ -1347,7 +1333,6 @@ class EmojiHashMap:
         except ArgumentError:
             return None
 
-    @beartype
     async def ensure_hash_map(
         self,
         *,
@@ -1417,7 +1402,6 @@ class EmojiHashMap:
 
         return image_hash
 
-    @beartype
     async def get_mapped_emoji_id(
         self,
         emoji: discord.PartialEmoji | discord.Emoji | str,

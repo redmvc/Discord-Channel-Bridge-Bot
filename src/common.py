@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING, Any, AsyncIterator, Callable, TypeVar, overloa
 import aiohttp
 import discord
 from aiolimiter import AsyncLimiter
-from beartype import beartype
 
 from validations import (
     ArgumentError,
@@ -389,7 +388,6 @@ async def get_channel_from_id(
     ...
 
 
-@beartype
 async def get_channel_from_id(
     channel_or_id: DiscordChannel | int,
     *,
@@ -482,7 +480,6 @@ def get_id_from_channel(channel_or_id: DiscordChannel) -> int:
     ...
 
 
-@beartype
 def get_id_from_channel(channel_or_id: DiscordChannel | int) -> int:
     """Return the ID of the Discord channel passed as argument, or the argument itself if it is already an ID.
 
@@ -543,7 +540,6 @@ async def get_channel_parent(channel_or_id: DiscordChannel) -> discord.TextChann
     ...
 
 
-@beartype
 async def get_channel_parent(
     channel_or_id: DiscordChannel | int,
 ) -> discord.TextChannel:
@@ -576,7 +572,6 @@ async def get_channel_parent(
     return channel
 
 
-@beartype
 async def get_channel_member(
     channel: discord.abc.GuildChannel | discord.Thread,
     member_id: int,
@@ -606,7 +601,6 @@ async def get_channel_member(
     return await get_server_member(channel.guild, member_id)
 
 
-@beartype
 async def get_server_member(
     server: discord.Guild,
     member_id: int,
@@ -643,7 +637,6 @@ async def get_server_member(
     return server_member
 
 
-@beartype
 async def get_users_from_iterator(
     user_iterator: AsyncIterator[discord.Member | discord.User],
 ) -> set[int]:
@@ -779,7 +772,6 @@ async def get_emoji_information(
 ) -> tuple[int, str, bool, str]: ...
 
 
-@beartype
 async def get_emoji_information(
     emoji: discord.PartialEmoji | discord.Emoji | None = None,
     emoji_id: int | str | None = None,
@@ -934,7 +926,6 @@ async def get_emoji_image(
     ...
 
 
-@beartype
 async def get_emoji_image(  # pyright: ignore[reportInconsistentOverload]
     *args: discord.PartialEmoji | discord.Emoji | int | str | bool,
 ) -> bytes:
@@ -1025,7 +1016,6 @@ def get_emoji_url(
 ) -> str: ...
 
 
-@beartype
 def get_emoji_url(  # pyright: ignore[reportInconsistentOverload]
     *args: discord.PartialEmoji | discord.Emoji | int | str | bool,
 ) -> str:
@@ -1109,7 +1099,6 @@ def get_emoji_url(  # pyright: ignore[reportInconsistentOverload]
     return emoji_url
 
 
-@beartype
 async def get_image_from_URL(url: str) -> bytes:
     """Return an image stored in a URL.
 
@@ -1156,7 +1145,6 @@ async def get_image_from_URL(url: str) -> bytes:
     return image_bytes.read()
 
 
-@beartype
 def hash_image(image: bytes) -> str:
     """Return a string with the MD5 hash of an image.
 
@@ -1172,7 +1160,6 @@ def hash_image(image: bytes) -> str:
     return md5(image).hexdigest()
 
 
-@beartype
 def truncate(msg: str, length: int) -> str:
     """Return `msg` truncated to `length` plus a "…" character at the end.
 
@@ -1191,7 +1178,6 @@ def truncate(msg: str, length: int) -> str:
     return msg if (len(msg) < length) else msg[: length - 1] + "…"
 
 
-@beartype
 async def wait_until_ready(
     *,
     time_to_wait: float | int = 100,
@@ -1227,7 +1213,6 @@ async def wait_until_ready(
     return True
 
 
-@beartype
 async def run_retries(
     fun: Callable[..., T],
     num_retries: int,

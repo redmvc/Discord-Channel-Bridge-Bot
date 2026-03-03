@@ -11,7 +11,6 @@ from typing import (
     overload,
 )
 
-from beartype import beartype
 from sqlalchemy import (
     Boolean,
     ColumnExpressionArgument,
@@ -266,7 +265,6 @@ def sql_select(
     return session.scalars(select)
 
 
-@beartype
 def get_sql_upsert_query(
     table: type[Table],
     *,
@@ -352,7 +350,6 @@ def get_sql_upsert_query(
         return upsert
 
 
-@beartype
 def get_sql_insert_ignore_duplicate_query(
     table: type[Table],
     *,
