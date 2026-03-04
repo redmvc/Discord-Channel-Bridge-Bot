@@ -21,7 +21,6 @@ from typing import (
 import discord
 import tester_bot
 from aiolimiter import AsyncLimiter
-from beartype import beartype
 from tester_bot import logger
 
 sys.path.append(str(Path(__file__).parent.parent))
@@ -55,7 +54,6 @@ CoroT = TypeVar("CoroT", bound=test_function_type)
 failures: dict[str, list[str]] = {}
 
 
-@beartype
 def camel_case_split(
     string: str,
     *,
@@ -108,7 +106,6 @@ def camel_case_split(
     return join_str.join(split_str)
 
 
-@beartype
 def log_expectation(
     message: str,
     type: Literal["success", "failure"],
@@ -143,7 +140,6 @@ def log_expectation(
             print(message)
 
 
-@beartype
 async def give_manage_webhook_perms(
     tester_bot: discord.Client,
     testing_server: discord.Guild,
@@ -160,7 +156,6 @@ async def give_manage_webhook_perms(
     await _give_or_remove_manage_webhook_perms(tester_bot, testing_server, give=True)
 
 
-@beartype
 async def remove_manage_webhook_perms(
     tester_bot: discord.Client,
     testing_server: discord.Guild,
@@ -255,7 +250,6 @@ async def create_bridge(
     ...
 
 
-@beartype
 async def create_bridge(
     source_channel: discord.TextChannel | discord.Thread | int,
     target_channel: discord.TextChannel | discord.Thread | int,
@@ -415,7 +409,6 @@ async def demolish_bridges(
     ...
 
 
-@beartype
 async def demolish_bridges(
     source_channel: discord.TextChannel | discord.Thread | int,
     target_channel: discord.TextChannel | discord.Thread | int | None = None,
@@ -475,7 +468,6 @@ class TestRunner:
         The list of registered test cases.
     """
 
-    @beartype
     def __init__(self, bridge_bot: discord.Client, tester_bot: discord.Client):
         """Create a class to run all registered tests.
 
@@ -490,7 +482,6 @@ class TestRunner:
         self.tester_bot = tester_bot
         self.bridge_bot = bridge_bot
 
-    @beartype
     def register_test_case(self, test_case: "TestCase"):
         """Register a test case to this object.
 
@@ -509,7 +500,6 @@ class TestRunner:
         """The test cases registered to this object."""
         return self._test_cases
 
-    @beartype
     async def run_tests(self, testing_server: discord.Guild):
         """Run the tests registered to this object.
 
@@ -647,7 +637,6 @@ class TestCase(ABC):
         The list of registered tests.
     """
 
-    @beartype
     def __init__(self, test_runner: TestRunner):
         """Initialise a test case.
 
@@ -664,7 +653,6 @@ class TestCase(ABC):
         """The tests registered to this object."""
         return self._tests
 
-    @beartype
     def test(self, coro: CoroT) -> CoroT:
         """Decorator to register a test function to this object.
 
@@ -823,7 +811,6 @@ async def expect(
 ) -> tuple[None, list[str]]: ...
 
 
-@beartype
 async def expect(
     obj: Literal["next_message", "no_new_message", "thread"] | discord.Message,
     *,

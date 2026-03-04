@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, List, Optional, Sequence, Union, cast
 
 import discord
-from beartype import beartype
 
 sys.path.append(str(Path(__file__).parent.parent))
 import common
@@ -150,7 +149,6 @@ async def on_thread_create(thread: discord.Thread):
     created_threads[thread.parent_id][thread.name] = thread
 
 
-@beartype
 async def wait_until_ready(
     *,
     time_to_wait: float | int = 100,
@@ -445,7 +443,6 @@ class FakeMessage:
         )
 
 
-@beartype
 async def process_tester_bot_command(
     message: discord.Message | FakeMessage,
     tester_bot_user: discord.User,
