@@ -132,7 +132,7 @@ async def between_channels_works(
         in_channel=channel_1,
         to={
             "be_a_reply_to": message_sent,
-            "contain": "Interaction was deferred with with thinking = True.",
+            "contain": "Interaction was deferred with thinking = True.",
         },
     )
     _, f = await expect(
@@ -181,7 +181,7 @@ async def between_channels_works(
         in_channel=channel_1,
         to={
             "be_a_reply_to": message_sent,
-            "contain": "Interaction was deferred with with thinking = True.",
+            "contain": "Interaction was deferred with thinking = True.",
         },
     )
     failure_messages += f
@@ -232,7 +232,7 @@ async def between_channels_works(
         in_channel=channel_1,
         to={
             "be_a_reply_to": message_sent,
-            "contain": "Interaction was deferred with with thinking = True.",
+            "contain": "Interaction was deferred with thinking = True.",
         },
     )
     failure_messages += f
@@ -303,7 +303,7 @@ async def between_threads_works(
         in_channel=thread_1,
         to={
             "be_a_reply_to": message_sent,
-            "contain": "Interaction was deferred with with thinking = True.",
+            "contain": "Interaction was deferred with thinking = True.",
         },
     )
     _, f = await expect(
@@ -368,7 +368,7 @@ async def from_thread_to_channel_works(
         in_channel=thread_1,
         to={
             "be_a_reply_to": message_sent,
-            "contain": "Interaction was deferred with with thinking = True.",
+            "contain": "Interaction was deferred with thinking = True.",
         },
     )
     _, f = await expect(
@@ -433,7 +433,7 @@ async def from_channel_to_thread_works(
         in_channel=channel_1,
         to={
             "be_a_reply_to": message_sent,
-            "contain": "Interaction was deferred with with thinking = True.",
+            "contain": "Interaction was deferred with thinking = True.",
         },
     )
     _, f = await expect(

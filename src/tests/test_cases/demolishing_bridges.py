@@ -139,7 +139,7 @@ async def works(
         in_channel=channel_1,
         to={
             "be_a_reply_to": message_sent,
-            "contain": "Interaction was deferred with with thinking = True.",
+            "contain": "Interaction was deferred with thinking = True.",
         },
     )
     _, f = await expect(
@@ -207,7 +207,7 @@ async def works_when_demolishing_all(
         in_channel=channel_1,
         to={
             "be_a_reply_to": message_sent,
-            "contain": "Interaction was deferred with with thinking = True.",
+            "contain": "Interaction was deferred with thinking = True.",
         },
     )
     _, f = await expect(

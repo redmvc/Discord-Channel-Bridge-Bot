@@ -24,7 +24,8 @@ logger = setup_logger("test_logger", "test_logs.log", "INFO")
 
 MISSING = discord.utils.MISSING
 
-settings_root: "SettingsRoot" = json.load(open("settings.json"))
+with open("settings.json") as f:
+    settings_root: "SettingsRoot" = json.load(f)
 assert "tests" in settings_root
 settings = settings_root["tests"]
 
@@ -298,11 +299,11 @@ class InteractionResponseTester:
         file: discord.File = MISSING,
         files: Sequence[discord.File] = MISSING,
         view: discord.ui.View = MISSING,
-        tts: bool = False,
+        tts: bool = MISSING,
         ephemeral: bool = False,
         allowed_mentions: discord.AllowedMentions = MISSING,
         suppress_embeds: bool = False,
-        silent: bool = False,
+        silent: bool = MISSING,
         delete_after: Optional[float] = None,
         poll: discord.Poll = MISSING,
     ) -> "discord.Message | FakeMessage | None":
@@ -378,7 +379,7 @@ class InteractionResponseTester:
     ):
         self.deferred_response = InteractionResponseTester(self.interaction)
         await self.deferred_response.send_message(
-            f"Interaction was deferred with with thinking = {thinking}.",
+            f"Interaction was deferred with thinking = {thinking}.",
             ephemeral=ephemeral,
         )
 

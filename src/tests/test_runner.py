@@ -61,7 +61,7 @@ def camel_case_split(
     *,
     join_str: str = " ",
     lowercase_after_first: bool = True,
-    other_split_strs: list[str] = ["_"],
+    other_split_strs: tuple[str] = ("_",),
 ) -> str:
     """Split `string` along CamelCase divisions then return a string joining the result using `join_str`.
 
@@ -73,8 +73,8 @@ def camel_case_split(
         Which string to use to join the split string. Defaults to " ".
     lowercase_after_first : bool, optional
         Whether to lowercase every word other than the first one. Defaults to True.
-    other_split_strs : list[str], optional
-        Other strings to split the string along. Defaults to a list containing only "_".
+    other_split_strs : tuple[str], optional
+        Other strings to split the string along. Defaults to a tuple containing only "_".
 
     Returns
     -------
@@ -1085,7 +1085,7 @@ async def expect(
                     if not embed.url:
                         message = f"{message} but embed had no URL"
                         result = "failure"
-                    elif url_must_contain != embed.url:
+                    elif url_must_contain not in embed.url:
                         message = f"{message} but it was instead '{embed.url}'"
                         result = "failure"
                     else:
