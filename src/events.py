@@ -2985,6 +2985,17 @@ async def clear_locks():
     }
 
 
+@common.client.event
+async def on_error(event: str, *args, **kwargs):
+    logger.error(
+        "An error occurred when executing event %s with positional arguments %s and keyword arguments %s:\n%s\n%s\n%s",
+        event,
+        args,
+        kwargs,
+        *sys.exc_info(),
+    )
+
+
 def register_events():
     """Register the bot's events."""
     events = [
@@ -3003,6 +3014,7 @@ def register_events():
         on_disconnect,
         on_connect,
         on_resumed,
+        on_error,
     ]
     for event in events:
         common.client.event(event)
