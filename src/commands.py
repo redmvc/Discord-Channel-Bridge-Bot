@@ -4,13 +4,13 @@ from typing import TYPE_CHECKING, Any, Iterable, Literal, overload
 
 import discord
 from sqlalchemy.exc import StatementError as SQLError
-from sqlalchemy.orm import Session as SQLSession
+from sqlalchemy.ext.asyncio import AsyncSession as SQLSession
 
 import common
 import emoji_hash_map
 from bridge import Bridge, bridges
 from database import (
-    DataFrame,
+    AsyncDataFrame,
     DBAppWhitelist,
     DBAutoBridgeThreadChannels,
     DBMessageMap,
@@ -479,7 +479,7 @@ async def auto_bridge_threads(interaction: discord.Interaction):
     await interaction.response.defer(thinking=True, ephemeral=True)
 
     try:
-        if toggle_auto_bridge_threads(message_channel.id):
+        if await toggle_auto_bridge_threads(message_channel.id):
             response = "✅ Threads will now be automatically created across bridges when they are created in this channel."
         else:
             response = "✅ Threads will no longer be automatically created across bridges when they are created in this channel."
@@ -514,7 +514,7 @@ async def auto_bridge_threads(interaction: discord.Interaction):
 
 
 @overload
-def toggle_auto_bridge_threads(message_channel_id: int) -> bool:
+async def toggle_auto_bridge_threads(message_channel_id: int) -> bool:
     """Toggle thread auto-bridging for the channel identified by `channel_id` and return True if auto-bridging was enabled and False otherwise.
 
     Parameters
@@ -530,7 +530,7 @@ def toggle_auto_bridge_threads(message_channel_id: int) -> bool:
 
 
 @overload
-def toggle_auto_bridge_threads(
+async def toggle_auto_bridge_threads(
     message_channel_id: int,
     *,
     session: SQLSession | None,
@@ -538,7 +538,7 @@ def toggle_auto_bridge_threads(
 
 
 @sql_command
-def toggle_auto_bridge_threads(
+async def toggle_auto_bridge_threads(
     channel_id: int,
     *,
     session: SQLSession,
@@ -549,8 +549,8 @@ def toggle_auto_bridge_threads(
     ----------
     channel_id : int
         The ID of the channel to toggle thread auto-bridging for.
-    session : :class:`~sqlalchemy.orm.Session` | None, optional
-        An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
+    session : :class:`~sqlalchemy.ext.asyncio.AsyncSession` | None, optional
+        An SQLAlchemy AsyncSession connecting to the database. Defaults to None, in which case a new one will be created.
 
     Returns
     -------
@@ -562,7 +562,7 @@ def toggle_auto_bridge_threads(
 
         return True
     else:
-        stop_auto_bridging_threads_helper(channel_id, session=session)
+        await stop_auto_bridging_threads_helper(channel_id, session=session)
 
         return False
 
@@ -654,8 +654,8 @@ async def bridge_thread_helper(
     try:
         # I don't need to store it I just need to know whether it exists
         await thread_parent.fetch_message(thread_to_bridge.id)
-        source_starting_message = (
-            DataFrame(session, DBMessageMap)
+        source_starting_message = await (
+            AsyncDataFrame(session, DBMessageMap)
             .where(F.col("target_message") == F.lit(thread_to_bridge.id))
             .first()
         )
@@ -668,8 +668,8 @@ async def bridge_thread_helper(
             source_channel_id = thread_parent.id
             source_message_id = thread_to_bridge.id
 
-        target_starting_messages = (
-            DataFrame(session, DBMessageMap)
+        target_starting_messages = await (
+            AsyncDataFrame(session, DBMessageMap)
             .where(F.col("source_message") == F.lit(source_message_id))
             .collect()
         )
@@ -791,7 +791,7 @@ async def bridge_thread_helper(
 
 
 @overload
-def stop_auto_bridging_threads_helper(
+async def stop_auto_bridging_threads_helper(
     channel_ids_to_remove: int | Iterable[int],
 ):
     """Remove a group of channels from the auto_bridge_thread_channels table and list.
@@ -810,7 +810,7 @@ def stop_auto_bridging_threads_helper(
 
 
 @overload
-def stop_auto_bridging_threads_helper(
+async def stop_auto_bridging_threads_helper(
     channel_ids_to_remove: int | Iterable[int],
     *,
     session: SQLSession | None = None,
@@ -818,7 +818,7 @@ def stop_auto_bridging_threads_helper(
 
 
 @sql_command
-def stop_auto_bridging_threads_helper(
+async def stop_auto_bridging_threads_helper(
     channel_ids_to_remove: int | Iterable[int],
     *,
     session: SQLSession,
@@ -829,8 +829,8 @@ def stop_auto_bridging_threads_helper(
     ----------
     channel_ids_to_remove : int | Iterable[int]
         The IDs of the channels to remove.
-    session : :class:`~sqlalchemy.orm.Session` | None, optional
-        An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
+    session : :class:`~sqlalchemy.ext.asyncio.AsyncSession` | None, optional
+        An SQLAlchemy AsyncSession connecting to the database. Defaults to None, in which case a new one will be created.
 
     Raises
     ------
@@ -843,8 +843,8 @@ def stop_auto_bridging_threads_helper(
         else:
             channel_ids_to_remove = set(channel_ids_to_remove)
 
-    (
-        DataFrame(session, DBAutoBridgeThreadChannels)
+    await (
+        AsyncDataFrame(session, DBAutoBridgeThreadChannels)
         .where(F.col("channel").isin(channel_ids_to_remove))
         .delete()
     )
@@ -889,7 +889,7 @@ async def validate_auto_bridge_thread_channels(
     if len(channel_ids_to_remove) == 0:
         return
 
-    stop_auto_bridging_threads_helper(channel_ids_to_remove, session=session)
+    await stop_auto_bridging_threads_helper(channel_ids_to_remove, session=session)
 
 
 async def mention_to_channel(link_or_mention: str) -> common.DiscordChannel | None:
@@ -1408,7 +1408,7 @@ async def whitelist(interaction: discord.Interaction, apps: str):
         channel_id_str = str(channel.id)
 
         @sql_command
-        def _toggle_whitelist(*, session: SQLSession | None = None):
+        async def _toggle_whitelist(*, session: SQLSession | None = None):
             assert session is not None
 
             if len(apps_to_add) > 0:
@@ -1425,11 +1425,13 @@ async def whitelist(interaction: discord.Interaction, apps: str):
                 )
 
             if len(apps_to_remove) > 0:
-                (
-                    DataFrame(session, DBAppWhitelist).where(
+                await (
+                    AsyncDataFrame(session, DBAppWhitelist)
+                    .where(
                         (F.col("channel") == F.lit(channel_id_str))
                         & F.col("application").isin(apps_to_remove)
                     )
+                    .delete()
                 )
 
                 apps_to_remove_str = ", ".join(
@@ -1448,7 +1450,7 @@ async def whitelist(interaction: discord.Interaction, apps: str):
             if len(common.per_channel_whitelist[channel.id]) == 0:
                 del common.per_channel_whitelist[channel.id]
 
-        _toggle_whitelist()
+        await _toggle_whitelist()
     except Exception as e:
         if isinstance(e, SQLError):
             await interaction.followup.send(
@@ -1861,8 +1863,8 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
             assert session is not None
 
             # We need to see whether this message is a bridged message and, if so, find its source
-            source_message_map = (
-                DataFrame(session, DBMessageMap)
+            source_message_map = await (
+                AsyncDataFrame(session, DBMessageMap)
                 .where(F.col("target_message") == F.lit(message.id))
                 .first()
             )
@@ -1894,8 +1896,8 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
             # Then we find all messages bridged from the source
             outbound_bridges = bridges.get_outbound_bridges(source_channel_id)
             if outbound_bridges:
-                bridged_messages = (
-                    DataFrame(session, DBMessageMap)
+                bridged_messages = await (
+                    AsyncDataFrame(session, DBMessageMap)
                     .where(F.col("source_message") == F.lit(source_message_id))
                     .collect()
                 )

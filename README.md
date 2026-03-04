@@ -27,7 +27,7 @@ It's very straightforward to run your own copy of this bot. You'll need access t
       "production": {
          "app_token": "the token you got in step 2",
          "db_dialect": "mysql, postgresql, or sqlite, depending on which dialect your database uses",
-         "db_driver": "pymysql, psycopg2, or pysqlite, respectively depending on the above",
+         "db_driver": "aiomysql, asyncpg, or aiosqlite, respectively depending on the above",
          "db_host": "",
          "db_port": 0,
          "db_user": "",

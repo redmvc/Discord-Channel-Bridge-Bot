@@ -1,4 +1,3 @@
-import inspect
 from functools import wraps
 from typing import (
     TYPE_CHECKING,
@@ -11,26 +10,22 @@ from typing import (
     overload,
 )
 
-from sparkqlalchemy import DataFrame, Row, functions  # noqa: F401
+from sparkqlalchemy import AsyncDataFrame, Row, functions  # noqa: F401
 from sqlalchemy import (
     Boolean,
     Integer,
     String,
     UniqueConstraint,
     UpdateBase,
-    create_engine,
     sql,
 )
 from sqlalchemy.dialects import mysql, postgresql, sqlite
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
-from sqlalchemy.orm import Session as SQLSession
+from sqlalchemy.ext.asyncio import AsyncSession as SQLSession
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from common import settings
 from validations import logger
-
-if TYPE_CHECKING:
-    from typing import cast
-
 
 T = TypeVar("T", bound=Any)
 P = ParamSpec("P")
@@ -231,7 +226,7 @@ Table = (
 TableType = TypeVar("TableType", bound=Table)
 
 
-def get_sql_upsert_query(
+async def get_sql_upsert_query(
     table: type[Table],
     *,
     indices: Iterable[str],
@@ -298,16 +293,17 @@ def get_sql_upsert_query(
         )
     else:
         # I'll do a manual update in this case
-        with Session() as session:
+        async with Session() as session:
             index_values = [
                 getattr(table, idx) == insert_values[idx] for idx in indices
             ]
             upsert: UpdateBase
 
-            def select_existing(session: SQLSession):
-                return session.execute(sql.select(table).where(*index_values)).first()
+            existing = (
+                await session.execute(sql.select(table).where(*index_values))
+            ).first()
 
-            if select_existing(session):
+            if existing:
                 # Values with those keys do exist, so I update
                 upsert = sql.Update(table).where(*index_values).values(**update_values)
             else:
@@ -316,7 +312,7 @@ def get_sql_upsert_query(
         return upsert
 
 
-def get_sql_insert_ignore_duplicate_query(
+async def get_sql_insert_ignore_duplicate_query(
     table: type[Table],
     *,
     indices: Iterable[str],
@@ -363,16 +359,17 @@ def get_sql_insert_ignore_duplicate_query(
         return insert.values(**insert_values).on_conflict_do_nothing()
     else:
         # I'll do a manual update in this case
-        with Session() as session:
+        async with Session() as session:
             index_values = [
                 getattr(table, idx) == insert_values[idx] for idx in indices
             ]
             insert_unknown: UpdateBase
 
-            def select_existing(session: SQLSession):
-                return session.execute(sql.select(table).where(*index_values)).first()
+            existing = (
+                await session.execute(sql.select(table).where(*index_values))
+            ).first()
 
-            if select_existing(session):
+            if existing:
                 # Values with those keys do exist, so I do nothing
                 random_index = indices.pop()
                 insert_unknown = sql.Update(table).values(
@@ -388,7 +385,7 @@ def get_sql_insert_ignore_duplicate_query(
 def sql_command(
     commit_results: Callable[P, Coroutine[Any, Any, T]],
 ) -> Callable[P, Coroutine[Any, Any, T]]:
-    """Decorator that checks whether the :class:`~sqlalchemy.orm.Session`-typed argument of a function exists and is valid, and runs the function with it if so. Otherwise, it create a Python context manager with the session and calls the function within it.
+    """Decorator that wraps an async function with database session and transaction management.
 
     Using the decorator with no arguments will commit the results of running the function to the database and will assume that the name of the argument to the function that should contain the session is "session".
     """
@@ -396,23 +393,14 @@ def sql_command(
 
 
 @overload
-def sql_command(commit_results: Callable[P, T]) -> Callable[P, T]:
-    """Decorator that checks whether the :class:`~sqlalchemy.orm.Session`-typed argument of a function exists and is valid, and runs the function with it if so. Otherwise, it create a Python context manager with the session and calls the function within it.
-
-    Using the decorator with no arguments will commit the results of running the function to the database and will assume that the name of the argument to the function that should contain the session is "session".
-    """
-    pass
-
-
-@overload
 def sql_command(
     commit_results: bool = True,
     session_keyword: str = "session",
-) -> (
-    Callable[[Callable[P, Coroutine[Any, Any, T]]], Callable[P, Coroutine[Any, Any, T]]]
-    | Callable[[Callable[P, T]], Callable[P, T]]
-):
-    """Decorator that checks whether the :class:`~sqlalchemy.orm.Session`-typed argument of a function exists and is valid, and runs the function with it if so. Otherwise, it create a Python context manager with the session and calls the function within it.
+) -> Callable[
+    [Callable[P, Coroutine[Any, Any, T]]],
+    Callable[P, Coroutine[Any, Any, T]],
+]:
+    """Decorator that wraps an async function with database session and transaction management.
 
     Parameters
     ----------
@@ -425,16 +413,14 @@ def sql_command(
 
 
 def sql_command(
-    commit_results: Callable[P, T] | Callable[P, Coroutine[Any, Any, T]] | bool = True,
+    commit_results: Callable[P, Coroutine[Any, Any, T]] | bool = True,
     session_keyword: str = "session",
 ) -> (
-    Callable[[Callable[P, T]], Callable[P, T]]
-    | Callable[
+    Callable[
         [Callable[P, Coroutine[Any, Any, T]]],
         Callable[P, Coroutine[Any, Any, T]],
     ]
     | Callable[P, Coroutine[Any, Any, T]]
-    | Callable[P, T]
 ):
     if callable(commit_results):
         calling_function = commit_results
@@ -442,91 +428,47 @@ def sql_command(
     else:
         calling_function = None
 
-    @overload
-    def decorator(func: Callable[P, T]) -> Callable[P, T]: ...
-
-    @overload
     def decorator(
         func: Callable[P, Coroutine[Any, Any, T]],
-    ) -> Callable[P, Coroutine[Any, Any, T]]: ...
+    ) -> Callable[P, Coroutine[Any, Any, T]]:
+        @wraps(func)
+        async def wrapper_func(*args, **kwargs) -> T:
+            # Try to fetch the session if it already existed
+            session_already_existed = isinstance(
+                session := kwargs.get(session_keyword),
+                SQLSession,
+            )
 
-    def decorator(
-        func: Callable[P, T] | Callable[P, Coroutine[Any, Any, T]],
-    ) -> Callable[P, T] | Callable[P, Coroutine[Any, Any, T]]:
-        if inspect.iscoroutinefunction(func):
-            if TYPE_CHECKING:
-                func = cast(Callable[P, Coroutine[Any, Any, T]], func)
+            # It didn't exist, create a new one and add it to the kwargs
+            if not session_already_existed:
+                session = Session()
+                kwargs[session_keyword] = session
 
-            @wraps(func)
-            async def wrapper_func_async(*args, **kwargs) -> T:
-                # Try to fetch the session if it already existed
-                session_already_existed = isinstance(
-                    session := kwargs.get(session_keyword),
-                    SQLSession,
-                )
-
-                # It didn't exist, create a new one and add it to the kwargs
-                if not session_already_existed:
-                    session = Session()
-                    kwargs[session_keyword] = session
-
-                try:
-                    # Run the function and get the result
-                    if commit_results:
-                        if not session.in_transaction():
-                            with session.begin():
-                                result = await func(*args, **kwargs)
-                        else:
-                            # If the session was already in a transaction, I begin a nested transaction
-                            with session.begin_nested():
-                                result = await func(*args, **kwargs)
+            try:
+                # Run the function and get the result
+                if commit_results:
+                    if not session.in_transaction():
+                        async with session.begin():
+                            result = await func(*args, **kwargs)
                     else:
-                        result = await func(*args, **kwargs)
-                finally:
-                    # If the session was new, I close it here, but not otherwise
-                    if not session_already_existed:
-                        session.close()
-
-                return result
-
-            wrapper_func = wrapper_func_async
-        else:
-            if TYPE_CHECKING:
-                func = cast(Callable[P, T], func)
-
-            @wraps(func)
-            def wrapper_func_sync(*args, **kwargs) -> T:
-                # Try to fetch the session if it already existed
-                session_already_existed = isinstance(
-                    session := kwargs.get(session_keyword),
-                    SQLSession,
+                        # If the session was already in a transaction, I begin a nested transaction
+                        async with session.begin_nested():
+                            result = await func(*args, **kwargs)
+                else:
+                    result = await func(*args, **kwargs)
+            except Exception as e:
+                logger.error(
+                    "An error occurred during database operation in %s: %s",
+                    func.__qualname__,
+                    e,
                 )
-
-                # It didn't exist, create a new one and add it to the kwargs
+                raise
+            finally:
+                # If the session was new, I close it here, but not otherwise
                 if not session_already_existed:
-                    session = Session()
-                    kwargs[session_keyword] = session
+                    await session.close()
 
-                try:
-                    # Run the function and get the result
-                    if commit_results:
-                        if not session.in_transaction():
-                            with session.begin():
-                                result = func(*args, **kwargs)
-                        else:
-                            # If the session was already in a transaction, I begin a nested transaction
-                            with session.begin_nested():
-                                result = func(*args, **kwargs)
-                    else:
-                        result = func(*args, **kwargs)
-                finally:
-                    # If the session was new, I close it here, but not otherwise
-                    if not session_already_existed:
-                        session.close()
-
-                return result
-
-            wrapper_func = wrapper_func_sync
+            return result
 
         return wrapper_func
 
@@ -536,21 +478,24 @@ def sql_command(
         return decorator
 
 
-# Create the engine connecting to the database
+# Create the async engine connecting to the database
 logger.info("Creating engine to connect to database...")
-engine = create_engine(
+engine = create_async_engine(
     f"{settings['db_dialect']}+{settings['db_driver']}://{settings['db_user']}:{settings['db_pwd']}@{settings['db_host']}:{settings['db_port']}/{settings['db_name']}",
     pool_pre_ping=True,
     pool_recycle=3600,
 )
-Session = sessionmaker(engine)
+Session = async_sessionmaker(engine, class_=SQLSession, expire_on_commit=False)
 logger.info("Created.")
 
-# Create all tables represented by the above classes, if they haven't already been created
-logger.info("Ensuring all necessary tables exist...")
-try:
-    DBBase.metadata.create_all(engine)
-except Exception as e:
-    logger.error("An error occurred while trying to create necessary tables: %s", e)
-    raise
-logger.info("All necessary tables are available.")
+
+async def create_tables():
+    """Create all tables represented by the ORM classes, if they haven't already been created."""
+    logger.info("Ensuring all necessary tables exist...")
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(DBBase.metadata.create_all)
+    except Exception as e:
+        logger.error("An error occurred while trying to create necessary tables: %s", e)
+        raise
+    logger.info("All necessary tables are available.")

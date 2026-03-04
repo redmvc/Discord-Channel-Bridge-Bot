@@ -4,11 +4,11 @@ from typing import TYPE_CHECKING, Literal, overload
 
 import discord
 from sqlalchemy.exc import StatementError
-from sqlalchemy.orm import Session as SQLSession
+from sqlalchemy.ext.asyncio import AsyncSession as SQLSession
 
 import common
 from database import (
-    DataFrame,
+    AsyncDataFrame,
     DBBridge,
     DBMessageMap,
     DBWebhook,
@@ -167,7 +167,7 @@ class Bridges:
         invalid_channel_ids: set[str] = set()
         invalid_webhook_ids: set[str] = set()
 
-        webhook_query_result = DataFrame(session, DBWebhook).collect()
+        webhook_query_result = await AsyncDataFrame(session, DBWebhook).collect()
         for channel_webhook in webhook_query_result:
             channel_id = int(channel_webhook.channel)
             webhook_id = int(channel_webhook.webhook)
@@ -207,7 +207,7 @@ class Bridges:
         all_target_channels: set[str] = set()
         targets_with_sources: set[str] = set()
 
-        bridge_query_result = DataFrame(session, DBBridge).collect()
+        bridge_query_result = await AsyncDataFrame(session, DBBridge).collect()
         for bridge in bridge_query_result:
             target_id_str = bridge.target
             if target_id_str in invalid_channel_ids:
@@ -308,8 +308,8 @@ class Bridges:
             )
 
             if len(channel_ids_to_delete) > 0:
-                (
-                    DataFrame(session, DBBridge)
+                await (
+                    AsyncDataFrame(session, DBBridge)
                     .where(
                         F.col("source").isin(channel_ids_to_delete)
                         | F.col("target").isin(channel_ids_to_delete)
@@ -317,8 +317,8 @@ class Bridges:
                     .delete()
                 )
 
-                (
-                    DataFrame(session, DBMessageMap)
+                await (
+                    AsyncDataFrame(session, DBMessageMap)
                     .where(
                         F.col("source_channel").isin(channel_ids_to_delete)
                         | F.col("target_channel").isin(channel_ids_to_delete)
@@ -326,8 +326,8 @@ class Bridges:
                     .delete()
                 )
 
-            (
-                DataFrame(session, DBWebhook)
+            await (
+                AsyncDataFrame(session, DBWebhook)
                 .where(
                     F.col("channel").isin(channel_ids_to_delete)
                     | F.col("webhook").isin(invalid_webhook_ids)
@@ -562,7 +562,7 @@ class Bridges:
         )
 
         target_id_str = str(target_id)
-        insert_bridge_row = get_sql_insert_ignore_duplicate_query(
+        insert_bridge_row = await get_sql_insert_ignore_duplicate_query(
             DBBridge,
             indices={"source", "target"},
             source=str(source_id),
@@ -570,15 +570,15 @@ class Bridges:
         )
 
         bridge_webhook = await bridge.webhook
-        insert_webhook_row = get_sql_upsert_query(
+        insert_webhook_row = await get_sql_upsert_query(
             DBWebhook,
             indices={"channel"},
             channel=target_id_str,
             webhook=str(bridge_webhook.id),
         )
 
-        session.execute(insert_bridge_row)
-        session.execute(insert_webhook_row)
+        await session.execute(insert_bridge_row)
+        await session.execute(insert_webhook_row)
 
         logger.debug(
             "Bridge from #%s to #%s inserted into database.",
@@ -776,14 +776,14 @@ class Bridges:
             logger.debug("Bridge(s) demolished.")
             return
 
-        self._remove_bridges_from_db(
+        await self._remove_bridges_from_db(
             bridges_to_demolish=bridges_to_demolish,
             webhooks_deleted=webhooks_deleted,
             session=session,
         )
 
     @overload
-    def _remove_bridges_from_db(
+    async def _remove_bridges_from_db(
         self,
         *,
         bridges_to_demolish: list[tuple[int, int]],
@@ -792,7 +792,7 @@ class Bridges:
     ): ...
 
     @overload
-    def _remove_bridges_from_db(
+    async def _remove_bridges_from_db(
         self,
         *,
         bridges_to_demolish: list[tuple[int, int]],
@@ -801,7 +801,7 @@ class Bridges:
     ): ...
 
     @sql_command
-    def _remove_bridges_from_db(
+    async def _remove_bridges_from_db(
         self,
         *,
         bridges_to_demolish: list[tuple[int, int]],
@@ -814,16 +814,16 @@ class Bridges:
         for sid, tid in bridges_to_demolish:
             source_id_str = str(sid)
             target_id_str = str(tid)
-            (
-                DataFrame(session, DBBridge)
+            await (
+                AsyncDataFrame(session, DBBridge)
                 .where(
                     (F.col("source") == F.lit(source_id_str))
                     & (F.col("target") == F.lit(target_id_str))
                 )
                 .delete()
             )
-            (
-                DataFrame(session, DBMessageMap)
+            await (
+                AsyncDataFrame(session, DBMessageMap)
                 .where(
                     (F.col("source_channel") == F.lit(source_id_str))
                     & (F.col("target_channel") == F.lit(target_id_str))
@@ -832,8 +832,8 @@ class Bridges:
             )
 
         if len(webhooks_deleted) > 0:
-            (
-                DataFrame(session, DBWebhook)
+            await (
+                AsyncDataFrame(session, DBWebhook)
                 .where(F.col("webhook").isin(webhooks_deleted))
                 .delete()
             )
