@@ -591,7 +591,7 @@ class TestRunner:
                     print(f"...{camel_case_split(test_name)}.")
                     full_test_name = f"{camel_case_split(test_case_name)} {camel_case_split(test_name)}."
 
-                    tester_bot.received_messages = defaultdict(lambda: [])
+                    tester_bot.received_messages = defaultdict(asyncio.Queue)
                     try:
                         failure_messages = await test(
                             self.bridge_bot,
@@ -856,14 +856,14 @@ async def expect(
 
     if obj in ("next_message", "no_new_message"):
         assert in_channel
+        queue = tester_bot.received_messages[in_channel]
 
-        end_time = datetime.now() + timedelta(seconds=timeout)
-        while (
-            not (received_messages := tester_bot.received_messages[in_channel])
-        ) and (datetime.now() <= end_time):
-            await asyncio.sleep(heartbeat)
+        try:
+            received_message = await asyncio.wait_for(queue.get(), timeout=timeout)
+        except asyncio.TimeoutError:
+            received_message = None
 
-        if not received_messages:
+        if received_message is None:
             if obj == "next_message":
                 failure_message = [
                     f"expecting next message in channel <#{in_channel}> timed out"
@@ -876,14 +876,24 @@ async def expect(
                     "success",
                 )
             return (None, failure_message)
+        else:
+            # Small delay to let the bridge bot finish any pending work (e.g.
+            # committing DB message mappings) that follows its webhook.send().
+            # The gateway event can arrive before the HTTP response, so without
+            # this the test can act on the message before the bot has committed.
+            await asyncio.sleep(0.2)
 
-        received_message = tester_bot.received_messages[in_channel].pop(0)
         if obj == "no_new_message":
             failure_message = [
                 f"expected no new messages in channel <#{in_channel}> but received at least one message instead: https://discord.com/channels/1/{in_channel}/{received_message.id}"
             ]
             log_expectation(failure_message[0], "failure")
-            tester_bot.received_messages[in_channel] = []
+            # Drain remaining messages
+            while not queue.empty():
+                try:
+                    queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
             return (None, failure_message)
 
         obj = received_message

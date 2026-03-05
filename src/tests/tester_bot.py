@@ -50,7 +50,9 @@ is_ready: bool = False
 testing_server: discord.Guild
 
 # Messages sent by the bridge bot via the interaction
-received_messages: dict[int, list[discord.Message]] = defaultdict(lambda: [])
+received_messages: dict[int, asyncio.Queue[discord.Message]] = defaultdict(
+    asyncio.Queue
+)
 
 # Threads created in each channel with each name
 created_threads: dict[int, dict[str, discord.Thread]] = defaultdict(lambda: {})
@@ -141,7 +143,7 @@ async def on_message(message: discord.Message):
         (message.author.id == bridge_bot_user.id)
         or (message.application_id == bridge_bot_user.id)
     ):
-        received_messages[message.channel.id].append(message)
+        received_messages[message.channel.id].put_nowait(message)
 
 
 @client.event
