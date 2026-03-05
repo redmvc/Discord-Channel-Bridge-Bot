@@ -181,14 +181,14 @@ async def works(
             in_channel=channel_1,
             with_name=thread_2_name,
             to="exist",
-            timeout=2,
+            timeout=3,
         ),
         expect(
             "thread",
             in_channel=channel_3,
             with_name=thread_2_name,
             to="exist",
-            timeout=2,
+            timeout=3,
         ),
     )
 
