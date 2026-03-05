@@ -2,7 +2,7 @@ import asyncio
 import sys
 from abc import ABC
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from re import finditer
 from typing import (
@@ -52,6 +52,8 @@ test_function_type = Callable[
 CoroT = TypeVar("CoroT", bound=test_function_type)
 
 failures: dict[str, list[str]] = {}
+_clock_offset: timedelta = timedelta()
+_test_start_time: datetime = datetime.min.replace(tzinfo=timezone.utc)
 
 
 def camel_case_split(
@@ -575,6 +577,14 @@ class TestRunner:
                 )
             logger.info("Created.")
 
+            # Measure offset between local UTC clock and Discord's clock.
+            # Done once here while channels have no bridges, so the
+            # calibration message won't be bridged.
+            global _clock_offset
+            _cal = await testing_channels[0].send("\u200b")
+            _clock_offset = datetime.now(timezone.utc) - _cal.created_at
+            await _cal.delete()
+
             # Run the tests
             logger.info("")
             logger.info("Running tests.")
@@ -591,7 +601,12 @@ class TestRunner:
                     print(f"...{camel_case_split(test_name)}.")
                     full_test_name = f"{camel_case_split(test_case_name)} {camel_case_split(test_name)}."
 
+                    # Let any in-flight messages from the previous test
+                    # settle into the old queue before discarding it.
+                    await asyncio.sleep(0.5)
                     tester_bot.received_messages = defaultdict(asyncio.Queue)
+                    global _test_start_time
+                    _test_start_time = datetime.now(timezone.utc) - _clock_offset
                     try:
                         failure_messages = await test(
                             self.bridge_bot,
@@ -852,10 +867,26 @@ async def expect(
         assert in_channel
         queue = tester_bot.received_messages[in_channel]
 
-        try:
-            received_message = await asyncio.wait_for(queue.get(), timeout=timeout)
-        except asyncio.TimeoutError:
-            received_message = None
+        # Pull messages from the queue, discarding any that were created
+        # before this test started (stale leftovers from a previous test).
+        received_message = None
+        deadline = asyncio.get_event_loop().time() + timeout
+        while True:
+            remaining = deadline - asyncio.get_event_loop().time()
+            if remaining <= 0:
+                break
+            try:
+                msg = await asyncio.wait_for(queue.get(), timeout=remaining)
+            except asyncio.TimeoutError:
+                break
+            if msg.created_at >= _test_start_time:
+                received_message = msg
+                break
+            # Stale message from a previous test — discard and retry.
+            logger.debug(
+                f"Discarding stale message {msg.id} "
+                f"(created {msg.created_at} < test start {_test_start_time})"
+            )
 
         if received_message is None:
             if obj == "next_message":
