@@ -1054,15 +1054,16 @@ async def expect(
                     )
                 return (None, failure_message)
 
+            await asyncio.sleep(0.2)  # settle delay for DB commits
+            obj = await obj.channel.fetch_message(message_id)
+
             if negation:
                 failure_message = [
-                    f"expected message {message_id} in channel <#{channel_id}> to not be edited, but it was"
+                    f"expected message {message_id} in channel <#{channel_id}> to not be edited, but it was, and its new contents were {obj.content}"
                 ]
                 log_expectation(failure_message[0], "failure")
                 return (None, failure_message)
 
-            await asyncio.sleep(0.2)  # settle delay for DB commits
-            obj = await obj.channel.fetch_message(message_id)
             log_expectation(
                 f"expected edit of message in channel <#{channel_id}>: https://discord.com/channels/1/{channel_id}/{obj.id}",
                 "success",
