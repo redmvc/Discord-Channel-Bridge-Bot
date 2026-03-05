@@ -169,6 +169,7 @@ async def works(
     failure_messages += f
 
     # Create thread
+    await asyncio.sleep(0.2)
     thread_2_name = f"thread_{random.randint(0, 10000)}"
     thread_2 = await channel_2.create_thread(
         name=thread_2_name,
