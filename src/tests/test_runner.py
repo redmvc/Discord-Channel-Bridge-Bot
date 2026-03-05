@@ -108,7 +108,7 @@ def camel_case_split(
 
 def log_expectation(
     message: str,
-    type: Literal["success", "failure"],
+    result: Literal["success", "failure"],
     *,
     print_success_to_console: bool = False,
     print_failure_to_console: bool = True,
@@ -119,14 +119,14 @@ def log_expectation(
     ----------
     message : str
         The message to be logged.
-    type : Literal["success", "failure"]
+    result : Literal["success", "failure"]
         Whether it's a success or a failure. Will add emoji to the start of the message depending on which.
     print_success_to_console : bool, optional
         Whether to also print a success message to console. Defaults to False.
     print_failure_to_console : bool, optional
         Whether to also print a failure message to console. Defaults to True.
     """
-    if type == "failure":
+    if result == "failure":
         message = f"FAILURE: {message}"
         logger.error(message)
         message = f"❌ {message}"
@@ -713,7 +713,6 @@ async def expect(
     in_channel: int | discord.TextChannel | discord.Thread,
     to: list[MessageExpectation] | MessageExpectation,
     timeout: float | int = 10,
-    heartbeat: float | int = 0.5,
 ) -> tuple[discord.Message | None, list[str]]:
     """Check that a message will arrive in `in_channel` within `timeout` seconds. If it does, also check that the given list of expectations is true of it, then return a tuple whose first element is the message and whose second element is a list of all the failing tests; otherwise, return a tuple whose first element is None and whose second element is a list with the failing test.
 
@@ -726,8 +725,6 @@ async def expect(
         A list of things to expect of that message. The valid expectations are: "contain", "not_contain", "equal", "not_equal", "be_a_reply_to", "not_be_a_reply_to", "be_from", "not_be_from", "have_embed", and "have_embeds".
     timeout : float | int, optional
         How long to wait, in seconds, for the message to arrive. If set to less than 1, will be set to 1. Defaults to 10.
-    heartbeat : float | int, optional
-        How long to wait, in seconds, between each check that the expected event occurred. If set to less than 0.5, will be set to 0.5; if set to a value greater than `timeout`, will be set to `timeout - 0.5`. Defaults to 0.5.
 
     Returns
     -------
@@ -766,7 +763,6 @@ async def expect(
     *,
     in_channel: int | discord.TextChannel | discord.Thread,
     timeout: float | int = 10,
-    heartbeat: float | int = 0.5,
 ) -> tuple[None, list[str]]:
     """Check that no message will be sent in `in_channel` within the next `timeout` seconds. If it is not, return a tuple `(None, [])`; if it is, return a tuple whose first element is None and whose second element is a list with the test failure message.
 
@@ -777,8 +773,6 @@ async def expect(
         The channel in which that no new message should be sent, or ID of same.
     timeout : float | int, optional
         How long to wait, in seconds, before declaring that no message was sent in `in_channel`. If set to less than 1, will be set to 1. Defaults to 10.
-    heartbeat : float | int, optional
-        How long to wait, in seconds, between each check for new messages. If set to less than 0.5, will be set to 0.5; if set to a value greater than `timeout`, will be set to `timeout - 0.5`. Defaults to 0.5.
 
     Returns
     -------
@@ -837,7 +831,7 @@ async def expect(
     timeout : float | int, optional
         How long to wait, in seconds, for the expected event to occur. If set to less than 1, will be set to 1. Defaults to 10.
     heartbeat : float | int, optional
-        How long to wait, in seconds, between each check that the expected event occurred. If set to less than 0.5, will be set to 0.5; if set to a value greater than `timeout`, will be set to `timeout - 0.5`. Defaults to 0.5.
+        How long to wait, in seconds, between each check for thread expectations. Not used for message expectations. If set to less than 0.5, will be set to 0.5; if set to a value greater than `timeout`, will be set to `timeout - 0.5`. Defaults to 0.5.
 
     Returns
     -------
@@ -876,14 +870,7 @@ async def expect(
                     "success",
                 )
             return (None, failure_message)
-        else:
-            # Small delay to let the bridge bot finish any pending work (e.g.
-            # committing DB message mappings) that follows its webhook.send().
-            # The gateway event can arrive before the HTTP response, so without
-            # this the test can act on the message before the bot has committed.
-            await asyncio.sleep(0.2)
-
-        if obj == "no_new_message":
+        elif obj == "no_new_message":
             failure_message = [
                 f"expected no new messages in channel <#{in_channel}> but received at least one message instead: https://discord.com/channels/1/{in_channel}/{received_message.id}"
             ]
@@ -895,6 +882,12 @@ async def expect(
                 except asyncio.QueueEmpty:
                     break
             return (None, failure_message)
+
+        # Small delay to let the bridge bot finish any pending work (e.g.
+        # committing DB message mappings) that follows its webhook.send().
+        # The gateway event can arrive before the HTTP response, so without
+        # this the test can act on the message before the bot has committed.
+        await asyncio.sleep(0.2)
 
         obj = received_message
         log_expectation(
@@ -934,7 +927,16 @@ async def expect(
         return (return_object, failure_message)
     else:
         if in_channel:
-            cast(ExistingMessageExpectation, to[0])["be_in_channel"] = in_channel
+            to = cast(
+                Sequence[Expectation],
+                [
+                    {
+                        **cast(ExistingMessageExpectation, to[0]),
+                        "be_in_channel": in_channel,
+                    },
+                    *to[1:],
+                ],
+            )
 
     assert not isinstance(to, str)
 

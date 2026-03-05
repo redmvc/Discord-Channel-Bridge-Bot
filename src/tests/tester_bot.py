@@ -340,8 +340,7 @@ class InteractionResponseTester:
                 ),
             )
 
-        if embeds is not MISSING:
-            arguments["embeds"] = embeds
+        arguments["embeds"] = embeds
 
         if file is not MISSING:
             files = [file]
