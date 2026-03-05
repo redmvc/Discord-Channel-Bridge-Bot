@@ -45,6 +45,7 @@ test_function_type = Callable[
     ],
     Coroutine[Any, Any, list[str]],
 ]
+T = TypeVar("T", bound=Any)
 CoroT = TypeVar("CoroT", bound=test_function_type)
 
 failures: dict[str, list[str]] = {}
@@ -723,6 +724,40 @@ class EmbedExpectation(TypedDict, total=False):
     not_have_url: bool
 
 
+async def _pull_from_queue(
+    queue: asyncio.Queue[T],
+    *,
+    timeout: float,
+    accept: Callable[[T], bool] | None = None,
+) -> T | None:
+    """Pull the first accepted item from `queue` within `timeout` seconds. Items for which `accept` returns False are silently discarded. Returns None on timeout.
+
+    Parameters
+    ----------
+    queue : :class:`~asyncio.Queue`[T]
+        An AsyncIO queue from which to pull items.
+    timeout : float
+        The maximum time to wait for an item to be pulled.
+    accept : Callable[[T], bool] | None, optional
+        If present, must be a function that evaluates an item pulled out of the queue and returns True if it's an acceptable item and False otherwise. Defaults to None, in which case the first item found in the queue will be returned.
+
+    Returns
+    -------
+    T | None
+    """
+    deadline = asyncio.get_event_loop().time() + timeout
+    while (remaining := deadline - asyncio.get_event_loop().time()) > 0:
+        try:
+            item = await asyncio.wait_for(queue.get(), timeout=remaining)
+        except asyncio.TimeoutError:
+            return None
+
+        if accept is None or accept(item):
+            return item
+
+    return None
+
+
 @overload
 async def expect(
     obj: Literal["next_message"],
@@ -871,24 +906,11 @@ async def expect(
 
         # Pull messages from the queue, discarding any that were created
         # before this test started (stale leftovers from a previous test).
-        received_message = None
-        deadline = asyncio.get_event_loop().time() + timeout
-        while True:
-            remaining = deadline - asyncio.get_event_loop().time()
-            if remaining <= 0:
-                break
-            try:
-                msg = await asyncio.wait_for(queue.get(), timeout=remaining)
-            except asyncio.TimeoutError:
-                break
-            if msg.created_at >= _test_start_time:
-                received_message = msg
-                break
-            # Stale message from a previous test — discard and retry.
-            logger.debug(
-                f"Discarding stale message {msg.id} "
-                f"(created {msg.created_at} < test start {_test_start_time})"
-            )
+        received_message = await _pull_from_queue(
+            queue,
+            timeout=timeout,
+            accept=(lambda msg: msg.created_at >= _test_start_time),
+        )
 
         if received_message is None:
             if obj == "next_message":
