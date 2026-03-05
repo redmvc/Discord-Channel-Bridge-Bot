@@ -724,6 +724,7 @@ class EmbedExpectation(TypedDict, total=False):
     whose_description_contains: "NotRequired[str]"
     whose_url_equals: "NotRequired[str]"
     whose_url_contains: "NotRequired[str]"
+    not_have_url: "NotRequired[bool]"
 
 
 @overload
@@ -1138,6 +1139,17 @@ async def expect(
                         result = "failure"
                     elif url_must_equal != embed.url:
                         message = f"{message} but it was instead '{embed.url}'"
+                        result = "failure"
+                    else:
+                        result = "success"
+
+                    if result == "failure":
+                        failure_messages.append(message)
+                    log_expectation(message, result)
+                elif embed_expectation.get("not_have_url"):
+                    message = f"expected embed #{idx} to not have a URL"
+                    if embed.url:
+                        message = f"{message} but it had '{embed.url}'"
                         result = "failure"
                     else:
                         result = "success"
