@@ -535,6 +535,11 @@ class TestRunner:
             assert self.tester_bot.user
             common.test_app = await self.bridge_bot.fetch_user(self.tester_bot.user.id)
 
+            # Clean up any leftover roles from interrupted previous runs
+            for role in testing_server.roles:
+                if role.name == "webhook_permissions_role":
+                    await role.delete()
+
             # Create a role in the testing server with the necessary permissions
             global webhook_permissions_role
             webhook_permissions_role = await testing_server.create_role(
