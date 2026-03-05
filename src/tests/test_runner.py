@@ -26,10 +26,6 @@ from tester_bot import logger
 sys.path.append(str(Path(__file__).parent.parent))
 import common
 
-if TYPE_CHECKING:
-    from typing import NotRequired
-
-
 # Helper to prevent us from being rate limited
 rate_limiter = AsyncLimiter(1, 10)
 
@@ -703,28 +699,28 @@ class Expectation(TypedDict, total=False):
 
 
 class MessageExpectation(Expectation, total=False):
-    contain: "NotRequired[str]"
-    not_contain: "NotRequired[str]"
-    equal: "NotRequired[str]"
-    not_equal: "NotRequired[str]"
-    be_a_reply_to: "NotRequired[discord.Message]"
-    not_be_a_reply_to: "NotRequired[discord.Message]"
-    be_from: "NotRequired[int | discord.User | discord.Member | discord.Client]"
-    not_be_from: "NotRequired[int | discord.User | discord.Member | discord.Client]"
-    have_embed: "NotRequired[EmbedExpectation]"
-    have_embeds: "NotRequired[list[EmbedExpectation]]"
+    contain: str
+    not_contain: str
+    equal: str
+    not_equal: str
+    be_a_reply_to: discord.Message
+    not_be_a_reply_to: discord.Message
+    be_from: int | discord.User | discord.Member | discord.Client
+    not_be_from: int | discord.User | discord.Member | discord.Client
+    have_embed: "EmbedExpectation"
+    have_embeds: "list[EmbedExpectation]"
 
 
 class ExistingMessageExpectation(MessageExpectation, total=False):
-    be_in_channel: "NotRequired[int | discord.TextChannel | discord.Thread]"
+    be_in_channel: int | discord.TextChannel | discord.Thread
 
 
 class EmbedExpectation(TypedDict, total=False):
-    whose_description_equals: "NotRequired[str]"
-    whose_description_contains: "NotRequired[str]"
-    whose_url_equals: "NotRequired[str]"
-    whose_url_contains: "NotRequired[str]"
-    not_have_url: "NotRequired[bool]"
+    whose_description_equals: str
+    whose_description_contains: str
+    whose_url_equals: str
+    whose_url_contains: str
+    not_have_url: bool
 
 
 @overload
