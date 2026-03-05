@@ -607,6 +607,7 @@ class TestRunner:
                     # settle into the old queue before discarding it.
                     await asyncio.sleep(0.5)
                     tester_bot.received_messages = defaultdict(asyncio.Queue)
+                    tester_bot.edited_messages = defaultdict(asyncio.Queue)
                     global _test_start_time
                     _test_start_time = datetime.now(timezone.utc) - _clock_offset
                     try:
@@ -709,6 +710,8 @@ class MessageExpectation(Expectation, total=False):
     be_from: int | discord.User | discord.Member | discord.Client
     not_be_from: int | discord.User | discord.Member | discord.Client
     have_embed: "EmbedExpectation"
+    be_edited: bool
+    not_be_edited: bool
     have_embeds: "list[EmbedExpectation]"
 
 
@@ -791,8 +794,11 @@ async def expect(
     *,
     in_channel: int | discord.TextChannel | discord.Thread | None = None,
     to: list[ExistingMessageExpectation] | ExistingMessageExpectation,
-) -> tuple[discord.Message, list[str]]:
+    timeout: float | int = 10,
+) -> tuple[discord.Message | None, list[str]]:
     """Check that a given list of expectations is true of a message, then return a tuple whose first element is the message and whose second element is a list of all the failing tests.
+
+    If any expectation sets `be_edited` or `not_be_edited` to True, waits up to `timeout` seconds for the message to be edited before checking the remaining expectations against the updated message.
 
     Parameters
     ----------
@@ -800,11 +806,36 @@ async def expect(
     in_channel : int | :class:`~discord.TextChannel` | :class:`~discord.Thread` | None, optional
         A channel in which the message should be expected. Equivalent to setting the "be_in_channel" expectation in `to`.
     to : list[:class:`~MessageExpectation`] | :class:`~MessageExpectation`
-        A list of things to expect of that message. The valid expectations are: "contain", "not_contain", "equal", "not_equal", "be_a_reply_to", "not_be_a_reply_to", "be_from", "not_be_from", "have_embed", "have_embeds", and "be_in_channel".
+        A list of things to expect of that message. The valid expectations are: "contain", "not_contain", "equal", "not_equal", "be_a_reply_to", "not_be_a_reply_to", "be_from", "not_be_from", "have_embed", "have_embeds", "be_in_channel", "be_edited", and "not_be_edited".
+    timeout : float | int, optional
+        How long to wait for an edit event when `be_edited` is set. Defaults to 10.
 
     Returns
     -------
-    tuple[:class:`~discord.Message`, list[str]]
+    tuple[:class:`~discord.Message` | None, list[str]]
+    """
+    ...
+
+
+@overload
+async def expect(
+    obj: discord.Message,
+    *,
+    to: Literal["not_be_edited"],
+    timeout: float | int = 10,
+) -> tuple[None, list[str]]:
+    """Check that a given message was not edited within `timout` seconds.
+
+    Parameters
+    ----------
+    obj : :class:`~discord.Message`
+    to : Literal["not_be_edited"]
+    timeout : float | int, optional
+        How long to wait for an edit event when `be_edited` is set. Defaults to 10.
+
+    Returns
+    -------
+    tuple[None, list[str]]
     """
     ...
 
@@ -863,7 +894,10 @@ async def expect(
     in_channel: int | discord.TextChannel | discord.Thread | None = None,
     with_name: str | None = None,
     to: (
-        Sequence[Expectation] | Expectation | Literal["exist", "not_exist"] | None
+        Sequence[Expectation]
+        | Expectation
+        | Literal["exist", "not_exist", "not_be_edited"]
+        | None
     ) = None,
     timeout: float | int = 10,
     heartbeat: float | int = 0.5,
@@ -878,7 +912,7 @@ async def expect(
         A channel in which that object should be expected, or ID of same. Defaults to None.
     with_name : str | None, optional
         The name the object should have. Defaults to None.
-    to : Sequence[:class:`~Expectation`] | :class:`~Expectation` | Literal["exist", "not_exist"] | None, optional
+    to : Sequence[:class:`~Expectation`] | :class:`~Expectation` | Literal["exist", "not_exist", "not_be_edited"] | None, optional
         A list of things to expect of that object. Defaults to None.
     timeout : float | int, optional
         How long to wait, in seconds, for the expected event to occur. If set to less than 1, will be set to 1. Defaults to 10.
@@ -894,6 +928,8 @@ async def expect(
 
     if to is None:
         to = []
+    elif to == "not_be_edited":
+        to = [cast(ExistingMessageExpectation, {"not_be_edited": True})]
     elif not isinstance(to, Sequence):
         to = [to]
 
@@ -938,10 +974,8 @@ async def expect(
                     break
             return (None, failure_message)
 
-        # Small delay to let the bridge bot finish any pending work (e.g.
-        # committing DB message mappings) that follows its webhook.send().
-        # The gateway event can arrive before the HTTP response, so without
-        # this the test can act on the message before the bot has committed.
+        # Small delay to let the bridge bot finish any pending work (e.g. committing DB message mappings) that follows its webhook.send().
+        # The gateway event can arrive before the HTTP response, so without this the test can act on the message before the bot has committed.
         await asyncio.sleep(0.2)
 
         obj = received_message
@@ -993,6 +1027,47 @@ async def expect(
                 ],
             )
 
+        # If any expectation has be_edited, wait for the edit event, then fetch the updated message before running assertions.
+        if not isinstance(to, str) and (
+            (negation := any(exp.get("not_be_edited") for exp in to))
+            or any(exp.get("be_edited") for exp in to)
+        ):
+            channel_id = obj.channel.id
+            message_id = obj.id
+            queue = tester_bot.edited_messages[channel_id]
+            payload = await _pull_from_queue(
+                queue,
+                timeout=timeout,
+                accept=(lambda p: p.message_id == message_id),
+            )
+            if payload is None:
+                if not negation:
+                    failure_message = [
+                        f"expecting edit of message {message_id} in channel <#{channel_id}> timed out"
+                    ]
+                    log_expectation(failure_message[0], "failure")
+                else:
+                    failure_message = []
+                    log_expectation(
+                        f"expected message {message_id} to not be edited",
+                        "success",
+                    )
+                return (None, failure_message)
+
+            if negation:
+                failure_message = [
+                    f"expected message {message_id} in channel <#{channel_id}> to not be edited, but it was"
+                ]
+                log_expectation(failure_message[0], "failure")
+                return (None, failure_message)
+
+            await asyncio.sleep(0.2)  # settle delay for DB commits
+            obj = await obj.channel.fetch_message(message_id)
+            log_expectation(
+                f"expected edit of message in channel <#{channel_id}>: https://discord.com/channels/1/{channel_id}/{obj.id}",
+                "success",
+            )
+
     assert not isinstance(to, str)
 
     content = obj.content
@@ -1001,6 +1076,9 @@ async def expect(
     for expectation, value in expectations:
         if negation := expectation.startswith("not_"):
             expectation = expectation[4:]
+
+        if expectation == "be_edited":
+            continue
 
         if expectation == "be_in_channel":
             if TYPE_CHECKING:

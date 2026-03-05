@@ -54,6 +54,11 @@ received_messages: dict[int, asyncio.Queue[discord.Message]] = defaultdict(
     asyncio.Queue
 )
 
+# Messages edited in each channel (raw payloads from on_raw_message_edit)
+edited_messages: dict[int, asyncio.Queue[discord.RawMessageUpdateEvent]] = defaultdict(
+    asyncio.Queue
+)
+
 # Threads created in each channel with each name
 created_threads: dict[int, dict[str, discord.Thread]] = defaultdict(lambda: {})
 
@@ -144,6 +149,11 @@ async def on_message(message: discord.Message):
         or (message.application_id == bridge_bot_user.id)
     ):
         received_messages[message.channel.id].put_nowait(message)
+
+
+@client.event
+async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
+    edited_messages[payload.channel_id].put_nowait(payload)
 
 
 @client.event
