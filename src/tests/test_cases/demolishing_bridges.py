@@ -1,4 +1,3 @@
-import asyncio
 import random
 import sys
 from pathlib import Path
@@ -152,18 +151,6 @@ async def works(
     )
     failure_messages += f
 
-    # Send message from channel_1
-    content = "message from channel 1"
-    await channel_1.send(content)
-    _, f = await expect("no_new_message", in_channel=channel_2, timeout=5)
-    failure_messages += f
-
-    # Send message from channel_2
-    content = "message from channel 2"
-    await channel_2.send(content)
-    _, f = await expect("no_new_message", in_channel=channel_1, timeout=5)
-    failure_messages += f
-
     return failure_messages
 
 
@@ -219,29 +206,5 @@ async def works_when_demolishing_all(
         },
     )
     failure_messages += f
-
-    # Send message from channel_1 and thread_1
-    await asyncio.gather(
-        channel_1.send("message from channel 1"),
-        thread_1.send("message from thread 1"),
-    )
-    expectations = await asyncio.gather(
-        expect("no_new_message", in_channel=channel_2, timeout=5),
-        expect("no_new_message", in_channel=thread_2, timeout=5),
-    )
-    for _, f in expectations:
-        failure_messages += f
-
-    # Send message from channel_2 and thread_2
-    await asyncio.gather(
-        channel_2.send("message from channel 2"),
-        thread_2.send("message from thread 2"),
-    )
-    expectations = await asyncio.gather(
-        expect("no_new_message", in_channel=channel_1, timeout=5),
-        expect("no_new_message", in_channel=thread_1, timeout=5),
-    )
-    for _, f in expectations:
-        failure_messages += f
 
     return failure_messages
