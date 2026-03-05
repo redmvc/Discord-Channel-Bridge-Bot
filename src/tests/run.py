@@ -3,11 +3,13 @@ import traceback
 from types import TracebackType
 from typing import Any
 
-import test_cases.auto_bridge_threads  # noqa: F401
-import test_cases.bridge_thread  # noqa: F401
-import test_cases.bridging_replies  # noqa: F401
 import test_cases.creating_bridges  # noqa: F401
 import test_cases.demolishing_bridges  # noqa: F401
+import test_cases.bridging_messages  # noqa: F401
+import test_cases.bridging_replies  # noqa: F401
+import test_cases.bridging_edits  # noqa: F401
+import test_cases.bridge_thread  # noqa: F401
+import test_cases.auto_bridge_threads  # noqa: F401
 import test_runner
 import tester_bot
 from tester_bot import start_client as start_tester_bot
@@ -49,7 +51,7 @@ class Bots:
             num_tests = len(test_runner.failures)
             num_failures = sum(len(f) for _, f in test_runner.failures.items())
             test_runner.log_expectation(
-                f"A total of {num_failures} failure{'s' if num_failures > 2 else ''} happened in {num_tests} test{'s' if num_tests > 2 else ''}:\n - {'\n - '.join(t + ' (' + str(len(f)) + ')' for t, f in test_runner.failures.items())}",
+                f"A total of {num_failures} failure{'s' if num_failures >= 2 else ''} happened in {num_tests} test{'s' if num_tests >= 2 else ''}:\n - {'\n - '.join(t + ' (' + str(len(f)) + ')' for t, f in test_runner.failures.items())}",
                 "failure",
             )
         else:
@@ -59,9 +61,9 @@ class Bots:
                 print_success_to_console=True,
             )
 
-        if exc_type:
+        if exc_value:
             traceback.print_tb(tb)
-            raise exc_type(exc_value)
+            raise exc_value.with_traceback(tb)
 
         return True
 
