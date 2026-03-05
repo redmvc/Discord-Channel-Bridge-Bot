@@ -194,7 +194,7 @@ async def works(
     failure_messages += f
 
     #
-    reply_content = "reply to bridged version of orignal message"
+    reply_content = "reply to bridged version of original message"
     await bridged_original_message.reply(reply_content)
     _, f = await expect(
         "next_message",

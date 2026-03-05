@@ -49,7 +49,7 @@ class Bots:
             num_tests = len(test_runner.failures)
             num_failures = sum(len(f) for _, f in test_runner.failures.items())
             test_runner.log_expectation(
-                f"A total of {num_failures} failure{'s' if num_failures >= 2 else ''} happened in {num_tests} test{'s' if num_tests > 2 else ''}:\n - {'\n - '.join(t + ' (' + str(len(f)) + ')' for t, f in test_runner.failures.items())}",
+                f"A total of {num_failures} failure{'s' if num_failures >= 2 else ''} happened in {num_tests} test{'s' if num_tests >= 2 else ''}:\n - {'\n - '.join(t + ' (' + str(len(f)) + ')' for t, f in test_runner.failures.items())}",
                 "failure",
             )
         else:
