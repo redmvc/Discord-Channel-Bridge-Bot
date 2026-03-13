@@ -1194,22 +1194,12 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
     async with lock:
         # If by the time this gets unlocked it was deleted from the dictionary, the message was deleted
         message_was_deleted = common.message_lock[message_id] is None
-        updated_message_content = payload.data.get("content") or ""
-        updated_message_attachments = payload.data.get("attachments")
-        updated_message_embeds = payload.data.get("embeds")
-        has_full_payload = all(
-            key in payload.data for key in ("content", "attachments", "embeds")
-        )
-        contentless_edit = has_full_payload and not (
-            updated_message_content
-            or updated_message_attachments
-            or updated_message_embeds
-        )
+        not_a_content_edit = "content" not in payload.data
 
         channel_id = payload.channel_id
         if (
             message_was_deleted
-            or contentless_edit
+            or not_a_content_edit
             or (not await common.wait_until_ready())
             or (not bridges.get_outbound_bridges(channel_id))
         ):
@@ -1219,14 +1209,14 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
 
         if (
             await edit_message_helper(
-                message_content=updated_message_content,
+                message_content=payload.data.get("content", ""),
                 attachments=[
                     discord.Attachment(data=attch, state=common.client._connection)
-                    for attch in (updated_message_attachments or [])
+                    for attch in payload.data.get("attachments", [])
                 ],
                 embeds=[
                     discord.Embed.from_dict(embed)
-                    for embed in (updated_message_embeds or [])
+                    for embed in payload.data.get("embeds", [])
                 ],
                 message_id=message_id,
                 channel_id=channel_id,
