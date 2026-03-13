@@ -8,22 +8,24 @@ from typing import TYPE_CHECKING, NamedTuple, TypedDict, overload
 
 import discord
 from discord.ext import tasks
-from sqlalchemy import sql
 from sqlalchemy.exc import StatementError
-from sqlalchemy.orm import Session as SQLSession
+from sqlalchemy.ext.asyncio import AsyncSession as SQLSession
 
 import commands
 import common
 import emoji_hash_map
 from bridge import Bridge, bridges
 from database import (
+    AsyncDataFrame,
     DBAppWhitelist,
     DBAutoBridgeThreadChannels,
     DBMessageMap,
     DBReactionMap,
+    Row,
+    create_tables,
     sql_command,
-    sql_select,
 )
+from database import functions as F
 from validations import (
     ChannelTypeError,
     TextChannelOrThread,
@@ -116,6 +118,8 @@ async def setup_bot(*, session: SQLSession):
     :class:`~discord.Forbidden`
         You do not have permissions to create or delete webhooks for some of the channels in existing Bridges.
     """
+    await create_tables()
+
     try:
         # -----
         logger.info("Loading bridges from database...")
@@ -124,12 +128,14 @@ async def setup_bot(*, session: SQLSession):
 
         # -----
         logger.info("Loading emoji hash map from database...")
-        emoji_hash_map.map = emoji_hash_map.EmojiHashMap()
+        emoji_hash_map.map = await emoji_hash_map.EmojiHashMap.create()
         logger.info("Emoji hash map loaded.")
 
         # -----
         logger.info("Loading whitelisted apps...")
-        whitelisted_apps_query_result = sql_select(DBAppWhitelist, session=session)
+        whitelisted_apps_query_result = await AsyncDataFrame(
+            session, DBAppWhitelist
+        ).collect()
         accessible_channels: set[int] = set()
         inaccessible_channels: set[int] = set()
         for whitelisted_app in whitelisted_apps_query_result:
@@ -164,19 +170,20 @@ async def setup_bot(*, session: SQLSession):
             )
 
         if len(inaccessible_channels) > 0:
-            delete_inaccessible_channels = sql.Delete(DBAppWhitelist).where(
-                DBAppWhitelist.channel.in_(inaccessible_channels)
+            await (
+                AsyncDataFrame(session, DBAppWhitelist)
+                .where(F.col("channel").isin(inaccessible_channels))
+                .delete()
             )
-            session.execute(delete_inaccessible_channels)
 
         logger.info("Whitelists loaded.")
 
         # -----
         logger.info("Loading automatically-thread-bridging channels...")
-        auto_thread_query_result = sql_select(
+        auto_thread_query_result = await AsyncDataFrame(
+            session,
             DBAutoBridgeThreadChannels,
-            session=session,
-        )
+        ).collect()
         common.auto_bridge_thread_channels = common.auto_bridge_thread_channels.union(
             {
                 int(auto_bridge_thread_channel.channel)
@@ -601,12 +608,12 @@ async def bridge_message_helper(
                     replied_to_content = "↱ " + replied_to_content
 
             # First, check whether the message replied to was itself bridged from a different channel
-            local_replied_to_message_map = sql_select(
-                DBMessageMap,
-                where=(DBMessageMap.target_message == str(message_reference_id)),
-                session=session,
-            ).first()
-            if isinstance(local_replied_to_message_map, DBMessageMap):
+            local_replied_to_message_map = await (
+                AsyncDataFrame(session, DBMessageMap)
+                .where(F.col("target_message") == F.lit(message_reference_id))
+                .first()
+            )
+            if local_replied_to_message_map is not None:
                 # So the message replied to was bridged from elsewhere
                 reply_source_channel_id = int(
                     local_replied_to_message_map.source_channel
@@ -631,10 +638,10 @@ async def bridge_message_helper(
                 source_replied_to_id = message_reference_id
 
             # Now find all other bridged versions of the message we're replying to
-            query_result = sql_select(
-                DBMessageMap,
-                where=(DBMessageMap.source_message == str(source_replied_to_id)),
-                session=session,
+            query_result = await (
+                AsyncDataFrame(session, DBMessageMap)
+                .where(F.col("source_message") == F.lit(source_replied_to_id))
+                .collect()
             )
             for message_map in query_result:
                 bridged_reply_to[int(message_map.target_channel)] = int(
@@ -1379,14 +1386,14 @@ async def edit_message_helper(
                     )
 
             # Find all bridged messages associated with this one (there might be multiple if the original message was split due to length)
-            bridged_messages = sql_select(
-                DBMessageMap,
-                where=(
-                    (DBMessageMap.source_message == message_id)
-                    & (DBMessageMap.target_channel == str(bridged_channel_id))
-                ),
-                order_by=(DBMessageMap.target_message_order),
-                session=session,
+            bridged_messages = await (
+                AsyncDataFrame(session, DBMessageMap)
+                .where(
+                    (F.col("source_message") == F.lit(message_id))
+                    & (F.col("target_channel") == F.lit(bridged_channel_id))
+                )
+                .orderBy("target_message_order")
+                .collect()
             )
 
             for message_row in bridged_messages:
@@ -1411,7 +1418,7 @@ async def edit_message_helper(
                 try:
 
                     async def edit_message(
-                        message_row: DBMessageMap,
+                        bridged_message_id: int,
                         channel_specific_embeds: list[discord.Embed],
                         bridged_channel: TextChannelOrThread,
                         content: str,
@@ -1420,7 +1427,6 @@ async def edit_message_helper(
                         include_attachments: bool,
                     ):
                         try:
-                            bridged_message_id = int(message_row.target_message)
                             if message_is_reply and include_attachments:
                                 # The message being edited is a reply, I need to keep its embed
                                 bridged_message_embeds = (
@@ -1466,7 +1472,7 @@ async def edit_message_helper(
                                 )
 
                     await edit_message(
-                        message_row,
+                        int(message_row.target_message),
                         channel_specific_embeds,
                         bridged_channel,
                         truncated_content,
@@ -1714,19 +1720,19 @@ async def replace_discord_links(
             continue
 
         # The message being linked is from a channel that is bridged to the current channel
-        bridged_messages = sql_select(
-            DBMessageMap,
-            where=(
+        bridged_messages = await (
+            AsyncDataFrame(session, DBMessageMap)
+            .where(
                 (
-                    (DBMessageMap.source_message == link_message_id)
-                    & DBMessageMap.target_channel.in_(channel_ids_to_check)
+                    (F.col("source_message") == F.lit(link_message_id))
+                    & F.col("target_channel").isin(channel_ids_to_check)
                 )
                 | (
-                    (DBMessageMap.target_message == link_message_id)
-                    & DBMessageMap.source_channel.in_(channel_ids_to_check)
+                    (F.col("target_message") == F.lit(link_message_id))
+                    & F.col("source_channel").isin(channel_ids_to_check)
                 )
-            ),
-            session=session,
+            )
+            .collect()
         )
         for message_row in bridged_messages:
             if message_row.source_message == link_message_id:
@@ -1869,10 +1875,10 @@ async def delete_message_helper(
 
     # Find all messages matching this one
     try:
-        bridged_messages = sql_select(
-            DBMessageMap,
-            where=(DBMessageMap.source_message == message_id),
-            session=session,
+        bridged_messages = await (
+            AsyncDataFrame(session, DBMessageMap)
+            .where(F.col("source_message") == F.lit(message_id))
+            .collect()
         )
         at_least_one_delete = False
         for message_row in bridged_messages:
@@ -1893,7 +1899,7 @@ async def delete_message_helper(
             try:
 
                 async def delete_message(
-                    message_row: DBMessageMap,
+                    message_row: Row,
                     target_channel_id: int,
                     thread_splat: ThreadSplat,
                     bridged_channel: TextChannelOrThread,
@@ -1969,11 +1975,13 @@ async def delete_message_helper(
 
         # If the message was bridged, delete its row
         # If it was a source of bridged messages, delete all rows of its bridged versions
-        session.execute(
-            sql.Delete(DBMessageMap).where(
-                (DBMessageMap.source_message == str(message_id))
-                | (DBMessageMap.target_message == str(message_id))
+        await (
+            AsyncDataFrame(session, DBMessageMap)
+            .where(
+                (F.col("source_message") == F.lit(message_id))
+                | (F.col("target_message") == F.lit(message_id))
             )
+            .delete()
         )
     except Exception as e:
         if isinstance(e, StatementError):
@@ -2247,13 +2255,13 @@ async def bridge_reaction_add(
             )
 
         # Let me check whether I've already reacted to bridged messages in some of these channels
-        already_bridged_reactions = sql_select(
-            DBReactionMap,
-            where=(
-                (DBReactionMap.source_message == source_message_id_str)
-                & (DBReactionMap.source_emoji == emoji_id_str)
-            ),
-            session=session,
+        already_bridged_reactions = await (
+            AsyncDataFrame(session, DBReactionMap)
+            .where(
+                (F.col("source_message") == F.lit(source_message_id_str))
+                & (F.col("source_emoji") == F.lit(emoji_id_str))
+            )
+            .collect()
         )
         already_bridged_reaction_channels = {
             int(bridged_reaction.target_channel)
@@ -2273,12 +2281,12 @@ async def bridge_reaction_add(
             return
 
         # First, check whether this message is bridged, in which case I need to find its source
-        source_message_map = sql_select(
-            DBMessageMap,
-            where=(DBMessageMap.target_message == source_message_id_str),
-            session=session,
-        ).first()
-        if isinstance(source_message_map, DBMessageMap):
+        source_message_map = await (
+            AsyncDataFrame(session, DBMessageMap)
+            .where(F.col("target_message") == F.lit(source_message_id_str))
+            .first()
+        )
+        if source_message_map is not None:
             # This message was bridged, so find the original one, react to it, and then find any other bridged messages from it
             try:
                 source_channel = await common.get_channel_from_id(
@@ -2326,37 +2334,21 @@ async def bridge_reaction_add(
             source_message_id = message_id
 
         # Bridge reactions to the last bridged message of a group of split bridged messages
-        max_message_subq = (
-            sql.select(
-                DBMessageMap.target_channel,
-                DBMessageMap.source_message,
-                sql.func.max(DBMessageMap.target_message_order).label("max_order"),
-            )
-            .where(DBMessageMap.source_message == str(source_message_id))
-            .group_by(DBMessageMap.target_channel, DBMessageMap.source_message)
-            .cte("max_message_subq")
-        )
-        select_message_map = (
-            sql.select(DBMessageMap)
+        last_bridged_messages = await (
+            AsyncDataFrame(session, DBMessageMap)
             .where(
-                DBMessageMap.target_channel.in_(
-                    [str(id) for id in reachable_channel_ids]
+                (F.col("source_message") == F.lit(source_message_id))
+                & (F.col("target_channel").isin(reachable_channel_ids))
+            )
+            .groupBy("target_channel")
+            .agg(
+                F.max_by("target_message", "target_message_order").alias(
+                    "target_message"
                 )
             )
-            .join(
-                max_message_subq,
-                (
-                    (DBMessageMap.target_channel == max_message_subq.c.target_channel)
-                    & (
-                        DBMessageMap.target_message_order
-                        == max_message_subq.c.max_order
-                    )
-                    & (DBMessageMap.source_message == max_message_subq.c.source_message)
-                ),
-            )
+            .collect()
         )
-        bridged_messages_query_result = session.scalars(select_message_map)
-        for message_row in bridged_messages_query_result:
+        for message_row in last_bridged_messages:
             bridged_channel = await common.get_channel_from_id(
                 int(message_row.target_channel)
             )
@@ -2605,14 +2597,12 @@ async def unreact(
 
     try:
         # First I find all of the messages that got this reaction bridged to them
-        conditions = DBReactionMap.source_message == str(message_id)
+        conditions = F.col("source_message") == F.lit(message_id)
         if removed_emoji_id:
-            conditions = conditions & (DBReactionMap.source_emoji == removed_emoji_id)
+            conditions = conditions & (F.col("source_emoji") == F.lit(removed_emoji_id))
 
-        bridged_reactions = sql_select(
-            DBReactionMap,
-            where=conditions,
-            session=session,
+        bridged_reactions = await (
+            AsyncDataFrame(session, DBReactionMap).where(conditions).collect()
         )
         bridged_messages = {
             (
@@ -2635,20 +2625,16 @@ async def unreact(
             return
 
         # Then I remove them from the database
-        session.execute(sql.Delete(DBReactionMap).where(*conditions))
+        await AsyncDataFrame(session, DBReactionMap).where(conditions).delete()
 
         # Next I find the messages that still have reactions of this type in them even after I removed the ones above
-        conditions = [
-            DBReactionMap.target_message.in_(
-                [message_id for message_id, _, _, _, _ in bridged_messages]
-            )
-        ]
+        conditions = F.col("target_message").isin(
+            [message_id for message_id, _, _, _, _ in bridged_messages]
+        )
         if equivalent_emoji_ids:
-            conditions.append(DBReactionMap.source_emoji.in_(equivalent_emoji_ids))
-        remaining_reactions = sql_select(
-            DBReactionMap,
-            where=sql.and_(*conditions),
-            session=session,
+            conditions = conditions & F.col("source_emoji").isin(equivalent_emoji_ids)
+        remaining_reactions = await (
+            AsyncDataFrame(session, DBReactionMap).where(conditions).collect()
         )
 
         # And I get rid of my reactions from the messages that aren't on that list
@@ -2915,27 +2901,16 @@ async def bridge_unbridged_messages(*, session: SQLSession):
     """
     # Find the latest bridged messages from each channel
     logger.debug("Looking for latest bridged message in each channel.")
-    max_id_table = (
-        sql.select(
-            DBMessageMap.source_channel,
-            sql.func.max(DBMessageMap.id).label("max_id"),
-        )
-        .group_by(DBMessageMap.source_channel)
-        .cte("max_id_table")
-    )
 
-    bridged_messages_query_result = session.scalars(
-        sql.select(DBMessageMap).join(
-            max_id_table,
-            (
-                (DBMessageMap.source_channel == max_id_table.c.source_channel)
-                & (DBMessageMap.id == max_id_table.c.max_id)
-            ),
-        )
+    latest_bridged_messages = await (
+        AsyncDataFrame(session, DBMessageMap)
+        .groupBy("source_channel")
+        .agg(F.max_by("source_message", "id").alias("source_message"))
+        .collect()
     )
 
     logger.debug("Checking each channel with bridges...")
-    for bridged_message_row in bridged_messages_query_result:
+    for bridged_message_row in latest_bridged_messages:
         # Check whether a channel's latest message has already been bridged
         channel_id = int(bridged_message_row.source_channel)
         latest_bridged_message_id = int(bridged_message_row.source_message)
@@ -2957,18 +2932,19 @@ async def bridge_unbridged_messages(*, session: SQLSession):
             )
             continue
 
-        messages_with_id_result = sql_select(
-            DBMessageMap,
-            where=(
-                (DBMessageMap.source_message == str(latest_bridged_message_id))
-                | (DBMessageMap.target_message == str(latest_bridged_message_id))
-            ),
-            session=session,
-        ).first()
-        if isinstance(messages_with_id_result, DBMessageMap):
+        messages_with_id_result = await (
+            AsyncDataFrame(session, DBMessageMap)
+            .where(
+                (F.col("source_message") == F.lit(latest_bridged_message_id))
+                | (F.col("target_message") == F.lit(latest_bridged_message_id))
+            )
+            .first()
+        )
+        if messages_with_id_result is not None:
             # Most recent message in the channel has been bridged
             logger.debug(
-                "Latest message in channel <#%s> was already bridged.", channel_id
+                "Latest message in channel <#%s> was already bridged.",
+                channel_id,
             )
             continue
 

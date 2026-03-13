@@ -97,7 +97,7 @@ async def requires_bridge_to_channel(
     await give_manage_webhook_perms(tester_bot, testing_server)
 
     channel_1 = testing_channels[0]
-    channel_2 = testing_channels[0]
+    channel_2 = testing_channels[1]
     await demolish_bridges(channel_1, channel_and_threads=True)
 
     thread_1 = await channel_1.create_thread(
@@ -161,7 +161,7 @@ async def works(
         in_channel=thread_1,
         to={
             "be_a_reply_to": message_sent,
-            "contain": "Interaction was deferred with with thinking = True.",
+            "contain": "Interaction was deferred with thinking = True.",
         },
     )
 
