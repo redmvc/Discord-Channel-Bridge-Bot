@@ -548,17 +548,36 @@ async def bridge_message_helper(
         replied_to_author = None
         replied_to_content = None
         reply_has_ping = False
-        if message.type == discord.MessageType.reply:
+        if message_is_reply := (message.type == discord.MessageType.reply):
             # This message is a reply to another message, so we should try to link to its match on the other side of bridges
             # bridged_reply_to will be a dict whose keys are channel IDs and whose values are the IDs of messages matching the
             # message I'm replying to in those channels
-            message_is_reply = True
-
             if original_message.id != message.id:
                 replied_to_message = original_message
             else:
                 replied_to_message = resolved_message_reference
+
             if isinstance(replied_to_message, discord.Message):
+                replied_to_author = replied_to_message.author
+
+                if (
+                    message_being_replied_to_is_forward := (
+                        replied_to_message.reference
+                        and (
+                            replied_to_message.reference.type
+                            == discord.MessageReferenceType.forward
+                        )
+                    )
+                ) and (
+                    resolved_forward_replied_to := (
+                        await common.resolve_message_reference(
+                            replied_to_message.reference
+                        )
+                    )
+                ):
+                    # The message I'm replying to is a forward
+                    replied_to_message = resolved_forward_replied_to
+
                 replied_to_content = await replace_missing_emoji(
                     common.truncate(
                         discord.utils.remove_markdown(replied_to_message.clean_content),
@@ -566,12 +585,20 @@ async def bridge_message_helper(
                     ),
                     session=session,
                 )
-                replied_to_author = replied_to_message.author
 
                 # identify if this reply "pinged" the target, to know whether to add the @ symbol UI
                 reply_has_ping = any(
                     x.id == replied_to_author.id for x in message.mentions
                 )
+
+                if (not replied_to_content) and (
+                    replied_to_message.attachments or replied_to_message.embeds
+                ):
+                    # The message being replied to included exclusively attachments/embeds
+                    replied_to_content = "*Click to see attachment*"
+
+                if message_being_replied_to_is_forward:
+                    replied_to_content = "↱ " + replied_to_content
 
             # First, check whether the message replied to was itself bridged from a different channel
             local_replied_to_message_map = sql_select(
@@ -613,8 +640,6 @@ async def bridge_message_helper(
                 bridged_reply_to[int(message_map.target_channel)] = int(
                     message_map.target_message
                 )
-        else:
-            message_is_reply = False
 
         # Check who, if anyone, is pinged in the message
         people_to_ping = {m.id for m in message.mentions}
@@ -976,7 +1001,6 @@ async def _bridge_message_to_target_channel(
             replied_to_content = "  " + replied_to_content
         else:
             replied_to_content = ""
-            # TODO: deal with the fact that forwarded messages don't have contents
             if jump_url:
                 reply_error_msg = (
                     "Couldn't load contents of the message this message is replying to."
