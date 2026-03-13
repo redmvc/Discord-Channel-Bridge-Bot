@@ -672,7 +672,7 @@ async def bridge_message_helper(
                     message,
                     message_content,
                     message_attachments,
-                    deepcopy(message_embeds),
+                    list(deepcopy(message_embeds)),
                     deepcopy(people_to_ping),
                     target_channel,
                     webhook,
@@ -1004,13 +1004,33 @@ async def _bridge_message_to_target_channel(
             f"**{reply_symbol}{replied_to_author_name}**{replied_to_content}{reply_error_msg}"
         )
 
-        reply_embed = [discord.Embed.from_dict(reply_embed_dict)]
-    else:
-        reply_embed = []
+        message_embeds += [discord.Embed.from_dict(reply_embed_dict)]
 
     attachments: list["discord.File"] = []
+    server_max_message_size = webhook_channel.guild.filesize_limit
+    total_attachment_size = 0
+    send_message_too_large_embed = False
     for attachment in message_attachments:
+        if (attachment_size := attachment.size) >= server_max_message_size:
+            send_message_too_large_embed = True
+            continue
+
+        total_attachment_size += attachment_size
+        if total_attachment_size >= server_max_message_size:
+            send_message_too_large_embed = True
+            break
+
         attachments.append(await attachment.to_file(spoiler=attachment.is_spoiler()))
+
+    if send_message_too_large_embed:
+        message_embeds += [
+            discord.Embed.from_dict(
+                {
+                    "type": "rich",
+                    "description": "-# This message had at least one attachment that could not be sent due to message size limits.",
+                }
+            )
+        ]
 
     target_channel_id = target_channel.id
     webhook_id = webhook.id
@@ -1036,7 +1056,7 @@ async def _bridge_message_to_target_channel(
                     avatar_url=bridged_avatar_url,
                     username=bridged_member_name,
                     embeds=(
-                        list(message_embeds + reply_embed)
+                        list(message_embeds)
                         if (len(message_content) == 0)
                         else []  # Only attach embeds on the last message
                     ),
@@ -1044,7 +1064,7 @@ async def _bridge_message_to_target_channel(
                         attachments
                         if (len(message_content) == 0)
                         else []  # Only attach files on the last message
-                    ),  # TODO: might throw HHTPException if too large?
+                    ),
                     wait=True,
                     **thread_splat,
                 )
