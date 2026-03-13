@@ -83,8 +83,8 @@ if TYPE_CHECKING:
             The token used by the Discord developers API.
         db_dialect : Literal['mysql'] | Literal['postgresql'] | Literal['sqlite']
             The database dialect.
-        db_driver : Literal['pymysql'] | Literal['psycopg2'] | Literal['pysqlite']
-            The database driver.
+        db_driver : Literal['aiomysql'] | Literal['asyncpg'] | Literal['aiosqlite']
+            The async database driver. Must match the dialect: ``'aiomysql'`` for MySQL, ``'asyncpg'`` for PostgreSQL, ``'aiosqlite'`` for SQLite.
         db_host : str
             The server host.
         db_port : int
@@ -103,7 +103,7 @@ if TYPE_CHECKING:
 
         app_token: str
         db_dialect: Literal["mysql", "postgresql", "sqlite"]
-        db_driver: Literal["pymysql", "psycopg2", "pysqlite"]
+        db_driver: Literal["aiomysql", "asyncpg", "aiosqlite"]
         db_host: str
         db_port: int
         db_user: str

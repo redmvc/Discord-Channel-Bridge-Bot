@@ -4,7 +4,8 @@ discord.py==2.5.2
 sphinx==7.4.7
 SQLAlchemy==2.0.31
 typing_extensions==4.12.2
-# Uncomment one of the lines below and choose a version depending on which SQL dialect your server will be using and make sure to use the correct one in your settings.json file
-# pymysql==X.Y.Z
-# psycopg2==X.Y.Z
-# pysqlite==X.Y.Z
+git+https://github.com/redmvc/sparkqlalchemy.git#egg=sparkqlalchemy
+# Uncomment one of the lines below and choose a version depending on which async SQL dialect your server will be using and make sure to use the correct one in your settings.json file
+# aiomysql==0.2.0
+# asyncpg==0.29.0
+# aiosqlite==0.20.0
