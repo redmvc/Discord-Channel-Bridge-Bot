@@ -1,6 +1,7 @@
 import io
 import sys
 from pathlib import Path
+from unittest.mock import PropertyMock, patch
 
 import discord
 
@@ -85,7 +86,7 @@ async def works_with_text(
 
 
 @attachment_bridging_tests.test
-async def preserve_spoiler(
+async def preserves_spoiler(
     bridge_bot: discord.Client,
     tester_bot: discord.Client,
     testing_server: discord.Guild,
@@ -168,6 +169,145 @@ async def works_with_multiple_attachments(
                 {"whose_filename_equals": "second.txt"},
             ],
         },
+    )
+
+    return failure_messages
+
+
+@attachment_bridging_tests.test
+async def drops_oversized_attachment(
+    bridge_bot: discord.Client,
+    tester_bot: discord.Client,
+    testing_server: discord.Guild,
+    testing_channels: tuple[
+        discord.TextChannel,
+        discord.TextChannel,
+        discord.TextChannel,
+        discord.TextChannel,
+    ],
+) -> list[str]:
+    await give_manage_webhook_perms(tester_bot, testing_server)
+
+    channel_1 = testing_channels[0]
+    channel_2 = testing_channels[1]
+    await create_bridge(channel_1, channel_2.id)
+
+    # Patch filesize_limit to 100 bytes so our attachment is "too large"
+    with patch.object(
+        discord.Guild,
+        "filesize_limit",
+        new_callable=PropertyMock,
+        return_value=100,
+    ):
+        await channel_1.send(
+            file=discord.File(io.BytesIO(b"\x00" * 100), filename="big.bin")
+        )
+        _, failure_messages = await expect(
+            "next_message",
+            in_channel=channel_2,
+            to={
+                "be_from": bridge_bot,
+                "not_have_attachment": True,
+                "have_embed": {
+                    "whose_description_contains": "could not be sent due to message size limits",
+                },
+            },
+        )
+
+    return failure_messages
+
+
+@attachment_bridging_tests.test
+async def drops_when_cumulative_too_large(
+    bridge_bot: discord.Client,
+    tester_bot: discord.Client,
+    testing_server: discord.Guild,
+    testing_channels: tuple[
+        discord.TextChannel,
+        discord.TextChannel,
+        discord.TextChannel,
+        discord.TextChannel,
+    ],
+) -> list[str]:
+    await give_manage_webhook_perms(tester_bot, testing_server)
+
+    channel_1 = testing_channels[0]
+    channel_2 = testing_channels[1]
+    await create_bridge(channel_1, channel_2.id)
+
+    # Patch filesize_limit to 100 bytes; send three ~40-byte files
+    # First two fit (cumulative 80), third would push to 120 and gets dropped
+    with patch.object(
+        discord.Guild,
+        "filesize_limit",
+        new_callable=PropertyMock,
+        return_value=100,
+    ):
+        await channel_1.send(
+            files=[
+                discord.File(io.BytesIO(b"\x00" * 40), filename="part1.bin"),
+                discord.File(io.BytesIO(b"\x00" * 40), filename="part2.bin"),
+                discord.File(io.BytesIO(b"\x00" * 40), filename="part3.bin"),
+                discord.File(io.BytesIO(b"\x00" * 10), filename="part4.bin"),
+            ]
+        )
+        _, failure_messages = await expect(
+            "next_message",
+            in_channel=channel_2,
+            to={
+                "be_from": bridge_bot,
+                "have_attachments": [
+                    {"whose_filename_equals": "part1.bin"},
+                    {"whose_filename_equals": "part2.bin"},
+                    {"whose_filename_equals": "part4.bin"},
+                ],
+                "have_embed": {
+                    "whose_description_contains": "could not be sent due to message size limits",
+                },
+            },
+        )
+
+    return failure_messages
+
+
+@attachment_bridging_tests.test
+async def drops_oversized_with_real_large_files(
+    bridge_bot: discord.Client,
+    tester_bot: discord.Client,
+    testing_server: discord.Guild,
+    testing_channels: tuple[
+        discord.TextChannel,
+        discord.TextChannel,
+        discord.TextChannel,
+        discord.TextChannel,
+    ],
+) -> list[str]:
+    await give_manage_webhook_perms(tester_bot, testing_server)
+
+    channel_1 = testing_channels[0]
+    channel_2 = testing_channels[1]
+    await create_bridge(channel_1, channel_2.id)
+
+    # Send two ~6MB files — each individually < 10MB limit, but cumulative ~12MB > 10MB
+    await channel_1.send(
+        files=[
+            discord.File(io.BytesIO(b"\x00" * 6_000_000), filename="large1.bin"),
+            discord.File(io.BytesIO(b"\x00" * 6_000_000), filename="large2.bin"),
+        ]
+    )
+    _, failure_messages = await expect(
+        "next_message",
+        in_channel=channel_2,
+        to={
+            "be_from": bridge_bot,
+            "have_attachments": [
+                {"whose_filename_equals": "large1.bin"},
+            ],
+            "have_embed": {
+                "whose_description_contains": "could not be sent due to message size limits",
+            },
+        },
+        timeout=20,
     )
 
     return failure_messages
