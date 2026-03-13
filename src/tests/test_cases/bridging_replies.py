@@ -284,3 +284,73 @@ async def truncates_message_length_correctly(
     failure_messages += f
 
     return failure_messages
+
+
+@reply_bridging_tests.test
+async def works_when_replying_to_forward(
+    bridge_bot: discord.Client,
+    tester_bot: discord.Client,
+    testing_server: discord.Guild,
+    testing_channels: tuple[
+        discord.TextChannel,
+        discord.TextChannel,
+        discord.TextChannel,
+        discord.TextChannel,
+    ],
+) -> list[str]:
+    await give_manage_webhook_perms(tester_bot, testing_server)
+
+    channel_1 = testing_channels[0]
+    channel_2 = testing_channels[1]
+    channel_3 = testing_channels[2]
+    await create_bridge(channel_1, channel_2.id)
+    await demolish_bridges(channel_3, channel_and_threads=True)
+
+    # Send a message in unbridged channel_3, then forward it to bridged channel_1
+    original_forwarded_content = "original forwarded content"
+    original_message = await channel_3.send(original_forwarded_content)
+    forwarded_message = await original_message.forward(channel_1)
+
+    # Wait for header + forwarded message in channel_2
+    _, failure_messages = await expect(
+        "next_message",
+        in_channel=channel_2,
+        to={"contain": "forwarded by", "be_from": bridge_bot},
+    )
+    bridged_forward, f = await expect(
+        "next_message",
+        in_channel=channel_2,
+        to={"be_from": bridge_bot, "be_a_forward_of": original_message},
+    )
+    failure_messages += f
+    if not bridged_forward:
+        return failure_messages
+
+    # Reply to the forwarded message in channel_1
+    reply_content = "reply to the forward"
+    await forwarded_message.reply(reply_content)
+    _, f = await expect(
+        "next_message",
+        in_channel=channel_2,
+        to=[
+            {
+                "equal": reply_content,
+                "be_from": bridge_bot,
+                "have_embed": {
+                    "whose_url_equals": f"https://discord.com/channels/{channel_2.guild.id}/{channel_2.id}/{bridged_forward.id}",
+                },
+            },
+            {
+                "have_embed": {
+                    "whose_description_contains": "↱ "
+                    + common.truncate(
+                        original_forwarded_content,
+                        50,
+                    )
+                }
+            },
+        ],
+    )
+    failure_messages += f
+
+    return failure_messages

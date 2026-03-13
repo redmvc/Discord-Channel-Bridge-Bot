@@ -463,6 +463,47 @@ async def works_down_chains(
 
 
 @message_bridging_tests.test
+async def works_for_forwards(
+    bridge_bot: discord.Client,
+    tester_bot: discord.Client,
+    testing_server: discord.Guild,
+    testing_channels: tuple[
+        discord.TextChannel,
+        discord.TextChannel,
+        discord.TextChannel,
+        discord.TextChannel,
+    ],
+) -> list[str]:
+    await give_manage_webhook_perms(tester_bot, testing_server)
+
+    channel_1 = testing_channels[0]
+    channel_2 = testing_channels[1]
+    channel_3 = testing_channels[2]
+    await create_bridge(channel_1, channel_2.id)
+    await demolish_bridges(channel_3, channel_and_threads=True)
+
+    # Send a message in unbridged channel_3, then forward it to bridged channel_1
+    original_message_content = "message to be forwarded"
+    original_message = await channel_3.send(original_message_content)
+    await original_message.forward(channel_1)
+
+    # Expect header + forwarded message in channel_2
+    _, failure_messages = await expect(
+        "next_message",
+        in_channel=channel_2,
+        to={"contain": "forwarded by", "be_from": bridge_bot},
+    )
+    _, f = await expect(
+        "next_message",
+        in_channel=channel_2,
+        to={"be_from": bridge_bot, "be_a_forward_of": original_message},
+    )
+    failure_messages += f
+
+    return failure_messages
+
+
+@message_bridging_tests.test
 async def does_not_work_if_bridge_demolished(
     bridge_bot: discord.Client,
     tester_bot: discord.Client,

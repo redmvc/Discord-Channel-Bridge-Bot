@@ -707,6 +707,8 @@ class MessageExpectation(Expectation, total=False):
     not_equal: str
     be_a_reply_to: discord.Message
     not_be_a_reply_to: discord.Message
+    be_a_forward_of: discord.Message
+    not_be_a_forward_of: discord.Message
     be_from: int | discord.User | discord.Member | discord.Client
     not_be_from: int | discord.User | discord.Member | discord.Client
     have_embed: "EmbedExpectation"
@@ -777,7 +779,7 @@ async def expect(
     in_channel : int | :class:`~discord.TextChannel` | :class:`~discord.Thread`
         A channel in which a message should be expected, or ID of same.
     to : list[:class:`~MessageExpectation`] | :class:`~MessageExpectation`
-        A list of things to expect of that message. The valid expectations are: "contain", "not_contain", "equal", "not_equal", "be_a_reply_to", "not_be_a_reply_to", "be_from", "not_be_from", "have_embed", and "have_embeds".
+        A list of things to expect of that message. The valid expectations are: "contain", "not_contain", "equal", "not_equal", "be_a_reply_to", "not_be_a_reply_to", "be_a_forward_of", "not_be_a_forward_of", "be_from", "not_be_from", "have_embed", and "have_embeds".
     timeout : float | int, optional
         How long to wait, in seconds, for the message to arrive. If set to less than 1, will be set to 1. Defaults to 10.
 
@@ -806,7 +808,7 @@ async def expect(
     in_channel : int | :class:`~discord.TextChannel` | :class:`~discord.Thread` | None, optional
         A channel in which the message should be expected. Equivalent to setting the "be_in_channel" expectation in `to`.
     to : list[:class:`~MessageExpectation`] | :class:`~MessageExpectation`
-        A list of things to expect of that message. The valid expectations are: "contain", "not_contain", "equal", "not_equal", "be_a_reply_to", "not_be_a_reply_to", "be_from", "not_be_from", "have_embed", "have_embeds", "be_in_channel", "be_edited", and "not_be_edited".
+        A list of things to expect of that message. The valid expectations are: "contain", "not_contain", "equal", "not_equal", "be_a_reply_to", "not_be_a_reply_to", "be_a_forward_of", "not_be_a_forward_of", "be_from", "not_be_from", "have_embed", "have_embeds", "be_in_channel", "be_edited", and "not_be_edited".
     timeout : float | int, optional
         How long to wait for an edit event when `be_edited` is set. Defaults to 10.
 
@@ -1115,6 +1117,42 @@ async def expect(
             elif (reference_id := message_reference.message_id) != value.id:
                 if not negation:
                     failure_message = f"{log_message} but it was a reply to message with ID {reference_id} instead"
+                    failure_messages.append(failure_message)
+                    log_expectation(failure_message, "failure")
+                else:
+                    log_expectation(log_message, "success")
+            else:
+                message = f"{log_message}{' but it was' if negation else ''}"
+                if not negation:
+                    log_expectation(message, "success")
+                else:
+                    failure_messages.append(message)
+                    log_expectation(message, "failure")
+
+            continue
+
+        if expectation == "be_a_forward_of":
+            if TYPE_CHECKING:
+                assert isinstance(value, discord.Message)
+
+            log_message = f"expected message to {' not' if negation else ''}be a forward of message with ID {value.id}"
+            if not (message_reference := obj.reference):
+                message = f"{log_message} {'but' if not negation else 'and'} it was not a forward"
+                if not negation:
+                    failure_messages.append(message)
+                    log_expectation(message, "failure")
+                else:
+                    log_expectation(message, "success")
+            elif message_reference.type != discord.MessageReferenceType.forward:
+                message = f"{log_message} {'but' if not negation else 'and'} it was a reply, not a forward"
+                if not negation:
+                    failure_messages.append(message)
+                    log_expectation(message, "failure")
+                else:
+                    log_expectation(message, "success")
+            elif (reference_id := message_reference.message_id) != value.id:
+                if not negation:
+                    failure_message = f"{log_message} but it was a forward of message with ID {reference_id} instead"
                     failure_messages.append(failure_message)
                     log_expectation(failure_message, "failure")
                 else:
