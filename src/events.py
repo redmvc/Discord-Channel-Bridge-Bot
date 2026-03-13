@@ -480,43 +480,28 @@ async def bridge_message_helper(
 
     try:
         # Check whether this message is a reference to another message, i.e. if it's a reply or a forward
-        message_reference = message.reference
-        original_message = message
-        original_message_channel = message.channel
-        if message_reference:
-            resolved_message_reference = message_reference.resolved
-            message_reference_id = message_reference.message_id
-
-            if isinstance(resolved_message_reference, discord.Message):
-                # Original message is cached and I can just fetch it
-                original_message = resolved_message_reference
-                original_message_channel = original_message.channel
-            elif message_reference_id:
-                # Try to find the original message, if it's not resolved
-                original_message_channel = await common.get_channel_from_id(
-                    message_reference.channel_id
+        if (message_reference := message.reference) and (
+            (
+                resolved_message_reference := await common.resolve_message_reference(
+                    message_reference
                 )
-                if isinstance(original_message_channel, TextChannelOrThread):
-                    # I have access to the channel of the original message being forwarded
-                    try:
-                        # Try to find the original message
-                        original_message = await original_message_channel.fetch_message(
-                            message_reference_id
-                        )
-                    except Exception:
-                        pass
-                else:
-                    original_message_channel = message.channel
+            )
+            is not None
+        ):
+            original_message = resolved_message_reference
+            original_message_channel = original_message.channel
+            message_reference_id = original_message.id
         else:
+            original_message = message
+            original_message_channel = message.channel
             resolved_message_reference = None
             message_reference_id = None
 
         if not (
-            message.message_snapshots
-            and (len(message.message_snapshots) > 0)
-            and message_reference
+            message_reference
+            and message_reference.type == discord.MessageReferenceType.forward
         ):
-            # Regular message with content (probably)
+            # Regular message with content
             logger.debug(
                 "Message with ID %s doesn't have snapshots, is probably not forwarded.",
                 message.id,
@@ -532,8 +517,8 @@ async def bridge_message_helper(
             message_attachments = message.attachments
             message_embeds = message.embeds
         else:
-            # There is a message snapshot, so this message was forwarded
-            logger.debug("Message with ID %s has snapshots, is forwarded.", message.id)
+            # Forwarded message
+            logger.debug("Message with ID %s was forwarded.", message.id)
 
             forwarded_message = original_message
             original_message_channel_parent = original_message_channel
@@ -563,17 +548,36 @@ async def bridge_message_helper(
         replied_to_author = None
         replied_to_content = None
         reply_has_ping = False
-        if message.type == discord.MessageType.reply:
+        if message_is_reply := (message.type == discord.MessageType.reply):
             # This message is a reply to another message, so we should try to link to its match on the other side of bridges
             # bridged_reply_to will be a dict whose keys are channel IDs and whose values are the IDs of messages matching the
             # message I'm replying to in those channels
-            message_is_reply = True
-
             if original_message.id != message.id:
                 replied_to_message = original_message
             else:
                 replied_to_message = resolved_message_reference
+
             if isinstance(replied_to_message, discord.Message):
+                replied_to_author = replied_to_message.author
+
+                if (
+                    message_being_replied_to_is_forward := (
+                        replied_to_message.reference
+                        and (
+                            replied_to_message.reference.type
+                            == discord.MessageReferenceType.forward
+                        )
+                    )
+                ) and (
+                    resolved_forward_replied_to := (
+                        await common.resolve_message_reference(
+                            replied_to_message.reference
+                        )
+                    )
+                ):
+                    # The message I'm replying to is a forward
+                    replied_to_message = resolved_forward_replied_to
+
                 replied_to_content = await replace_missing_emoji(
                     common.truncate(
                         discord.utils.remove_markdown(replied_to_message.clean_content),
@@ -581,12 +585,20 @@ async def bridge_message_helper(
                     ),
                     session=session,
                 )
-                replied_to_author = replied_to_message.author
 
                 # identify if this reply "pinged" the target, to know whether to add the @ symbol UI
                 reply_has_ping = any(
                     x.id == replied_to_author.id for x in message.mentions
                 )
+
+                if (not replied_to_content) and (
+                    replied_to_message.attachments or replied_to_message.embeds
+                ):
+                    # The message being replied to included exclusively attachments/embeds
+                    replied_to_content = "*Click to see attachment*"
+
+                if message_being_replied_to_is_forward:
+                    replied_to_content = "↱ " + replied_to_content
 
             # First, check whether the message replied to was itself bridged from a different channel
             local_replied_to_message_map = sql_select(
@@ -628,8 +640,6 @@ async def bridge_message_helper(
                 bridged_reply_to[int(message_map.target_channel)] = int(
                     message_map.target_message
                 )
-        else:
-            message_is_reply = False
 
         # Check who, if anyone, is pinged in the message
         people_to_ping = {m.id for m in message.mentions}
@@ -672,7 +682,7 @@ async def bridge_message_helper(
                     message,
                     message_content,
                     message_attachments,
-                    deepcopy(message_embeds),
+                    list(deepcopy(message_embeds)),
                     deepcopy(people_to_ping),
                     target_channel,
                     webhook,
@@ -991,7 +1001,6 @@ async def _bridge_message_to_target_channel(
             replied_to_content = "  " + replied_to_content
         else:
             replied_to_content = ""
-            # TODO: deal with the fact that forwarded messages don't have contents
             if jump_url:
                 reply_error_msg = (
                     "Couldn't load contents of the message this message is replying to."
@@ -1004,13 +1013,33 @@ async def _bridge_message_to_target_channel(
             f"**{reply_symbol}{replied_to_author_name}**{replied_to_content}{reply_error_msg}"
         )
 
-        reply_embed = [discord.Embed.from_dict(reply_embed_dict)]
-    else:
-        reply_embed = []
+        message_embeds += [discord.Embed.from_dict(reply_embed_dict)]
 
     attachments: list["discord.File"] = []
+    server_max_message_size = webhook_channel.guild.filesize_limit
+    total_attachment_size = 0
+    send_message_too_large_embed = False
     for attachment in message_attachments:
+        if (attachment_size := attachment.size) >= server_max_message_size:
+            send_message_too_large_embed = True
+            continue
+
+        total_attachment_size += attachment_size
+        if total_attachment_size >= server_max_message_size:
+            send_message_too_large_embed = True
+            break
+
         attachments.append(await attachment.to_file(spoiler=attachment.is_spoiler()))
+
+    if send_message_too_large_embed:
+        message_embeds += [
+            discord.Embed.from_dict(
+                {
+                    "type": "rich",
+                    "description": "-# This message had at least one attachment that could not be sent due to message size limits.",
+                }
+            )
+        ]
 
     target_channel_id = target_channel.id
     webhook_id = webhook.id
@@ -1036,7 +1065,7 @@ async def _bridge_message_to_target_channel(
                     avatar_url=bridged_avatar_url,
                     username=bridged_member_name,
                     embeds=(
-                        list(message_embeds + reply_embed)
+                        list(message_embeds)
                         if (len(message_content) == 0)
                         else []  # Only attach embeds on the last message
                     ),
@@ -1044,7 +1073,7 @@ async def _bridge_message_to_target_channel(
                         attachments
                         if (len(message_content) == 0)
                         else []  # Only attach files on the last message
-                    ),  # TODO: might throw HHTPException if too large?
+                    ),
                     wait=True,
                     **thread_splat,
                 )
