@@ -707,12 +707,17 @@ class MessageExpectation(Expectation, total=False):
     not_equal: str
     be_a_reply_to: discord.Message
     not_be_a_reply_to: discord.Message
+    be_a_forward_of: discord.Message
+    not_be_a_forward_of: discord.Message
     be_from: int | discord.User | discord.Member | discord.Client
     not_be_from: int | discord.User | discord.Member | discord.Client
     have_embed: "EmbedExpectation"
+    have_embeds: "list[EmbedExpectation]"
+    have_attachment: "AttachmentExpectation"
+    have_attachments: "list[AttachmentExpectation]"
+    not_have_attachment: bool
     be_edited: bool
     not_be_edited: bool
-    have_embeds: "list[EmbedExpectation]"
 
 
 class ExistingMessageExpectation(MessageExpectation, total=False):
@@ -725,6 +730,12 @@ class EmbedExpectation(TypedDict, total=False):
     whose_url_equals: str
     whose_url_contains: str
     not_have_url: bool
+
+
+class AttachmentExpectation(TypedDict, total=False):
+    whose_filename_equals: str
+    whose_filename_contains: str
+    be_spoiler: bool
 
 
 async def _pull_from_queue(
@@ -777,7 +788,7 @@ async def expect(
     in_channel : int | :class:`~discord.TextChannel` | :class:`~discord.Thread`
         A channel in which a message should be expected, or ID of same.
     to : list[:class:`~MessageExpectation`] | :class:`~MessageExpectation`
-        A list of things to expect of that message. The valid expectations are: "contain", "not_contain", "equal", "not_equal", "be_a_reply_to", "not_be_a_reply_to", "be_from", "not_be_from", "have_embed", and "have_embeds".
+        A list of things to expect of that message. The valid expectations are: "contain", "not_contain", "equal", "not_equal", "be_a_reply_to", "not_be_a_reply_to", "be_a_forward_of", "not_be_a_forward_of", "be_from", "not_be_from", "have_embed", "have_embeds", "have_attachment", "have_attachments", and "not_have_attachment".
     timeout : float | int, optional
         How long to wait, in seconds, for the message to arrive. If set to less than 1, will be set to 1. Defaults to 10.
 
@@ -806,7 +817,7 @@ async def expect(
     in_channel : int | :class:`~discord.TextChannel` | :class:`~discord.Thread` | None, optional
         A channel in which the message should be expected. Equivalent to setting the "be_in_channel" expectation in `to`.
     to : list[:class:`~MessageExpectation`] | :class:`~MessageExpectation`
-        A list of things to expect of that message. The valid expectations are: "contain", "not_contain", "equal", "not_equal", "be_a_reply_to", "not_be_a_reply_to", "be_from", "not_be_from", "have_embed", "have_embeds", "be_in_channel", "be_edited", and "not_be_edited".
+        A list of things to expect of that message. The valid expectations are: "contain", "not_contain", "equal", "not_equal", "be_a_reply_to", "not_be_a_reply_to", "be_a_forward_of", "not_be_a_forward_of", "be_from", "not_be_from", "have_embed", "have_embeds", "have_attachment", "have_attachments", "not_have_attachment", "be_in_channel", "be_edited", and "not_be_edited".
     timeout : float | int, optional
         How long to wait for an edit event when `be_edited` is set. Defaults to 10.
 
@@ -1129,6 +1140,42 @@ async def expect(
 
             continue
 
+        if expectation == "be_a_forward_of":
+            if TYPE_CHECKING:
+                assert isinstance(value, discord.Message)
+
+            log_message = f"expected message to {' not' if negation else ''}be a forward of message with ID {value.id}"
+            if not (message_reference := obj.reference):
+                message = f"{log_message} {'but' if not negation else 'and'} it was not a forward"
+                if not negation:
+                    failure_messages.append(message)
+                    log_expectation(message, "failure")
+                else:
+                    log_expectation(message, "success")
+            elif message_reference.type != discord.MessageReferenceType.forward:
+                message = f"{log_message} {'but' if not negation else 'and'} it was a reply, not a forward"
+                if not negation:
+                    failure_messages.append(message)
+                    log_expectation(message, "failure")
+                else:
+                    log_expectation(message, "success")
+            elif (reference_id := message_reference.message_id) != value.id:
+                if not negation:
+                    failure_message = f"{log_message} but it was a forward of message with ID {reference_id} instead"
+                    failure_messages.append(failure_message)
+                    log_expectation(failure_message, "failure")
+                else:
+                    log_expectation(log_message, "success")
+            else:
+                message = f"{log_message}{' but it was' if negation else ''}"
+                if not negation:
+                    log_expectation(message, "success")
+                else:
+                    failure_messages.append(message)
+                    log_expectation(message, "failure")
+
+            continue
+
         if expectation == "be_from":
             if isinstance(value, discord.Client):
                 assert value.user
@@ -1247,6 +1294,81 @@ async def expect(
                     message = f"expected embed #{idx} to not have a URL"
                     if embed.url:
                         message = f"{message} but it had '{embed.url}'"
+                        result = "failure"
+                    else:
+                        result = "success"
+
+                    if result == "failure":
+                        failure_messages.append(message)
+                    log_expectation(message, result)
+
+            continue
+
+        if expectation in ("have_attachment", "have_attachments"):
+            attachments = obj.attachments
+
+            if negation:
+                log_message = "expected message to have no attachments"
+                if attachments:
+                    failure_message = f"{log_message} but it had {len(attachments)}"
+                    failure_messages.append(failure_message)
+                    log_expectation(failure_message, "failure")
+                else:
+                    log_expectation(log_message, "success")
+                continue
+
+            if expectation == "have_attachment":
+                value = [value]
+
+            if TYPE_CHECKING:
+                value = cast(list[AttachmentExpectation], value)
+
+            if len(attachments) < len(value):
+                message = f"expected message to have at least {len(value)} attachment(s) but it had {len(attachments)} instead"
+                failure_messages.append(message)
+                log_expectation(message, "failure")
+                continue
+
+            for idx, attachment_expectation in enumerate(value):
+                attachment = attachments[idx]
+
+                if filename_must_equal := attachment_expectation.get(
+                    "whose_filename_equals"
+                ):
+                    message = f"expected filename of attachment #{idx} to equal '{filename_must_equal}'"
+                    if filename_must_equal != attachment.filename:
+                        message = f"{message} but it was '{attachment.filename}'"
+                        result = "failure"
+                    else:
+                        result = "success"
+
+                    if result == "failure":
+                        failure_messages.append(message)
+                    log_expectation(message, result)
+
+                if filename_must_contain := attachment_expectation.get(
+                    "whose_filename_contains"
+                ):
+                    message = f"expected filename of attachment #{idx} to contain '{filename_must_contain}'"
+                    if filename_must_contain not in attachment.filename:
+                        message = f"{message} but it was '{attachment.filename}'"
+                        result = "failure"
+                    else:
+                        result = "success"
+
+                    if result == "failure":
+                        failure_messages.append(message)
+                    log_expectation(message, result)
+
+                if (
+                    must_be_spoiler := attachment_expectation.get("be_spoiler")
+                ) is not None:
+                    is_spoiler = attachment.is_spoiler()
+                    message = f"expected attachment #{idx} to {'be' if must_be_spoiler else 'not be'} a spoiler"
+                    if is_spoiler != must_be_spoiler:
+                        message = (
+                            f"{message} but it {'was' if is_spoiler else 'was not'}"
+                        )
                         result = "failure"
                     else:
                         result = "success"

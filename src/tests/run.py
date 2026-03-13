@@ -6,6 +6,7 @@ from typing import Any
 import test_cases.creating_bridges  # noqa: F401
 import test_cases.demolishing_bridges  # noqa: F401
 import test_cases.bridging_messages  # noqa: F401
+import test_cases.bridging_attachments  # noqa: F401
 import test_cases.bridging_replies  # noqa: F401
 import test_cases.bridging_edits  # noqa: F401
 import test_cases.bridge_thread  # noqa: F401
