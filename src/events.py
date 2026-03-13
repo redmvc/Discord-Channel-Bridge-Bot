@@ -1188,7 +1188,14 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
     async with lock:
         # If by the time this gets unlocked it was deleted from the dictionary, the message was deleted
         message_was_deleted = common.message_lock[message_id] is None
-        contentless_edit = not (updated_message_content := payload.data.get("content"))
+        updated_message_content = payload.data.get("content") or ""
+        updated_message_attachments = payload.data.get("attachments")
+        updated_message_embeds = payload.data.get("embeds")
+        contentless_edit = not (
+            updated_message_content
+            or updated_message_attachments
+            or updated_message_embeds
+        )
 
         channel_id = payload.channel_id
         if (
@@ -1204,9 +1211,12 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
         if (
             await edit_message_helper(
                 message_content=updated_message_content,
+                attachments=[
+                    discord.Attachment(data=attch, state=common.client._connection)
+                    for attch in updated_message_attachments
+                ],
                 embeds=[
-                    discord.Embed.from_dict(embed)
-                    for embed in payload.data.get("embeds")
+                    discord.Embed.from_dict(embed) for embed in updated_message_embeds
                 ],
                 message_id=message_id,
                 channel_id=channel_id,
@@ -1224,6 +1234,7 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
 async def edit_message_helper(
     *,
     message_content: str,
+    attachments: list[discord.Attachment],
     embeds: list[discord.Embed],
     message_id: int,
     channel_id: int,
@@ -1235,6 +1246,8 @@ async def edit_message_helper(
     ----------
     message_content : str
         The updated contents of the message.
+    attachments : list[:class:`~discord.Attachment`]
+        The updated attachments of the message.
     embeds : list[:class:`~discord.Embed`]
         The updated embeds of the message.
     message_id : int
@@ -1264,6 +1277,7 @@ async def edit_message_helper(
 async def edit_message_helper(
     *,
     message_content: str,
+    attachments: list[discord.Attachment],
     embeds: list[discord.Embed],
     message_id: int,
     channel_id: int,
@@ -1276,6 +1290,7 @@ async def edit_message_helper(
 async def edit_message_helper(
     *,
     message_content: str,
+    attachments: list[discord.Attachment],
     embeds: list[discord.Embed],
     message_id: int,
     channel_id: int,
@@ -1288,6 +1303,8 @@ async def edit_message_helper(
     ----------
     message_content : str
         The updated contents of the message.
+    attachments : list[:class:`~discord.Attachment`]
+        The updated attachments of the message.
     embeds : list[:class:`~discord.Embed`]
         The updated embeds of the message.
     message_id : int
@@ -1400,11 +1417,11 @@ async def edit_message_helper(
                         content: str,
                         webhook: discord.Webhook,
                         thread_splat: ThreadSplat,
-                        attach_embeds: bool,
+                        include_attachments: bool,
                     ):
                         try:
                             bridged_message_id = int(message_row.target_message)
-                            if message_is_reply and attach_embeds:
+                            if message_is_reply and include_attachments:
                                 # The message being edited is a reply, I need to keep its embed
                                 bridged_message_embeds = (
                                     await bridged_channel.fetch_message(
@@ -1417,10 +1434,15 @@ async def edit_message_helper(
                             await webhook.edit_message(
                                 message_id=bridged_message_id,
                                 content=content,
+                                attachments=(
+                                    attachments
+                                    if include_attachments
+                                    else []  # Only include attachments in the last message
+                                ),
                                 embeds=(
                                     channel_specific_embeds
-                                    if attach_embeds
-                                    else []  # Only attach embeds on the last message
+                                    if include_attachments
+                                    else []  # Only include embeds in the last message
                                 ),
                                 **thread_splat,
                             )
