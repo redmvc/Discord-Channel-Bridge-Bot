@@ -1432,7 +1432,7 @@ async def edit_message_helper(
                                     channel_specific_embeds += [reply_embed]
                             await webhook.edit_message(
                                 message_id=bridged_message_id,
-                                content=content,
+                                content=content or " ",
                                 attachments=(
                                     attachments
                                     if include_attachments
