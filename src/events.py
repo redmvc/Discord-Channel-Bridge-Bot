@@ -498,11 +498,10 @@ async def bridge_message_helper(
             message_reference_id = None
 
         if not (
-            message.message_snapshots
-            and (len(message.message_snapshots) > 0)
-            and message_reference
+            message_reference
+            and message_reference.type == discord.MessageReferenceType.forward
         ):
-            # Regular message with content (probably)
+            # Regular message with content
             logger.debug(
                 "Message with ID %s doesn't have snapshots, is probably not forwarded.",
                 message.id,
@@ -518,8 +517,8 @@ async def bridge_message_helper(
             message_attachments = message.attachments
             message_embeds = message.embeds
         else:
-            # There is a message snapshot, so this message was forwarded
-            logger.debug("Message with ID %s has snapshots, is forwarded.", message.id)
+            # Forwarded message
+            logger.debug("Message with ID %s was forwarded.", message.id)
 
             forwarded_message = original_message
             original_message_channel_parent = original_message_channel
