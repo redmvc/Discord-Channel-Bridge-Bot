@@ -480,34 +480,20 @@ async def bridge_message_helper(
 
     try:
         # Check whether this message is a reference to another message, i.e. if it's a reply or a forward
-        message_reference = message.reference
-        original_message = message
-        original_message_channel = message.channel
-        if message_reference:
-            resolved_message_reference = message_reference.resolved
-            message_reference_id = message_reference.message_id
-
-            if isinstance(resolved_message_reference, discord.Message):
-                # Original message is cached and I can just fetch it
-                original_message = resolved_message_reference
-                original_message_channel = original_message.channel
-            elif message_reference_id:
-                # Try to find the original message, if it's not resolved
-                original_message_channel = await common.get_channel_from_id(
-                    message_reference.channel_id
+        if (message_reference := message.reference) and (
+            (
+                resolved_message_reference := await common.resolve_message_reference(
+                    message_reference
                 )
-                if isinstance(original_message_channel, TextChannelOrThread):
-                    # I have access to the channel of the original message being forwarded
-                    try:
-                        # Try to find the original message
-                        original_message = await original_message_channel.fetch_message(
-                            message_reference_id
-                        )
-                    except Exception:
-                        pass
-                else:
-                    original_message_channel = message.channel
+            )
+            is not None
+        ):
+            original_message = resolved_message_reference
+            original_message_channel = original_message.channel
+            message_reference_id = original_message.id
         else:
+            original_message = message
+            original_message_channel = message.channel
             resolved_message_reference = None
             message_reference_id = None
 
