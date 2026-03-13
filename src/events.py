@@ -1027,14 +1027,13 @@ async def _bridge_message_to_target_channel(
     total_attachment_size = 0
     send_message_too_large_embed = False
     for attachment in message_attachments:
-        if (attachment_size := attachment.size) >= server_max_message_size:
+        if ((attachment_size := attachment.size) >= server_max_message_size) or (
+            total_attachment_size + attachment_size >= server_max_message_size
+        ):
             send_message_too_large_embed = True
             continue
 
         total_attachment_size += attachment_size
-        if total_attachment_size >= server_max_message_size:
-            send_message_too_large_embed = True
-            break
 
         attachments.append(await attachment.to_file(spoiler=attachment.is_spoiler()))
 
