@@ -12,6 +12,8 @@ from test_runner import (
     give_manage_webhook_perms,
 )
 
+ASSET_PATH = Path(__file__).parent.parent / "assets" / "test_file.txt"
+
 
 class BridgingEdits(test_runner.TestCase):
     def __init__(self):
@@ -174,6 +176,53 @@ async def does_not_work_if_bridge_demolished(
         bridged_message,
         to="not_be_edited",
         timeout=5,
+    )
+    failure_messages += f
+
+    return failure_messages
+
+
+@edit_bridging_tests.test
+async def allows_no_content_if_attachments_present(
+    bridge_bot: discord.Client,
+    tester_bot: discord.Client,
+    testing_server: discord.Guild,
+    testing_channels: tuple[
+        discord.TextChannel,
+        discord.TextChannel,
+        discord.TextChannel,
+        discord.TextChannel,
+    ],
+) -> list[str]:
+    await give_manage_webhook_perms(tester_bot, testing_server)
+
+    channel_1 = testing_channels[0]
+    channel_2 = testing_channels[1]
+    await create_bridge(channel_1, channel_2.id)
+
+    # Send message with text and attachment
+    original_message = await channel_1.send("hello", file=discord.File(ASSET_PATH))
+    bridged_message, failure_messages = await expect(
+        "next_message",
+        in_channel=channel_2,
+        to={
+            "equal": "hello",
+            "be_from": bridge_bot,
+            "have_attachment": {"whose_filename_equals": "test_file.txt"},
+        },
+    )
+    if not bridged_message:
+        return failure_messages
+
+    # Edit to remove text content (keep attachment)
+    await original_message.edit(content="")
+    _, f = await expect(
+        bridged_message,
+        to={
+            "be_edited": True,
+            "equal": "",
+            "have_attachment": {"whose_filename_equals": "test_file.txt"},
+        },
     )
     failure_messages += f
 
