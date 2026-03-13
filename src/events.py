@@ -1405,13 +1405,8 @@ async def edit_message_helper(
                     channel_specific_message_content = channel_specific_message_content[
                         2000:
                     ]
-                elif message_row != bridged_messages[0]:
-                    # This is a subsequent message in a multi-part split, but the edited content
-                    # no longer needs this many messages
-                    truncated_content = "-# (The original message was longer than 2000 characters but has been edited to be shorter.)"
                 else:
-                    # Content is empty (e.g. removed while keeping attachments)
-                    truncated_content = ""
+                    truncated_content = "-# (The original message was longer than 2000 characters but has been edited to be shorter.)"
 
                 try:
 
