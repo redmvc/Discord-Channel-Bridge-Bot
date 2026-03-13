@@ -1197,7 +1197,10 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
         updated_message_content = payload.data.get("content") or ""
         updated_message_attachments = payload.data.get("attachments")
         updated_message_embeds = payload.data.get("embeds")
-        contentless_edit = not (
+        has_full_payload = all(
+            key in payload.data for key in ("content", "attachments", "embeds")
+        )
+        contentless_edit = has_full_payload and not (
             updated_message_content
             or updated_message_attachments
             or updated_message_embeds
@@ -1219,10 +1222,11 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
                 message_content=updated_message_content,
                 attachments=[
                     discord.Attachment(data=attch, state=common.client._connection)
-                    for attch in updated_message_attachments
+                    for attch in (updated_message_attachments or [])
                 ],
                 embeds=[
-                    discord.Embed.from_dict(embed) for embed in updated_message_embeds
+                    discord.Embed.from_dict(embed)
+                    for embed in (updated_message_embeds or [])
                 ],
                 message_id=message_id,
                 channel_id=channel_id,
@@ -1411,8 +1415,13 @@ async def edit_message_helper(
                     channel_specific_message_content = channel_specific_message_content[
                         2000:
                     ]
-                else:
+                elif message_row != bridged_messages[0]:
+                    # This is a subsequent message in a multi-part split, but the edited content
+                    # no longer needs this many messages
                     truncated_content = "-# (The original message was longer than 2000 characters but has been edited to be shorter.)"
+                else:
+                    # Content is empty (e.g. removed while keeping attachments)
+                    truncated_content = ""
 
                 try:
 
