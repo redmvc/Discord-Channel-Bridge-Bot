@@ -11,6 +11,7 @@ from typing import (
     Callable,
     Coroutine,
     Literal,
+    Required,
     Sequence,
     TypedDict,
     TypeVar,
@@ -736,7 +737,8 @@ class MessageExpectation(Expectation, total=False):
     have_attachment: "AttachmentExpectation"
     have_attachments: "list[AttachmentExpectation]"
     not_have_attachment: bool
-    have_reaction: "ReactionExpectation"
+    get_reaction: "ReactionExpectation"
+    still_have_reaction: "ReactionExpectation"
     have_no_new_reaction: bool
     have_reaction_removed: "ReactionExpectation"
 
@@ -764,7 +766,8 @@ class AttachmentExpectation(TypedDict, total=False):
 
 
 class ReactionExpectation(TypedDict, total=False):
-    emoji: str
+    emoji: Required[str]
+    from_user: int
 
 
 async def _pull_from_queue(
@@ -882,7 +885,7 @@ async def expect(
     in_channel : int | :class:`~discord.TextChannel` | :class:`~discord.Thread` | None, optional
         A channel in which the message should be expected. Equivalent to setting the "be_in_channel" expectation in `to`.
     to : list[:class:`~MessageExpectation`] | :class:`~MessageExpectation`
-        A list of things to expect of that message. The valid expectations are: "contain", "not_contain", "equal", "not_equal", "be_a_reply_to", "not_be_a_reply_to", "be_a_forward_of", "not_be_a_forward_of", "be_from", "not_be_from", "have_embed", "have_embeds", "have_attachment", "have_attachments", "not_have_attachment", "be_in_channel", "be_edited", "not_be_edited", "be_deleted", "not_be_deleted", "have_reaction", "have_no_new_reaction", and "have_reaction_removed".
+        A list of things to expect of that message. The valid expectations are: "contain", "not_contain", "equal", "not_equal", "be_a_reply_to", "not_be_a_reply_to", "be_a_forward_of", "not_be_a_forward_of", "be_from", "not_be_from", "have_embed", "have_embeds", "have_attachment", "have_attachments", "not_have_attachment", "be_in_channel", "be_edited", "not_be_edited", "be_deleted", "not_be_deleted", "get_reaction", "still_have_reaction", "have_no_new_reaction", and "have_reaction_removed".
     timeout : float | int, optional
         How long to wait for an edit event when `be_edited`, `not_be_edited`, `be_deleted`, or `not_be_deleted` is set. Defaults to 10.
 
@@ -1515,21 +1518,34 @@ async def expect(
                 log_message = f"{log_message} but reaction {f'with ID {payload.emoji.id}' if payload.emoji.id else payload.emoji} was added"
                 failure_messages.append(log_message)
                 log_expectation(log_message, "failure")
-        elif expectation in ("have_reaction", "have_reaction_removed"):
+        elif expectation in (
+            "get_reaction",
+            "have_reaction_removed",
+            "still_have_reaction",
+        ):
             if TYPE_CHECKING:
                 value = cast(ReactionExpectation, value)
 
             expected_emoji = value.get("emoji", "")
+            reacting_user = value.get("from_user")
+            from_user_with_id_str = (
+                f" from user with ID {reacting_user}" if reacting_user else ""
+            )
+
             if expectation == "have_reaction_removed":
                 # Poll the removed_reactions set for this (message_id, emoji) pair
-                log_message = f"expected reaction {expected_emoji} to be removed from message {message_id}"
+                log_message = f"expected reaction {expected_emoji}{from_user_with_id_str} to be removed from message {message_id}"
                 was_removed = await _poll_set(
                     tester_bot.removed_reactions[message_channel_id],
-                    (message_id, expected_emoji),
+                    (message_id, reacting_user, expected_emoji),
                     timeout=timeout,
                 )
 
                 if was_removed:
+                    if reacting_user:
+                        tester_bot.removed_reactions[message_channel_id].discard(
+                            (message_id, None, expected_emoji)
+                        )
                     log_expectation(log_message, "success")
                 else:
                     failure_messages.append(
@@ -1538,30 +1554,64 @@ async def expect(
                     log_expectation(
                         f"{log_message} but removal was not observed", "failure"
                     )
-            else:
-                # have_reaction: wait for an add event
+            elif expectation == "get_reaction":
+                # get_reaction: wait for an add event
                 queue = tester_bot.added_reactions[message_channel_id]
                 payload = await _pull_from_queue(
                     queue,
                     timeout=timeout,
                     accept=(
                         lambda p: (
-                            p.message_id == message_id
+                            (p.message_id == message_id)
                             and (
-                                str(p.emoji) == expected_emoji
-                                or p.emoji.name == expected_emoji
+                                (str(p.emoji) == expected_emoji)
+                                or (p.emoji.name == expected_emoji)
+                            )
+                            and (
+                                (reacting_user is None) or (p.user_id == reacting_user)
                             )
                         )
                     ),
                 )
-                log_message = (
-                    f"expected reaction {expected_emoji} on message {message_id}"
-                )
+                log_message = f"expected reaction {expected_emoji}{from_user_with_id_str} on message {message_id}"
                 if payload is not None:
                     log_expectation(log_message, "success")
                 else:
-                    failure_messages.append(f"{log_message} but it was not observed")
-                    log_expectation(f"{log_message} but it was not observed", "failure")
+                    log_message = f"{log_message} but it was not observed"
+                    failure_messages.append(log_message)
+                    log_expectation(log_message, "failure")
+            else:
+                log_message = f"expected message {message_id} to still have reaction {expected_emoji}{from_user_with_id_str}"
+                # Fetch the current state of the message and check its reactions
+                fetched = await obj.channel.fetch_message(message_id)
+                found = False
+                for r in fetched.reactions:
+                    emoji_matches = (
+                        str(r.emoji) == expected_emoji
+                        or getattr(r.emoji, "name", None) == expected_emoji
+                    )
+                    if not emoji_matches:
+                        continue
+
+                    if reacting_user is None:
+                        found = True
+                        break
+
+                    async for user in r.users():
+                        if user.id == reacting_user:
+                            found = True
+                            break
+
+                    if found:
+                        break
+
+                if found:
+                    log_expectation(log_message, "success")
+                else:
+                    present = [str(r.emoji) for r in fetched.reactions] or "none"
+                    failure_msg = f"{log_message} but it was not found (reactions present: {present})"
+                    failure_messages.append(failure_msg)
+                    log_expectation(failure_msg, "failure")
 
         if not isinstance(value, str):
             continue
