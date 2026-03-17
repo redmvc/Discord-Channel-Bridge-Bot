@@ -716,12 +716,14 @@ class MessageExpectation(Expectation, total=False):
     have_attachment: "AttachmentExpectation"
     have_attachments: "list[AttachmentExpectation]"
     not_have_attachment: bool
-    be_edited: bool
-    not_be_edited: bool
 
 
 class ExistingMessageExpectation(MessageExpectation, total=False):
     be_in_channel: int | discord.TextChannel | discord.Thread
+    be_edited: bool
+    not_be_edited: bool
+    be_deleted: bool
+    not_be_deleted: bool
 
 
 class EmbedExpectation(TypedDict, total=False):
@@ -811,15 +813,17 @@ async def expect(
 
     If any expectation sets `be_edited` or `not_be_edited` to True, waits up to `timeout` seconds for the message to be edited before checking the remaining expectations against the updated message.
 
+    If any expectation sets `be_deleted` or `not_be_deleted` to True, waits up to `timeout` seconds for the message to be deleted.
+
     Parameters
     ----------
     obj : :class:`~discord.Message`
     in_channel : int | :class:`~discord.TextChannel` | :class:`~discord.Thread` | None, optional
         A channel in which the message should be expected. Equivalent to setting the "be_in_channel" expectation in `to`.
     to : list[:class:`~MessageExpectation`] | :class:`~MessageExpectation`
-        A list of things to expect of that message. The valid expectations are: "contain", "not_contain", "equal", "not_equal", "be_a_reply_to", "not_be_a_reply_to", "be_a_forward_of", "not_be_a_forward_of", "be_from", "not_be_from", "have_embed", "have_embeds", "have_attachment", "have_attachments", "not_have_attachment", "be_in_channel", "be_edited", and "not_be_edited".
+        A list of things to expect of that message. The valid expectations are: "contain", "not_contain", "equal", "not_equal", "be_a_reply_to", "not_be_a_reply_to", "be_a_forward_of", "not_be_a_forward_of", "be_from", "not_be_from", "have_embed", "have_embeds", "have_attachment", "have_attachments", "not_have_attachment", "be_in_channel", "be_edited", "not_be_edited", "be_deleted", and "not_be_deleted".
     timeout : float | int, optional
-        How long to wait for an edit event when `be_edited` is set. Defaults to 10.
+        How long to wait for an edit event when `be_edited`, `not_be_edited`, `be_deleted`, or `not_be_deleted` is set. Defaults to 10.
 
     Returns
     -------
@@ -832,17 +836,17 @@ async def expect(
 async def expect(
     obj: discord.Message,
     *,
-    to: Literal["not_be_edited"],
+    to: Literal["not_be_edited", "be_deleted", "not_be_deleted"],
     timeout: float | int = 10,
 ) -> tuple[None, list[str]]:
-    """Check that a given message was not edited within `timout` seconds.
+    """Check that a given message was not edited, was deleted, or was not deleted within `timeout` seconds.
 
     Parameters
     ----------
     obj : :class:`~discord.Message`
     to : Literal["not_be_edited"]
     timeout : float | int, optional
-        How long to wait for an edit event when `be_edited` is set. Defaults to 10.
+        How long to wait for an edit event or deletion to happen before declaring it hasn't happened. Defaults to 10.
 
     Returns
     -------
@@ -907,7 +911,7 @@ async def expect(
     to: (
         Sequence[Expectation]
         | Expectation
-        | Literal["exist", "not_exist", "not_be_edited"]
+        | Literal["exist", "not_exist", "not_be_edited", "be_deleted", "not_be_deleted"]
         | None
     ) = None,
     timeout: float | int = 10,
@@ -923,7 +927,7 @@ async def expect(
         A channel in which that object should be expected, or ID of same. Defaults to None.
     with_name : str | None, optional
         The name the object should have. Defaults to None.
-    to : Sequence[:class:`~Expectation`] | :class:`~Expectation` | Literal["exist", "not_exist", "not_be_edited"] | None, optional
+    to : Sequence[:class:`~Expectation`] | :class:`~Expectation` | Literal["exist", "not_exist", "not_be_edited", "be_deleted", "not_be_deleted"] | None, optional
         A list of things to expect of that object. Defaults to None.
     timeout : float | int, optional
         How long to wait, in seconds, for the expected event to occur. If set to less than 1, will be set to 1. Defaults to 10.
@@ -939,8 +943,15 @@ async def expect(
 
     if to is None:
         to = []
-    elif to == "not_be_edited":
-        to = [cast(ExistingMessageExpectation, {"not_be_edited": True})]
+    elif isinstance(to, str) and (
+        to
+        in (
+            "not_be_edited",
+            "be_deleted",
+            "not_be_deleted",
+        )
+    ):
+        to = [cast(ExistingMessageExpectation, {to: True})]
     elif not isinstance(to, Sequence):
         to = [to]
 
@@ -1025,6 +1036,10 @@ async def expect(
 
         log_expectation(message, result)
         return (return_object, failure_message)
+    elif to in ("exist", "not_exist"):
+        raise ValueError(
+            "'exist' and 'not_exist' expectations are only valid for 'thread' objects."
+        )
     else:
         if in_channel:
             to = cast(
@@ -1038,11 +1053,10 @@ async def expect(
                 ],
             )
 
-        # If any expectation has be_edited, wait for the edit event, then fetch the updated message before running assertions.
-        if not isinstance(to, str) and (
-            (negation := any(exp.get("not_be_edited") for exp in to))
-            or any(exp.get("be_edited") for exp in to)
+        if (negation := any(exp.get("not_be_edited") for exp in to)) or any(
+            exp.get("be_edited") for exp in to
         ):
+            # If any expectation has be_edited, wait for the edit event, then fetch the updated message before running assertions.
             channel_id = obj.channel.id
             message_id = obj.id
             queue = tester_bot.edited_messages[channel_id]
@@ -1079,6 +1093,45 @@ async def expect(
                 f"expected edit of message in channel <#{channel_id}>: https://discord.com/channels/1/{channel_id}/{obj.id}",
                 "success",
             )
+        elif (negation := any(exp.get("not_be_deleted") for exp in to)) or any(
+            exp.get("be_deleted") for exp in to
+        ):
+            # If any expectation has be_deleted/not_be_deleted, poll the deleted set.
+            channel_id = obj.channel.id
+            message_id = obj.id
+            deadline = asyncio.get_event_loop().time() + timeout
+            while message_id not in tester_bot.deleted_message_ids[channel_id]:
+                if asyncio.get_event_loop().time() >= deadline:
+                    break
+                await asyncio.sleep(0.2)
+            was_deleted = message_id in tester_bot.deleted_message_ids[channel_id]
+
+            if not was_deleted:
+                if not negation:
+                    failure_message = [
+                        f"expecting deletion of message {message_id} in channel <#{channel_id}> timed out"
+                    ]
+                    log_expectation(failure_message[0], "failure")
+                else:
+                    failure_message = []
+                    log_expectation(
+                        f"expected message {message_id} to not be deleted",
+                        "success",
+                    )
+                return (None, failure_message)
+
+            if negation:
+                failure_message = [
+                    f"expected message {message_id} in channel <#{channel_id}> to not be deleted, but it was"
+                ]
+                log_expectation(failure_message[0], "failure")
+                return (None, failure_message)
+
+            log_expectation(
+                f"expected deletion of message {message_id} in channel <#{channel_id}>",
+                "success",
+            )
+            return (None, [])
 
     assert not isinstance(to, str)
 
@@ -1377,6 +1430,10 @@ async def expect(
                         failure_messages.append(message)
                     log_expectation(message, result)
 
+            continue
+
+        if expectation == "be_deleted":
+            # Shouldn't happen
             continue
 
         assert isinstance(value, str)

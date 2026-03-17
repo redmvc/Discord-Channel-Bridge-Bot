@@ -59,6 +59,9 @@ edited_messages: dict[int, asyncio.Queue[discord.RawMessageUpdateEvent]] = defau
     asyncio.Queue
 )
 
+# Message IDs deleted in each channel
+deleted_message_ids: dict[int, set[int]] = defaultdict(set)
+
 # Threads created in each channel with each name
 created_threads: dict[int, dict[str, discord.Thread]] = defaultdict(lambda: {})
 
@@ -154,6 +157,11 @@ async def on_message(message: discord.Message):
 @client.event
 async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
     edited_messages[payload.channel_id].put_nowait(payload)
+
+
+@client.event
+async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
+    deleted_message_ids[payload.channel_id].add(payload.message_id)
 
 
 @client.event
