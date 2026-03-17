@@ -62,6 +62,14 @@ edited_messages: dict[int, asyncio.Queue[discord.RawMessageUpdateEvent]] = defau
 # Message IDs deleted in each channel
 deleted_message_ids: dict[int, set[int]] = defaultdict(set)
 
+# Reactions added in each channel (raw payloads from on_raw_reaction_add)
+added_reactions: dict[int, asyncio.Queue[discord.RawReactionActionEvent]] = defaultdict(
+    asyncio.Queue
+)
+
+# Reactions removed in each channel — set of (message_id, emoji_str) tuples
+removed_reactions: dict[int, set[tuple[int, str]]] = defaultdict(set)
+
 # Threads created in each channel with each name
 created_threads: dict[int, dict[str, discord.Thread]] = defaultdict(lambda: {})
 
@@ -162,6 +170,17 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
 @client.event
 async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
     deleted_message_ids[payload.channel_id].add(payload.message_id)
+
+
+@client.event
+async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
+    added_reactions[payload.channel_id].put_nowait(payload)
+
+
+@client.event
+async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
+    emoji_str = str(payload.emoji) if payload.emoji.id else payload.emoji.name
+    removed_reactions[payload.channel_id].add((payload.message_id, emoji_str))
 
 
 @client.event

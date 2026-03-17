@@ -10,6 +10,7 @@ import test_cases.bridging_attachments  # noqa: F401
 import test_cases.bridging_replies  # noqa: F401
 import test_cases.bridging_edits  # noqa: F401
 import test_cases.bridging_deletions  # noqa: F401
+import test_cases.bridging_reactions  # noqa: F401
 import test_cases.bridge_thread  # noqa: F401
 import test_cases.auto_bridge_threads  # noqa: F401
 import test_runner
