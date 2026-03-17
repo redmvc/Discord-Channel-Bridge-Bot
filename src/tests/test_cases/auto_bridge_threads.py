@@ -12,6 +12,14 @@ from test_runner import (
 
 
 class AutoBridgeThreads(test_runner.TestCase):
+    order = 100
+    dependencies = [
+        "CreatingBridges",
+        "DemolishingBridges",
+        "BridgingMessages",
+        "BridgeThread",
+    ]
+
     def __init__(self):
         super().__init__(test_runner.test_runner)
 

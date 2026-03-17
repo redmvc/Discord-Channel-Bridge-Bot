@@ -12,6 +12,9 @@ from test_runner import (
 
 
 class DemolishingBridges(test_runner.TestCase):
+    order = 20
+    dependencies = ["CreatingBridges"]
+
     def __init__(self):
         super().__init__(test_runner.test_runner)
 

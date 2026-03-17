@@ -13,6 +13,9 @@ ASSET_PATH = Path(__file__).parent.parent / "assets" / "test_file.txt"
 
 
 class BridgingEdits(test_runner.TestCase):
+    order = 60
+    dependencies = ["CreatingBridges", "DemolishingBridges", "BridgingMessages"]
+
     def __init__(self):
         super().__init__(test_runner.test_runner)
 

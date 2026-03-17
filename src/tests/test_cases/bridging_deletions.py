@@ -9,6 +9,9 @@ from test_runner import (
 
 
 class BridgingDeletions(test_runner.TestCase):
+    order = 70
+    dependencies = ["CreatingBridges", "DemolishingBridges", "BridgingMessages"]
+
     def __init__(self):
         super().__init__(test_runner.test_runner)
 

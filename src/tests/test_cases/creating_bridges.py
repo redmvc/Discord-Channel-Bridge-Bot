@@ -10,6 +10,8 @@ from test_runner import (
 
 
 class CreatingBridges(test_runner.TestCase):
+    order = 10
+
     def __init__(self):
         super().__init__(test_runner.test_runner)
 

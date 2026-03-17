@@ -13,6 +13,9 @@ from test_runner import (
 
 
 class BridgingMessages(test_runner.TestCase):
+    order = 30
+    dependencies = ["CreatingBridges", "DemolishingBridges"]
+
     def __init__(self):
         super().__init__(test_runner.test_runner)
 
