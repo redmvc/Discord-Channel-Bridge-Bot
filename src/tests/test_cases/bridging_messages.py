@@ -12,6 +12,7 @@ from test_runner import (
     demolish_bridges,
     expect,
     give_manage_webhook_perms,
+    set_nsfw,
 )
 
 
@@ -499,6 +500,47 @@ async def works_for_forwards(
         to={"be_from": bridge_bot, "be_a_forward_of": original_message},
     )
     failure_messages += f
+
+    return failure_messages
+
+
+@message_bridging_tests.test
+async def blocks_forwarding_from_nsfw_channels(
+    bridge_bot: discord.Client,
+    tester_bot: discord.Client,
+    testing_server: discord.Guild,
+    testing_channels: tuple[
+        discord.TextChannel,
+        discord.TextChannel,
+        discord.TextChannel,
+        discord.TextChannel,
+    ],
+) -> list[str]:
+    await give_manage_webhook_perms(tester_bot, testing_server)
+
+    channel_1 = testing_channels[0]
+    channel_2 = testing_channels[1]
+    channel_3 = testing_channels[2]
+    await demolish_bridges(channel_1, channel_and_threads=True)
+    await demolish_bridges(channel_3, channel_and_threads=True)
+    await create_bridge(channel_1, channel_2.id)
+
+    # Mark channels 1 and 3 as NSFW and 2 as SFW
+    await set_nsfw({channel_1.id: True, channel_2.id: False, channel_3.id: True})
+
+    # Send a message in NSFW channel_3, then forward it to NSFW channel_1
+    original_message = await channel_3.send("nsfw content")
+    await original_message.forward(channel_1)
+
+    # Expect error message in channel_2 about NSFW blocking
+    _, failure_messages = await expect(
+        "next_message",
+        in_channel=channel_2,
+        to={"contain": "NSFW channel"},
+    )
+
+    # Restore channels 1 and 3 to SFW
+    await set_nsfw({channel_1.id: False, channel_3.id: False})
 
     return failure_messages
 

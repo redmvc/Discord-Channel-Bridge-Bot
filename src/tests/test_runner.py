@@ -155,6 +155,26 @@ async def give_manage_webhook_perms(
     await _give_or_remove_manage_webhook_perms(tester_bot, testing_server, give=True)
 
 
+async def set_nsfw(channels_to_set: dict[discord.TextChannel | int, bool]):
+    """Set some channels to NSFW (or SFW).
+
+    Parameters
+    ----------
+    channels_to_set : dict[:class:`~discord.TextChannel`  |  int, bool]
+        A dictionary whose keys must be either channel IDs or text channels from the perspective of the bridge bot and whose values must be True if we want to set a channel to NSFW and False if we want to set it to SFW.
+    """
+    async_edits = []
+    for key, value in channels_to_set.items():
+        if isinstance(key, int):
+            channel = await common.get_channel_parent(key)
+        else:
+            channel = key
+
+        async_edits.append(channel.edit(nsfw=value))
+
+    await asyncio.gather(*async_edits)
+
+
 async def remove_manage_webhook_perms(
     tester_bot: discord.Client,
     testing_server: discord.Guild,
