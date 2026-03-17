@@ -1,9 +1,7 @@
 import asyncio
-import sys
 from abc import ABC
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from re import finditer
 from typing import (
     TYPE_CHECKING,
@@ -24,7 +22,6 @@ import tester_bot
 from aiolimiter import AsyncLimiter
 from tester_bot import logger
 
-sys.path.append(str(Path(__file__).parent.parent))
 import common
 
 # Helper to prevent us from being rate limited
@@ -520,13 +517,20 @@ class TestRunner:
         """The test cases registered to this object."""
         return self._test_cases
 
-    async def run_tests(self, testing_server: discord.Guild):
+    async def run_tests(
+        self,
+        testing_server: discord.Guild,
+        *,
+        filter_prefix: str | None = None,
+    ):
         """Run the tests registered to this object.
 
         Parameters
         ----------
         testing_server : :class:`~discord.Guild`
             The server in which to run the tests.
+        filter_prefix : str | None, optional
+            If provided, only run tests whose display name starts with this prefix (case-insensitive). Defaults to None.
         """
         logger.info("Starting to run tests.")
         if not rate_limiter.has_capacity():
@@ -608,21 +612,80 @@ class TestRunner:
             _clock_offset = datetime.now(timezone.utc) - _cal.created_at
             await _cal.delete()
 
+            # Sort test cases by order, adjusting for dependencies
+            name_to_order = {type(tc).__name__: tc.order for tc in self.test_cases}
+            sorted_cases = []
+            for tc in self.test_cases:
+                tc_name = type(tc).__name__
+                effective_order = tc.order
+                for dep in tc.dependencies:
+                    if dep in name_to_order:
+                        dep_order = name_to_order[dep]
+                        if dep_order >= effective_order:
+                            logger.warning(
+                                f"{tc_name} (order={tc.order}) depends on {dep} (order={dep_order}) which has equal or higher order; adjusting {tc_name} to run after {dep}."
+                            )
+                            effective_order = max(effective_order, dep_order + 1)
+                    elif dep not in {type(t).__name__ for t in self.test_cases}:
+                        logger.warning(
+                            f'{tc_name} depends on unknown TestCase: "{dep}"'
+                        )
+                sorted_cases.append((effective_order, tc.order, tc))
+            sorted_cases.sort(key=lambda x: (x[0], x[1]))
+
             # Run the tests
             logger.info("")
             logger.info("Running tests.")
             logger.info("")
             print("\nRunning tests.\n")
-            for test_case in self.test_cases:
+
+            filter_lower = filter_prefix.lower() if filter_prefix else None
+            passed_cases: set[str] = set()
+            failed_cases: set[str] = set()
+
+            for _, _, test_case in sorted_cases:
                 test_case_name = type(test_case).__name__
+                test_case_display = camel_case_split(test_case_name)
+
+                # Check filter
+                if filter_lower is not None:
+                    display_lower = test_case_display.lower()
+                    if not (
+                        display_lower.startswith(filter_lower)
+                        or filter_lower.startswith(display_lower)
+                    ):
+                        continue
+
+                # Check dependencies
+                unmet = [d for d in test_case.dependencies if d in failed_cases]
+                if unmet:
+                    logger.info(
+                        f'Skipping "{test_case_name}" due to failed dependencies: {unmet}'
+                    )
+                    print(
+                        f"{test_case_display}... SKIPPED "
+                        f"(dependency failed: {', '.join(camel_case_split(d) for d in unmet)})"
+                    )
+                    failed_cases.add(test_case_name)
+                    print("")
+                    continue
+
                 logger.info(f'Starting test case "{test_case_name}".')
-                print(f"{camel_case_split(test_case_name)}...")
+                print(f"{test_case_display}...")
                 test_case_had_failures = False
                 for test in test_case.tests:
                     test_name = test.__name__
+                    full_test_name = (
+                        f"{test_case_display} {camel_case_split(test_name)}."
+                    )
+
+                    # Check filter at individual test level
+                    if filter_lower is not None:
+                        if not full_test_name.lower().startswith(filter_lower):
+                            continue
+
                     logger.info(f'Starting test "{test_name}".')
                     print(f"...{camel_case_split(test_name)}.")
-                    full_test_name = f"{camel_case_split(test_case_name)} {camel_case_split(test_name)}."
 
                     # Let any in-flight messages from the previous test
                     # settle into the old queue before discarding it.
@@ -651,9 +714,12 @@ class TestRunner:
                     if failure_messages:
                         test_case_had_failures = True
 
-                if not test_case_had_failures:
+                if test_case_had_failures:
+                    failed_cases.add(test_case_name)
+                else:
+                    passed_cases.add(test_case_name)
                     log_expectation(
-                        f'All "{camel_case_split(test_case_name)}" tests passed!',
+                        f'All "{test_case_display}" tests passed!',
                         "success",
                         print_success_to_console=True,
                     )
@@ -672,9 +738,16 @@ class TestCase(ABC):
 
     Attributes
     ----------
+    order : int
+        The order in which this test case should run. Lower values run first. Defaults to 100.
+    dependencies : list[str]
+        Class names of other TestCase subclasses that must pass before this one runs.
     tests : list[(:class:`~discord.Client`, :class:`~discord.Client`, :class:`~discord.Guild`, tuple[:class:`~discord.TextChannel`, :class:`~discord.TextChannel`, :class:`~discord.TextChannel`, :class:`~discord.TextChannel`]) -> Coroutine[Any, Any, None]]
         The list of registered tests.
     """
+
+    order: int = 100
+    dependencies: list[str] = []
 
     def __init__(self, test_runner: TestRunner):
         """Initialise a test case.

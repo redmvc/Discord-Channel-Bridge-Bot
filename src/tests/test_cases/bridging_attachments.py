@@ -1,11 +1,8 @@
 import io
-import sys
 from pathlib import Path
 from unittest.mock import PropertyMock, patch
 
 import discord
-
-sys.path.append(str(Path(__file__).parent.parent))
 import test_runner
 from test_runner import create_bridge, expect, give_manage_webhook_perms
 
@@ -13,6 +10,9 @@ ASSET_PATH = Path(__file__).parent.parent / "assets" / "test_file.txt"
 
 
 class BridgingAttachments(test_runner.TestCase):
+    order = 40
+    dependencies = ["CreatingBridges", "DemolishingBridges", "BridgingMessages"]
+
     def __init__(self):
         super().__init__(test_runner.test_runner)
 

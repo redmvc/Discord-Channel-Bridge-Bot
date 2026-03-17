@@ -1,9 +1,6 @@
-import sys
 from pathlib import Path
 
 import discord
-
-sys.path.append(str(Path(__file__).parent.parent))
 import test_runner
 from test_runner import (
     create_bridge,
@@ -16,6 +13,9 @@ ASSET_PATH = Path(__file__).parent.parent / "assets" / "test_file.txt"
 
 
 class BridgingEdits(test_runner.TestCase):
+    order = 60
+    dependencies = ["CreatingBridges", "DemolishingBridges", "BridgingMessages"]
+
     def __init__(self):
         super().__init__(test_runner.test_runner)
 

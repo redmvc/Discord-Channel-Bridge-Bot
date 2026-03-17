@@ -1,9 +1,6 @@
-import sys
 from pathlib import Path
 
 import discord
-
-sys.path.append(str(Path(__file__).parent.parent))
 import test_runner
 from test_runner import (
     create_bridge,
@@ -12,13 +9,15 @@ from test_runner import (
     give_manage_webhook_perms,
 )
 
-sys.path.append(str(Path(__file__).parent.parent.parent))
 import common
 
 ASSET_PATH = Path(__file__).parent.parent / "assets" / "test_file.txt"
 
 
 class BridgingReplies(test_runner.TestCase):
+    order = 50
+    dependencies = ["CreatingBridges", "DemolishingBridges", "BridgingMessages"]
+
     def __init__(self):
         super().__init__(test_runner.test_runner)
 

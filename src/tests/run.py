@@ -1,24 +1,28 @@
 import asyncio
+import importlib
+import pkgutil
+import sys
 import traceback
+from pathlib import Path
 from types import TracebackType
 from typing import Any
 
-import test_cases.creating_bridges  # noqa: F401
-import test_cases.demolishing_bridges  # noqa: F401
-import test_cases.bridging_messages  # noqa: F401
-import test_cases.bridging_attachments  # noqa: F401
-import test_cases.bridging_replies  # noqa: F401
-import test_cases.bridging_edits  # noqa: F401
-import test_cases.bridging_deletions  # noqa: F401
-import test_cases.bridging_reactions  # noqa: F401
-import test_cases.bridge_thread  # noqa: F401
-import test_cases.auto_bridge_threads  # noqa: F401
+# Add src/tests/ and src/ to sys.path so that all test modules and
+# top-level modules (common, bridge, events, etc.) can be imported.
+sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+import test_cases
 import test_runner
 import tester_bot
 from tester_bot import start_client as start_tester_bot
 
 import common
 from main import start_client as start_bridge_bot
+
+# Auto-discover and import all test case modules
+for _, module_name, _ in pkgutil.iter_modules(test_cases.__path__):
+    importlib.import_module(f"test_cases.{module_name}")
 
 
 class Bots:
@@ -73,8 +77,12 @@ class Bots:
 
 async def run_tests():
     """Run all tests registered to the test runner."""
+    filter_prefix = sys.argv[1] if len(sys.argv) > 1 else None
     async with Bots():
-        await test_runner.test_runner.run_tests(tester_bot.testing_server)
+        await test_runner.test_runner.run_tests(
+            tester_bot.testing_server,
+            filter_prefix=filter_prefix,
+        )
 
 
 if __name__ == "__main__":
