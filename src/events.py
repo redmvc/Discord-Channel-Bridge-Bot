@@ -2017,11 +2017,14 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
     ):
         return
 
-    await bridge_reaction_add(
-        message_id=payload.message_id,
-        channel_id=channel_id,
-        emoji=payload.emoji,
-    )
+    message_id = payload.message_id
+    lock = common.message_lock[message_id]
+    async with lock:
+        await bridge_reaction_add(
+            message_id=message_id,
+            channel_id=channel_id,
+            emoji=payload.emoji,
+        )
 
 
 @overload
@@ -2408,49 +2411,54 @@ async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
     ):
         return
 
-    try:
-        channel = await common.get_channel_from_id(
-            channel_id,
-            ensure_text_or_thread=True,
-        )
-    except ChannelTypeError:
-        # This really shouldn't happen
-        logger.error(
-            "Channel with ID %s is registered to bot's bridged channels but isn't a text channel nor a thread off one.",
-            channel_id,
-        )
-        return
+    # Wait a bit in case this is a "clear reactions" trigger
+    await asyncio.sleep(0.2)
 
-    # I will try to see if this emoji still has other reactions in it and, if so, stop doing this as I don't care anymore
     message_id = payload.message_id
-    message = await channel.fetch_message(message_id)
+    lock = common.message_lock[message_id]
+    async with lock:
+        try:
+            channel = await common.get_channel_from_id(
+                channel_id,
+                ensure_text_or_thread=True,
+            )
+        except ChannelTypeError:
+            # This really shouldn't happen
+            logger.error(
+                "Channel with ID %s is registered to bot's bridged channels but isn't a text channel nor a thread off one.",
+                channel_id,
+            )
+            return
 
-    emoji = payload.emoji
-    reactions_with_emoji = {
-        reaction
-        for reaction in message.reactions
-        if (reaction.emoji == emoji.name) or (reaction.emoji == emoji)
-    }
-    for reaction in reactions_with_emoji:
-        async for user in reaction.users():
-            if user.id != client_user_id:
-                # There is at least one user who reacted to this message other than me, so I don't need to do anything
-                return
+        # I will try to see if this emoji still has other reactions in it and, if so, stop doing this as I don't care anymore
+        message = await channel.fetch_message(message_id)
 
-    logger.debug(
-        "Bridging reaction removal of %s from message with ID %s.",
-        emoji,
-        message_id,
-    )
+        emoji = payload.emoji
+        reactions_with_emoji = {
+            reaction
+            for reaction in message.reactions
+            if (reaction.emoji == emoji.name) or (reaction.emoji == emoji)
+        }
+        for reaction in reactions_with_emoji:
+            async for user in reaction.users():
+                if user.id != client_user_id:
+                    # There is at least one user who reacted to this message other than me, so I don't need to do anything
+                    return
 
-    # If I'm here, there are no remaining reactions of this kind on this message except perhaps for my own
-    await unreact(message_id=message_id, emoji_to_remove=emoji)
+        logger.debug(
+            "Bridging reaction removal of %s from message with ID %s.",
+            emoji,
+            message_id,
+        )
 
-    logger.debug(
-        "Successfully bridged reaction removal of %s from message with ID %s.",
-        emoji,
-        message_id,
-    )
+        # If I'm here, there are no remaining reactions of this kind on this message except perhaps for my own
+        await unreact(message_id=message_id, emoji_to_remove=emoji)
+
+        logger.debug(
+            "Successfully bridged reaction removal of %s from message with ID %s.",
+            emoji,
+            message_id,
+        )
 
 
 @common.client.event
@@ -2468,21 +2476,23 @@ async def on_raw_reaction_clear_emoji(payload: discord.RawReactionClearEmojiEven
         return
 
     message_id = payload.message_id
-    emoji = payload.emoji
+    lock = common.message_lock[message_id]
+    async with lock:
+        emoji = payload.emoji
 
-    logger.debug(
-        "Bridging reaction clear of %s from message with ID %s.",
-        emoji,
-        message_id,
-    )
+        logger.debug(
+            "Bridging reaction clear of %s from message with ID %s.",
+            emoji,
+            message_id,
+        )
 
-    await unreact(message_id=message_id, emoji_to_remove=emoji)
+        await unreact(message_id=message_id, emoji_to_remove=emoji)
 
-    logger.debug(
-        "Successfully bridged clear removal of %s from message with ID %s.",
-        emoji,
-        message_id,
-    )
+        logger.debug(
+            "Successfully bridged clear removal of %s from message with ID %s.",
+            emoji,
+            message_id,
+        )
 
 
 @common.client.event
@@ -2502,15 +2512,16 @@ async def on_raw_reaction_clear(payload: discord.RawReactionClearEvent):
         return
 
     message_id = payload.message_id
+    lock = common.message_lock[message_id]
+    async with lock:
+        logger.debug("Bridging reaction clear from message with ID %s.", message_id)
 
-    logger.debug("Bridging reaction clear from message with ID %s.", message_id)
+        await unreact(message_id=message_id)
 
-    await unreact(message_id=message_id)
-
-    logger.debug(
-        "Successfully bridged clear removal from message with ID %s.",
-        message_id,
-    )
+        logger.debug(
+            "Successfully bridged clear removal from message with ID %s.",
+            message_id,
+        )
 
 
 @overload
