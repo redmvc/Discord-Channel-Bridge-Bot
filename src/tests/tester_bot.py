@@ -2,15 +2,11 @@ import asyncio
 import inspect
 import json
 import logging
-import sys
 from collections import defaultdict
-from pathlib import Path
 from typing import TYPE_CHECKING, List, Optional, Sequence, Union, cast
 
 import discord
-from beartype import beartype
 
-sys.path.append(str(Path(__file__).parent.parent))
 import common
 from validations import setup_logger
 
@@ -24,7 +20,8 @@ logger = setup_logger("test_logger", "test_logs.log", "INFO")
 
 MISSING = discord.utils.MISSING
 
-settings_root: "SettingsRoot" = json.load(open("settings.json"))
+with open("settings.json") as f:
+    settings_root: "SettingsRoot" = json.load(f)
 assert "tests" in settings_root
 settings = settings_root["tests"]
 
@@ -50,7 +47,25 @@ is_ready: bool = False
 testing_server: discord.Guild
 
 # Messages sent by the bridge bot via the interaction
-received_messages: dict[int, list[discord.Message]] = defaultdict(lambda: [])
+received_messages: dict[int, asyncio.Queue[discord.Message]] = defaultdict(
+    asyncio.Queue
+)
+
+# Messages edited in each channel (raw payloads from on_raw_message_edit)
+edited_messages: dict[int, asyncio.Queue[discord.RawMessageUpdateEvent]] = defaultdict(
+    asyncio.Queue
+)
+
+# Message IDs deleted in each channel
+deleted_message_ids: dict[int, set[int]] = defaultdict(set)
+
+# Reactions added in each channel (raw payloads from on_raw_reaction_add)
+added_reactions: dict[int, asyncio.Queue[discord.RawReactionActionEvent]] = defaultdict(
+    asyncio.Queue
+)
+
+# Reactions removed in each channel — set of (message_id, emoji_str) tuples
+removed_reactions: dict[int, set[tuple[int, int | None, str]]] = defaultdict(set)
 
 # Threads created in each channel with each name
 created_threads: dict[int, dict[str, discord.Thread]] = defaultdict(lambda: {})
@@ -141,7 +156,31 @@ async def on_message(message: discord.Message):
         (message.author.id == bridge_bot_user.id)
         or (message.application_id == bridge_bot_user.id)
     ):
-        received_messages[message.channel.id].append(message)
+        received_messages[message.channel.id].put_nowait(message)
+
+
+@client.event
+async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
+    edited_messages[payload.channel_id].put_nowait(payload)
+
+
+@client.event
+async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
+    deleted_message_ids[payload.channel_id].add(payload.message_id)
+
+
+@client.event
+async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
+    added_reactions[payload.channel_id].put_nowait(payload)
+
+
+@client.event
+async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
+    emoji_str = str(payload.emoji) if payload.emoji.id else payload.emoji.name
+    removed_reactions[payload.channel_id].add(
+        (payload.message_id, payload.user_id, emoji_str)
+    )
+    removed_reactions[payload.channel_id].add((payload.message_id, None, emoji_str))
 
 
 @client.event
@@ -149,7 +188,6 @@ async def on_thread_create(thread: discord.Thread):
     created_threads[thread.parent_id][thread.name] = thread
 
 
-@beartype
 async def wait_until_ready(
     *,
     time_to_wait: float | int = 100,
@@ -298,11 +336,11 @@ class InteractionResponseTester:
         file: discord.File = MISSING,
         files: Sequence[discord.File] = MISSING,
         view: discord.ui.View = MISSING,
-        tts: bool = False,
+        tts: bool = MISSING,
         ephemeral: bool = False,
         allowed_mentions: discord.AllowedMentions = MISSING,
         suppress_embeds: bool = False,
-        silent: bool = False,
+        silent: bool = MISSING,
         delete_after: Optional[float] = None,
         poll: discord.Poll = MISSING,
     ) -> "discord.Message | FakeMessage | None":
@@ -339,8 +377,7 @@ class InteractionResponseTester:
                 ),
             )
 
-        if embeds is not MISSING:
-            arguments["embeds"] = embeds
+        arguments["embeds"] = embeds
 
         if file is not MISSING:
             files = [file]
@@ -378,7 +415,7 @@ class InteractionResponseTester:
     ):
         self.deferred_response = InteractionResponseTester(self.interaction)
         await self.deferred_response.send_message(
-            f"Interaction was deferred with with thinking = {thinking}.",
+            f"Interaction was deferred with thinking = {thinking}.",
             ephemeral=ephemeral,
         )
 
@@ -444,7 +481,6 @@ class FakeMessage:
         )
 
 
-@beartype
 async def process_tester_bot_command(
     message: discord.Message | FakeMessage,
     tester_bot_user: discord.User,

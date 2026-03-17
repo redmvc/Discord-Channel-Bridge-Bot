@@ -1,7 +1,5 @@
 from typing import TYPE_CHECKING, Any, Coroutine, overload
 
-from beartype import beartype
-
 import common
 import events
 from validations import logger
@@ -33,7 +31,6 @@ def start_client(blocking: "Literal[False]") -> Coroutine[Any, Any, None]:
     ...
 
 
-@beartype
 def start_client(blocking: bool = True) -> Coroutine[Any, Any, None] | None:
     """Start the client and connect to Discord. If `blocking` is set to False, this function will instead return a Coroutine that can be awaited or passed to an asyncio event loop with a non-blocking connection.
 

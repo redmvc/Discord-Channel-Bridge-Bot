@@ -3,21 +3,20 @@ from copy import deepcopy
 from typing import TYPE_CHECKING, Literal, overload
 
 import discord
-from beartype import beartype
-from sqlalchemy import sql
 from sqlalchemy.exc import StatementError
-from sqlalchemy.orm import Session as SQLSession
+from sqlalchemy.ext.asyncio import AsyncSession as SQLSession
 
 import common
 from database import (
+    AsyncDataFrame,
     DBBridge,
     DBMessageMap,
     DBWebhook,
     get_sql_insert_ignore_duplicate_query,
     get_sql_upsert_query,
     sql_command,
-    sql_select,
 )
+from database import functions as F
 from validations import (
     ArgumentError,
     TextChannelOrThread,
@@ -52,7 +51,6 @@ class Bridge:
         A webhook connecting those channels
     """
 
-    @beartype
     @classmethod
     async def create(
         cls,
@@ -150,7 +148,6 @@ class Bridges:
     async def load_from_database(self): ...
 
     @sql_command
-    @beartype
     async def load_from_database(self, *, session: SQLSession):
         """Load all bridges saved in the bot's connected database.
 
@@ -170,7 +167,7 @@ class Bridges:
         invalid_channel_ids: set[str] = set()
         invalid_webhook_ids: set[str] = set()
 
-        webhook_query_result = sql_select(DBWebhook, session=session)
+        webhook_query_result = await AsyncDataFrame(session, DBWebhook).collect()
         for channel_webhook in webhook_query_result:
             channel_id = int(channel_webhook.channel)
             webhook_id = int(channel_webhook.webhook)
@@ -210,7 +207,7 @@ class Bridges:
         all_target_channels: set[str] = set()
         targets_with_sources: set[str] = set()
 
-        bridge_query_result = sql_select(DBBridge, session=session)
+        bridge_query_result = await AsyncDataFrame(session, DBBridge).collect()
         for bridge in bridge_query_result:
             target_id_str = bridge.target
             if target_id_str in invalid_channel_ids:
@@ -311,27 +308,35 @@ class Bridges:
             )
 
             if len(channel_ids_to_delete) > 0:
-                delete_invalid_bridges = sql.Delete(DBBridge).where(
-                    DBBridge.source.in_(channel_ids_to_delete)
-                    | DBBridge.target.in_(channel_ids_to_delete)
+                await (
+                    AsyncDataFrame(session, DBBridge)
+                    .where(
+                        F.col("source").isin(channel_ids_to_delete)
+                        | F.col("target").isin(channel_ids_to_delete)
+                    )
+                    .delete()
                 )
-                session.execute(delete_invalid_bridges)
 
-                delete_invalid_messages = sql.Delete(DBMessageMap).where(
-                    DBMessageMap.source_channel.in_(channel_ids_to_delete)
-                    | DBMessageMap.target_channel.in_(channel_ids_to_delete)
+                await (
+                    AsyncDataFrame(session, DBMessageMap)
+                    .where(
+                        F.col("source_channel").isin(channel_ids_to_delete)
+                        | F.col("target_channel").isin(channel_ids_to_delete)
+                    )
+                    .delete()
                 )
-                session.execute(delete_invalid_messages)
 
-            delete_invalid_webhooks = sql.Delete(DBWebhook).where(
-                DBWebhook.channel.in_(channel_ids_to_delete)
-                | DBWebhook.webhook.in_(invalid_webhook_ids)
+            await (
+                AsyncDataFrame(session, DBWebhook)
+                .where(
+                    F.col("channel").isin(channel_ids_to_delete)
+                    | F.col("webhook").isin(invalid_webhook_ids)
+                )
+                .delete()
             )
-            session.execute(delete_invalid_webhooks)
 
         logger.info("Bridges successfully loaded from database!")
 
-    @beartype
     async def create_bridge(
         self,
         *,
@@ -557,7 +562,7 @@ class Bridges:
         )
 
         target_id_str = str(target_id)
-        insert_bridge_row = get_sql_insert_ignore_duplicate_query(
+        insert_bridge_row = await get_sql_insert_ignore_duplicate_query(
             DBBridge,
             indices={"source", "target"},
             source=str(source_id),
@@ -565,15 +570,15 @@ class Bridges:
         )
 
         bridge_webhook = await bridge.webhook
-        insert_webhook_row = get_sql_upsert_query(
+        insert_webhook_row = await get_sql_upsert_query(
             DBWebhook,
             indices={"channel"},
             channel=target_id_str,
             webhook=str(bridge_webhook.id),
         )
 
-        session.execute(insert_bridge_row)
-        session.execute(insert_webhook_row)
+        await session.execute(insert_bridge_row)
+        await session.execute(insert_webhook_row)
 
         logger.debug(
             "Bridge from #%s to #%s inserted into database.",
@@ -582,7 +587,6 @@ class Bridges:
         )
         return bridge
 
-    @beartype
     async def demolish_bridges(
         self,
         *,
@@ -772,14 +776,14 @@ class Bridges:
             logger.debug("Bridge(s) demolished.")
             return
 
-        self._remove_bridges_from_db(
+        await self._remove_bridges_from_db(
             bridges_to_demolish=bridges_to_demolish,
             webhooks_deleted=webhooks_deleted,
             session=session,
         )
 
     @overload
-    def _remove_bridges_from_db(
+    async def _remove_bridges_from_db(
         self,
         *,
         bridges_to_demolish: list[tuple[int, int]],
@@ -788,7 +792,7 @@ class Bridges:
     ): ...
 
     @overload
-    def _remove_bridges_from_db(
+    async def _remove_bridges_from_db(
         self,
         *,
         bridges_to_demolish: list[tuple[int, int]],
@@ -797,7 +801,7 @@ class Bridges:
     ): ...
 
     @sql_command
-    def _remove_bridges_from_db(
+    async def _remove_bridges_from_db(
         self,
         *,
         bridges_to_demolish: list[tuple[int, int]],
@@ -807,38 +811,35 @@ class Bridges:
         """Remove bridges from database."""
         logger.debug("Removing bridge(s) from database...")
 
-        delete_demolished_bridges_and_messages: list[sql.Delete] = []
         for sid, tid in bridges_to_demolish:
             source_id_str = str(sid)
             target_id_str = str(tid)
-            delete_demolished_bridges_and_messages.append(
-                sql.Delete(DBBridge).where(
-                    (DBBridge.source == source_id_str)
-                    & (DBBridge.target == target_id_str)
+            await (
+                AsyncDataFrame(session, DBBridge)
+                .where(
+                    (F.col("source") == F.lit(source_id_str))
+                    & (F.col("target") == F.lit(target_id_str))
                 )
+                .delete()
             )
-            delete_demolished_bridges_and_messages.append(
-                sql.Delete(DBMessageMap).where(
-                    (DBMessageMap.source_channel == source_id_str)
-                    & (DBMessageMap.target_channel == target_id_str)
+            await (
+                AsyncDataFrame(session, DBMessageMap)
+                .where(
+                    (F.col("source_channel") == F.lit(source_id_str))
+                    & (F.col("target_channel") == F.lit(target_id_str))
                 )
+                .delete()
             )
 
         if len(webhooks_deleted) > 0:
-            delete_invalid_webhooks = sql.Delete(DBWebhook).where(
-                DBWebhook.webhook.in_(webhooks_deleted)
+            await (
+                AsyncDataFrame(session, DBWebhook)
+                .where(F.col("webhook").isin(webhooks_deleted))
+                .delete()
             )
-        else:
-            delete_invalid_webhooks = None
-
-        for delete_query in delete_demolished_bridges_and_messages:
-            session.execute(delete_query)
-        if delete_invalid_webhooks is not None:
-            session.execute(delete_invalid_webhooks)
 
         logger.debug("Bridge(s) removed from database.")
 
-    @beartype
     def get_one_way_bridge(
         self,
         source: TextChannelOrThread | int,
@@ -866,7 +867,6 @@ class Bridges:
 
         return bridges_from_source.get(target_id)
 
-    @beartype
     def get_two_way_bridge(
         self,
         source: TextChannelOrThread | int,
@@ -891,7 +891,6 @@ class Bridges:
             self.get_one_way_bridge(target, source),
         )
 
-    @beartype
     def get_outbound_bridges(
         self,
         source: TextChannelOrThread | int,
@@ -919,7 +918,6 @@ class Bridges:
         """
         return set(self._outbound_bridges.keys())
 
-    @beartype
     def get_inbound_bridges(
         self,
         target: TextChannelOrThread | int,
@@ -1015,7 +1013,6 @@ class Bridges:
         """
         ...
 
-    @beartype
     async def get_reachable_channels(
         self,
         starting_channel: TextChannelOrThread | int,
@@ -1119,7 +1116,6 @@ class Webhooks:
         # The webhook used by a parent channel
         self._webhook_by_parent: dict[int, int] = {}
 
-    @beartype
     async def add_webhook(
         self,
         channel_or_id: TextChannelOrThread | int,
@@ -1194,7 +1190,6 @@ class Webhooks:
         logger.debug("Webhook added to channel with ID %s.", channel_id)
         return webhook
 
-    @beartype
     async def get_webhook(
         self,
         channel_or_id: TextChannelOrThread | int,
@@ -1240,7 +1235,6 @@ class Webhooks:
         # The channel doesn't have its own webhook associated, nor is it a thread so we can't find its parent
         return None
 
-    @beartype
     async def delete_channel(
         self,
         channel_or_id: TextChannelOrThread | int,

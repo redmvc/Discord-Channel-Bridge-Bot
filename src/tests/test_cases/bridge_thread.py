@@ -1,11 +1,7 @@
 import asyncio
 import random
-import sys
-from pathlib import Path
 
 import discord
-
-sys.path.append(str(Path(__file__).parent.parent))
 import test_runner
 from test_runner import (
     create_bridge,
@@ -16,6 +12,9 @@ from test_runner import (
 
 
 class BridgeThread(test_runner.TestCase):
+    order = 90
+    dependencies = ["CreatingBridges", "DemolishingBridges"]
+
     def __init__(self):
         super().__init__(test_runner.test_runner)
 
@@ -97,7 +96,7 @@ async def requires_bridge_to_channel(
     await give_manage_webhook_perms(tester_bot, testing_server)
 
     channel_1 = testing_channels[0]
-    channel_2 = testing_channels[0]
+    channel_2 = testing_channels[1]
     await demolish_bridges(channel_1, channel_and_threads=True)
 
     thread_1 = await channel_1.create_thread(
@@ -161,7 +160,7 @@ async def works(
         in_channel=thread_1,
         to={
             "be_a_reply_to": message_sent,
-            "contain": "Interaction was deferred with with thinking = True.",
+            "contain": "Interaction was deferred with thinking = True.",
         },
     )
 

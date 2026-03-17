@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING, Any, AsyncIterator, Callable, TypeVar, overloa
 import aiohttp
 import discord
 from aiolimiter import AsyncLimiter
-from beartype import beartype
 
 from validations import (
     ArgumentError,
@@ -17,6 +16,7 @@ from validations import (
     HTTPResponseError,
     TextChannelOrThread,
     logger,
+    validate_channels,
 )
 
 if TYPE_CHECKING:
@@ -83,8 +83,8 @@ if TYPE_CHECKING:
             The token used by the Discord developers API.
         db_dialect : Literal['mysql'] | Literal['postgresql'] | Literal['sqlite']
             The database dialect.
-        db_driver : Literal['pymysql'] | Literal['psycopg2'] | Literal['pysqlite']
-            The database driver.
+        db_driver : Literal['aiomysql'] | Literal['asyncpg'] | Literal['aiosqlite']
+            The async database driver. Must match the dialect: ``'aiomysql'`` for MySQL, ``'asyncpg'`` for PostgreSQL, ``'aiosqlite'`` for SQLite.
         db_host : str
             The server host.
         db_port : int
@@ -103,7 +103,7 @@ if TYPE_CHECKING:
 
         app_token: str
         db_dialect: Literal["mysql", "postgresql", "sqlite"]
-        db_driver: Literal["pymysql", "psycopg2", "pysqlite"]
+        db_driver: Literal["aiomysql", "asyncpg", "aiosqlite"]
         db_host: str
         db_port: int
         db_user: str
@@ -389,7 +389,6 @@ async def get_channel_from_id(
     ...
 
 
-@beartype
 async def get_channel_from_id(
     channel_or_id: DiscordChannel | int,
     *,
@@ -482,7 +481,6 @@ def get_id_from_channel(channel_or_id: DiscordChannel) -> int:
     ...
 
 
-@beartype
 def get_id_from_channel(channel_or_id: DiscordChannel | int) -> int:
     """Return the ID of the Discord channel passed as argument, or the argument itself if it is already an ID.
 
@@ -543,7 +541,6 @@ async def get_channel_parent(channel_or_id: DiscordChannel) -> discord.TextChann
     ...
 
 
-@beartype
 async def get_channel_parent(
     channel_or_id: DiscordChannel | int,
 ) -> discord.TextChannel:
@@ -576,7 +573,6 @@ async def get_channel_parent(
     return channel
 
 
-@beartype
 async def get_channel_member(
     channel: discord.abc.GuildChannel | discord.Thread,
     member_id: int,
@@ -606,7 +602,6 @@ async def get_channel_member(
     return await get_server_member(channel.guild, member_id)
 
 
-@beartype
 async def get_server_member(
     server: discord.Guild,
     member_id: int,
@@ -643,7 +638,6 @@ async def get_server_member(
     return server_member
 
 
-@beartype
 async def get_users_from_iterator(
     user_iterator: AsyncIterator[discord.Member | discord.User],
 ) -> set[int]:
@@ -779,7 +773,6 @@ async def get_emoji_information(
 ) -> tuple[int, str, bool, str]: ...
 
 
-@beartype
 async def get_emoji_information(
     emoji: discord.PartialEmoji | discord.Emoji | None = None,
     emoji_id: int | str | None = None,
@@ -934,7 +927,6 @@ async def get_emoji_image(
     ...
 
 
-@beartype
 async def get_emoji_image(  # pyright: ignore[reportInconsistentOverload]
     *args: discord.PartialEmoji | discord.Emoji | int | str | bool,
 ) -> bytes:
@@ -1025,7 +1017,6 @@ def get_emoji_url(
 ) -> str: ...
 
 
-@beartype
 def get_emoji_url(  # pyright: ignore[reportInconsistentOverload]
     *args: discord.PartialEmoji | discord.Emoji | int | str | bool,
 ) -> str:
@@ -1109,7 +1100,6 @@ def get_emoji_url(  # pyright: ignore[reportInconsistentOverload]
     return emoji_url
 
 
-@beartype
 async def get_image_from_URL(url: str) -> bytes:
     """Return an image stored in a URL.
 
@@ -1156,7 +1146,6 @@ async def get_image_from_URL(url: str) -> bytes:
     return image_bytes.read()
 
 
-@beartype
 def hash_image(image: bytes) -> str:
     """Return a string with the MD5 hash of an image.
 
@@ -1172,7 +1161,83 @@ def hash_image(image: bytes) -> str:
     return md5(image).hexdigest()
 
 
-@beartype
+async def resolve_message_reference(
+    message_reference: discord.MessageReference | None,
+) -> discord.Message | None:
+    """Attempt to fetch and return the message a :class:`~discord.MessageReference` is a reference to.
+
+    Parameters
+    ----------
+    message_reference : :class:`~discord.MessageReference`
+        The message reference to fetch the original of.
+
+    Returns
+    -------
+    :class:`~discord.Message` | None
+    """
+    if message_reference is None:
+        return None
+
+    logger.debug(
+        "Trying to resolve the message referenced by reference %s.",
+        message_reference,
+    )
+
+    if isinstance(
+        resolved_message_reference := message_reference.resolved,
+        discord.Message,
+    ):
+        # Original message is cached and I can just fetch it
+        logger.debug(
+            "Resolved reference to cached message with ID %s.",
+            resolved_message_reference.id,
+        )
+        return resolved_message_reference
+
+    if (message_reference_id := message_reference.message_id) is None:
+        logger.debug(
+            "Message being referenced was not cached and its ID was not included in the message reference."
+        )
+        return None
+
+    logger.debug(
+        "Message being referenced was not cached but had ID %s. Trying to fetch it.",
+        message_reference_id,
+    )
+    try:
+        message_reference_channel = validate_channels(
+            message_reference_channel=await get_channel_from_id(
+                message_reference.channel_id
+            ),
+            log_error=False,
+        )["message_reference_channel"]
+    except ChannelTypeError:
+        logger.debug(
+            "The channel referenced message with ID %s was from was not a text channel or a thread off one.",
+            message_reference_id,
+        )
+        return None
+
+    # I have access to the channel of the original message being forwarded
+    try:
+        # Try to find the original message
+        fetched_message = await message_reference_channel.fetch_message(
+            message_reference_id
+        )
+        logger.debug(
+            "Successfully fetched referenced message with ID %s.",
+            fetched_message.id,
+        )
+        return fetched_message
+    except Exception as e:
+        logger.error(
+            "An error occurred while trying to fetch referenced message with ID %s: %s",
+            message_reference_id,
+            e,
+        )
+        return None
+
+
 def truncate(msg: str, length: int) -> str:
     """Return `msg` truncated to `length` plus a "…" character at the end.
 
@@ -1191,7 +1256,6 @@ def truncate(msg: str, length: int) -> str:
     return msg if (len(msg) < length) else msg[: length - 1] + "…"
 
 
-@beartype
 async def wait_until_ready(
     *,
     time_to_wait: float | int = 100,
@@ -1227,7 +1291,6 @@ async def wait_until_ready(
     return True
 
 
-@beartype
 async def run_retries(
     fun: Callable[..., T],
     num_retries: int,

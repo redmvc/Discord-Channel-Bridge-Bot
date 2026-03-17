@@ -69,7 +69,7 @@ def setup_logger(
     ):
         raise ValueError(f"Level {level} is not a valid logging level.")
 
-    handler = logging.FileHandler(log_file, mode="w")
+    handler = logging.FileHandler(log_file, mode="w", encoding="utf-8")
     handler.setFormatter(formatter)
 
     logger = logging.getLogger(name)
