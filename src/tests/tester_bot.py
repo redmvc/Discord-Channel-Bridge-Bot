@@ -2,14 +2,11 @@ import asyncio
 import inspect
 import json
 import logging
-import sys
 from collections import defaultdict
-from pathlib import Path
 from typing import TYPE_CHECKING, List, Optional, Sequence, Union, cast
 
 import discord
 
-sys.path.append(str(Path(__file__).parent.parent))
 import common
 from validations import setup_logger
 

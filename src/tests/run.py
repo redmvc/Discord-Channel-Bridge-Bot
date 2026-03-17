@@ -1,8 +1,14 @@
 import asyncio
+import sys
 import traceback
+from pathlib import Path
 from types import TracebackType
 from typing import Any
 
+# Add src/tests/ and src/ to sys.path so that all test modules and
+# top-level modules (common, bridge, events, etc.) can be imported.
+sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).parent.parent))
 import test_cases.creating_bridges  # noqa: F401
 import test_cases.demolishing_bridges  # noqa: F401
 import test_cases.bridging_messages  # noqa: F401

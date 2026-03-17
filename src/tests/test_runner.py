@@ -1,9 +1,7 @@
 import asyncio
-import sys
 from abc import ABC
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from re import finditer
 from typing import (
     TYPE_CHECKING,
@@ -24,7 +22,6 @@ import tester_bot
 from aiolimiter import AsyncLimiter
 from tester_bot import logger
 
-sys.path.append(str(Path(__file__).parent.parent))
 import common
 
 # Helper to prevent us from being rate limited
