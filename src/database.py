@@ -449,6 +449,10 @@ def sql_command(
                     if not session.in_transaction():
                         async with session.begin():
                             result = await func(*args, **kwargs)
+                        logger.debug(
+                            "Database transaction committed successfully in %s.",
+                            func.__qualname__,
+                        )
                     else:
                         # If the session was already in a transaction, I begin a nested transaction
                         async with session.begin_nested():
