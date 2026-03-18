@@ -455,7 +455,7 @@ def sql_command(
                             result = await func(*args, **kwargs)
                 else:
                     result = await func(*args, **kwargs)
-            except Exception as e:
+            except BaseException as e:
                 logger.error(
                     "An error occurred during database operation in %s: %s",
                     func.__qualname__,
