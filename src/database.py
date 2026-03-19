@@ -217,7 +217,6 @@ Table = (
     | DBWebhook
     | DBMessageMap
     | DBReactionMap
-    | DBReactionMap
     | DBAutoBridgeThreadChannels
     | DBEmoji
     | DBAppWhitelist
