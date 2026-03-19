@@ -50,11 +50,19 @@ async def adds_reactions(
     if not bridged_message:
         return failure_messages
 
-    # Add reaction
+    # Add reaction to original message
     await original_message.add_reaction("\N{THUMBS UP SIGN}")
     _, f = await expect(
         bridged_message,
         to={"get_reaction": {"emoji": "\N{THUMBS UP SIGN}"}},
+    )
+    failure_messages += f
+
+    # Add reaction to bridged message
+    await bridged_message.add_reaction("\N{HEAVY BLACK HEART}")
+    _, f = await expect(
+        original_message,
+        to={"get_reaction": {"emoji": "\N{HEAVY BLACK HEART}"}},
     )
     failure_messages += f
 
