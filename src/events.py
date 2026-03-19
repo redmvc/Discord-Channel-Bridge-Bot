@@ -19,6 +19,7 @@ from database import (
     AsyncDataFrame,
     DBAppWhitelist,
     DBAutoBridgeThreadChannels,
+    DBBridge,
     DBMessageMap,
     DBReactionMap,
     Row,
@@ -2897,7 +2898,12 @@ async def bridge_unbridged_messages(*, session: SQLSession):
     logger.debug("Looking for latest bridged message in each channel.")
 
     latest_bridged_messages = await (
-        AsyncDataFrame(session, DBMessageMap)
+        AsyncDataFrame(session, DBBridge)
+        .select(F.col("source").alias("source_channel"), "created_at")
+        .join(AsyncDataFrame(session, DBMessageMap), "source_channel")
+        .where(F.col("sent_at") >= F.col("created_at"))
+        # The logic above is to ensure that if a bridge is demolished and rebuilt,
+        # we don't try to bridge messages that were sent prior to the rebuilding
         .groupBy("source_channel")
         .agg(F.max_by("source_message", "id").alias("source_message"))
         .collect()
