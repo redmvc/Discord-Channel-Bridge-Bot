@@ -71,7 +71,6 @@ class DBBridge(DBBase):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
-        nullable=False,
     )
     source: Mapped[str] = mapped_column(String(32), nullable=False)
     target: Mapped[str] = mapped_column(String(32), nullable=False)
@@ -95,7 +94,6 @@ class DBWebhook(DBBase):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
-        nullable=False,
     )
 
 
@@ -122,7 +120,6 @@ class DBMessageMap(DBBase):
     sent_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
-        nullable=False,
     )
     source_message: Mapped[str] = mapped_column(String(32), nullable=False)
     source_channel: Mapped[str] = mapped_column(String(32), nullable=False)
@@ -168,7 +165,6 @@ class DBReactionMap(DBBase):
     added_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
-        nullable=False,
     )
     source_emoji: Mapped[str] = mapped_column(String(32), nullable=False)
     source_message: Mapped[str] = mapped_column(String(32), nullable=False)
