@@ -10,7 +10,6 @@ import common
 from database import (
     AsyncDataFrame,
     DBBridge,
-    DBMessageMap,
     DBWebhook,
     get_sql_insert_ignore_duplicate_query,
     get_sql_upsert_query,
@@ -313,15 +312,6 @@ class Bridges:
                     .where(
                         F.col("source").isin(channel_ids_to_delete)
                         | F.col("target").isin(channel_ids_to_delete)
-                    )
-                    .delete()
-                )
-
-                await (
-                    AsyncDataFrame(session, DBMessageMap)
-                    .where(
-                        F.col("source_channel").isin(channel_ids_to_delete)
-                        | F.col("target_channel").isin(channel_ids_to_delete)
                     )
                     .delete()
                 )
@@ -819,14 +809,6 @@ class Bridges:
                 .where(
                     (F.col("source") == F.lit(source_id_str))
                     & (F.col("target") == F.lit(target_id_str))
-                )
-                .delete()
-            )
-            await (
-                AsyncDataFrame(session, DBMessageMap)
-                .where(
-                    (F.col("source_channel") == F.lit(source_id_str))
-                    & (F.col("target_channel") == F.lit(target_id_str))
                 )
                 .delete()
             )
