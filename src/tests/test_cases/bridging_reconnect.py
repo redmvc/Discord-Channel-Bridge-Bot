@@ -1,5 +1,5 @@
 import asyncio
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import discord
 import test_runner
@@ -10,8 +10,7 @@ from test_runner import (
     give_manage_webhook_perms,
 )
 
-import common
-from bridge import bridges
+import events
 from events import bridge_unbridged_messages
 
 
@@ -47,24 +46,19 @@ async def bridges_unbridged_messages(
 
     # Send a message that gets bridged normally (establishes DB state)
     await channel_1.send("already bridged")
-    _, failure_messages = await expect(
+    first_message, failure_messages = await expect(
         "next_message",
         in_channel=channel_2,
         to={"equal": "already bridged", "be_from": bridge_bot},
     )
 
-    # Temporarily suppress bridging by making get_outbound_bridges return None
-    # for channel_1. The gateway-triggered on_message will exit early.
-    original = bridges.get_outbound_bridges
+    if first_message is None:
+        return failure_messages
 
-    def mock_get_outbound(source):
-        if common.get_id_from_channel(source) == channel_1.id:
-            return None
-        return original(source)
-
-    with patch.object(bridges, "get_outbound_bridges", side_effect=mock_get_outbound):
+    # Temporarily suppress processing messages
+    with patch.object(events, "bridge_message_helper", new=AsyncMock()):
         await channel_1.send("missed during disconnect")
-        await asyncio.sleep(1)  # let the gateway event fire and be ignored
+        await asyncio.sleep(1)  # let the gateway on_message fire and complete
 
     # Patch removed — now call bridge_unbridged_messages to catch up
     await bridge_unbridged_messages()

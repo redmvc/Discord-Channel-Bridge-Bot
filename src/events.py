@@ -3,6 +3,7 @@ import inspect
 import re
 import sys
 from copy import deepcopy
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple, TypedDict, overload
 
@@ -21,9 +22,11 @@ from database import (
     DBAutoBridgeThreadChannels,
     DBBridge,
     DBMessageMap,
+    DBMostRecentEventInChannel,
     DBReactionMap,
     Row,
     create_tables,
+    register_observed_event,
     sql_command,
 )
 from database import functions as F
@@ -386,8 +389,7 @@ async def on_message(message: discord.Message):
             if await process_tester_bot_command(message, common.test_app):
                 return
 
-        message_channel_id = message.channel.id
-        if not bridges.get_outbound_bridges(message_channel_id):
+        if not bridges.get_outbound_bridges(message_channel_id := message.channel.id):
             return
 
         await bridge_message_helper(message, message_channel_id)
@@ -470,6 +472,13 @@ async def bridge_message_helper(
         "Bridging message with ID %s from channel with ID %s.",
         message.id,
         message_channel_id,
+    )
+
+    await register_observed_event(
+        message_channel_id,
+        message.id,
+        message.created_at,
+        session=session,
     )
 
     # Get all channels reachable from this one via an unbroken sequence of outbound bridges as well as their webhooks
@@ -723,6 +732,26 @@ async def bridge_message_helper(
 
             people_to_ping.difference_update(
                 {member.id for member in webhook_channel.members}
+            )
+
+        # Register the latest observed event in each channel
+        already_registered_channels = {}
+        for bridged_message in bridged_messages:
+            message_timestamp = discord.utils.snowflake_time(bridged_message.id)
+            if (
+                already_registered_channels.get(
+                    bridged_message.channel_id,
+                    message_timestamp,
+                )
+                > message_timestamp
+            ):
+                continue
+            already_registered_channels[bridged_message.channel_id] = message_timestamp
+
+            await register_observed_event(
+                bridged_message.channel_id,
+                observed_at=message_timestamp,
+                session=session,
             )
 
         # Insert references to the linked messages into the message_mappings table
@@ -1086,6 +1115,7 @@ async def _bridge_message_to_target_channel(
                 )
                 sent_message_ids.append(sent_message.id)
                 people_to_ping = set()
+
             return [
                 BridgedMessage(
                     id=message_id,
@@ -1131,6 +1161,7 @@ async def _bridge_message_to_target_channel(
                 content=f"> -# The following message was originally forwarded by <@{bridged_member_id}>.",
             )
             bridged_forward = await forwarded_message.forward(target_channel)
+
             return BridgedMessage(
                 id=bridged_forward.id,
                 message_order=0,
@@ -1205,8 +1236,8 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
         if (
             message_was_deleted
             or contentless_edit
-            or (not await common.wait_until_ready())
             or (not bridges.get_outbound_bridges(channel_id))
+            or (not await common.wait_until_ready())
         ):
             if message_id in common.messages_to_edit:
                 del common.messages_to_edit[message_id]
@@ -1327,6 +1358,12 @@ async def edit_message_helper(
         channel_id,
         "outbound",
         include_webhooks=True,
+    )
+
+    await register_observed_event(
+        channel_id,
+        observed_at=discord.utils.snowflake_time(message_id),
+        session=session,
     )
 
     # Find all messages matching this one
@@ -1455,14 +1492,20 @@ async def edit_message_helper(
                                     e,
                                 )
 
+                    target_message_id = int(message_row.target_message)
                     await edit_message(
-                        int(message_row.target_message),
+                        target_message_id,
                         channel_specific_embeds,
                         bridged_channel,
                         truncated_content,
                         webhook,
                         thread_splat,
                         len(channel_specific_message_content) == 0,
+                    )
+                    await register_observed_event(
+                        bridged_channel.id,
+                        observed_at=discord.utils.snowflake_time(target_message_id),
+                        session=session,
                     )
 
                     at_least_one_edit = True
@@ -1763,12 +1806,11 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
     async with lock:
         # If by the time this gets unlocked it was removed from the dictionary, the message was deleted
         message_was_deleted = common.message_lock.get(message_id) is None
-
         channel_id = payload.channel_id
         if (
             message_was_deleted
-            or (not await common.wait_until_ready())
             or (not bridges.get_outbound_bridges(channel_id))
+            or (not await common.wait_until_ready())
         ):
             common.messages_to_delete.discard(message_id)
             return
@@ -1857,6 +1899,12 @@ async def delete_message_helper(
         include_webhooks=True,
     )
 
+    await register_observed_event(
+        channel_id,
+        observed_at=discord.utils.snowflake_time(message_id),
+        session=session,
+    )
+
     # Find all messages matching this one
     try:
         bridged_messages = await (
@@ -1888,6 +1936,7 @@ async def delete_message_helper(
                     thread_splat: ThreadSplat,
                     bridged_channel: TextChannelOrThread,
                 ):
+                    target_message_id = int(message_row.target_message)
                     if message_row.webhook:
                         # The webhook returned by the call to get_reachable_channels() may not be the same as the one used to post the message
                         message_webhook_id = int(message_row.webhook)
@@ -1906,7 +1955,7 @@ async def delete_message_helper(
 
                         try:
                             await webhook.delete_message(
-                                int(message_row.target_message),
+                                target_message_id,
                                 **thread_splat,
                             )
                         except discord.NotFound:
@@ -1935,7 +1984,7 @@ async def delete_message_helper(
                             target_channel_id
                         )
                         await partial_target_channel.get_partial_message(
-                            int(message_row.target_message)
+                            target_message_id
                         ).delete()
                         await partial_target_channel.get_partial_message(
                             int(message_row.forward_header_message)
@@ -1943,6 +1992,12 @@ async def delete_message_helper(
                     else:
                         # This should never happen
                         return
+
+                    await register_observed_event(
+                        target_channel_id,
+                        observed_at=discord.utils.snowflake_time(target_message_id),
+                        session=session,
+                    )
 
                 await delete_message(
                     message_row,
@@ -2009,16 +2064,15 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
     own_reaction = (client_user := common.client.user) and (
         payload.user_id == client_user.id
     )
-
     channel_id = payload.channel_id
+    message_id = payload.message_id
     if (
         own_reaction
-        or (not await common.wait_until_ready())
         or (not bridges.get_outbound_bridges(channel_id))
+        or (not await common.wait_until_ready())
     ):
         return
 
-    message_id = payload.message_id
     lock = common.message_lock[message_id]
     async with lock:
         await bridge_reaction_add(
@@ -2404,18 +2458,18 @@ async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
     own_reaction = (client_user := common.client.user) and (
         (client_user_id := client_user.id) == payload.user_id
     )
-
+    channel_id = payload.channel_id
+    message_id = payload.message_id
     if (
         own_reaction
+        or (not bridges.get_outbound_bridges(channel_id))
         or (not await common.wait_until_ready())
-        or (not bridges.get_outbound_bridges(channel_id := payload.channel_id))
     ):
         return
 
     # Wait a bit in case this is a "clear reactions" trigger
     await asyncio.sleep(0.2)
 
-    message_id = payload.message_id
     lock = common.message_lock[message_id]
     async with lock:
         try:
@@ -2471,12 +2525,13 @@ async def on_raw_reaction_clear_emoji(payload: discord.RawReactionClearEmojiEven
     payload : :class:`~discord.RawReactionClearEmojiEvent`
         The raw event payload data.
     """
+    channel_id = payload.channel_id
+    message_id = payload.message_id
     if (not await common.wait_until_ready()) or (
-        not bridges.get_outbound_bridges(payload.channel_id)
+        not bridges.get_outbound_bridges(channel_id)
     ):
         return
 
-    message_id = payload.message_id
     lock = common.message_lock[message_id]
     async with lock:
         emoji = payload.emoji
@@ -2507,12 +2562,13 @@ async def on_raw_reaction_clear(payload: discord.RawReactionClearEvent):
     payload : :class:`~discord.RawReactionClearEvent`
         The raw event payload data.
     """
+    channel_id = payload.channel_id
+    message_id = payload.message_id
     if (not await common.wait_until_ready()) or (
-        not bridges.get_outbound_bridges(payload.channel_id)
+        not bridges.get_outbound_bridges(channel_id)
     ):
         return
 
-    message_id = payload.message_id
     lock = common.message_lock[message_id]
     async with lock:
         logger.debug("Bridging reaction clear from message with ID %s.", message_id)
@@ -2757,6 +2813,11 @@ async def on_thread_create(thread: discord.Thread):
     ):
         return
 
+    await register_observed_event(
+        parent_channel.id,
+        observed_at=discord.utils.snowflake_time(thread.id),
+    )
+
     try:
         await thread.join()
     except Exception as e:
@@ -2895,46 +2956,44 @@ async def bridge_unbridged_messages(*, session: SQLSession):
         An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
     """
     # Find the latest bridged messages from each channel
-    logger.debug("Looking for latest bridged message in each channel.")
+    logger.debug("Looking for latest event in each channel.")
 
-    latest_bridged_messages = (
+    most_recent_events = await (
         AsyncDataFrame(session, DBBridge)
-        .select(F.col("source").alias("source_channel"), "created_at")
-        .join(AsyncDataFrame(session, DBMessageMap), "source_channel")
-        .where(F.col("sent_at") >= F.col("created_at"))
-        # The logic above is to ensure that if a bridge is demolished and rebuilt,
-        # we don't try to bridge messages that were sent prior to the rebuilding
-    )
-
-    latest_messages_seen = await (
-        latest_bridged_messages.select(
-            "id",
-            F.col("source_channel").alias("channel_id"),
-            F.col("source_message").alias("message_id"),
+        .select(F.col("source").alias("channel"), "created_at")
+        .join(AsyncDataFrame(session, DBMostRecentEventInChannel), "channel")
+        .select(
+            F.col("channel").alias("channel_id"),
+            F.greatest("created_at", "observed_at").alias("most_recent_event_datetime"),
+            F.col("message").alias("most_recent_message_id"),
         )
-        .union(
-            latest_bridged_messages.select(
-                "id",
-                F.col("target_channel").alias("channel_id"),
-                F.col("target_message").alias("message_id"),
-            )
-        )
-        .groupBy("channel_id")
-        .agg(F.max_by("message_id", "id").alias("latest_bridged_message_id"))
         .collect()
     )
 
     logger.debug("Checking each channel with bridges...")
     assert common.client.user is not None
     bot_id = common.client.user.id
-    for bridged_message_row in latest_messages_seen:
+    for most_recent_event in most_recent_events:
         # Check whether a channel's latest message has already been bridged
-        channel_id = int(bridged_message_row.channel_id)
-        latest_bridged_message_id = int(bridged_message_row.latest_bridged_message_id)
+        channel_id = int(most_recent_event.channel_id)
+        most_recent_event_datetime: datetime = (
+            most_recent_event.most_recent_event_datetime
+        )
+        most_recent_message_id: int | None = (
+            int(most_recent_event.most_recent_message_id)
+            if most_recent_event.most_recent_message_id
+            else None
+        )
+        # Ensure the datetime is timezone-aware UTC — some DB drivers
+        # return naive datetimes even for TIMESTAMP columns
+        if most_recent_event_datetime.tzinfo is None:
+            most_recent_event_datetime = most_recent_event_datetime.replace(
+                tzinfo=timezone.utc
+            )
         logger.debug(
-            "Latest message from channel <#%s> had ID %s.",
+            "Most recent event in channel <#%s> happened on %s.",
             channel_id,
-            latest_bridged_message_id,
+            most_recent_event_datetime,
         )
 
         try:
@@ -2951,16 +3010,14 @@ async def bridge_unbridged_messages(*, session: SQLSession):
 
         # There might be unbridged messages, try to find them
         try:
-            latest_bridged_message = channel.get_partial_message(
-                latest_bridged_message_id
-            )
-
             messages_after_latest_bridged = []
             async for message in channel.history(
-                after=latest_bridged_message.created_at,
+                after=most_recent_event_datetime,
                 oldest_first=True,
             ):
-                if message.author.id != bot_id:
+                if (message.author.id != bot_id) and (
+                    message.id != most_recent_message_id
+                ):
                     messages_after_latest_bridged.append(message)
         except discord.Forbidden as e:
             logger.warning(
@@ -2986,9 +3043,6 @@ async def bridge_unbridged_messages(*, session: SQLSession):
             channel_id,
         )
         for message_to_bridge in messages_after_latest_bridged:
-            if message_to_bridge.id == latest_bridged_message_id:
-                continue
-
             try:
                 await on_message(message_to_bridge)
                 num_messages_bridged += 1
@@ -2997,7 +3051,8 @@ async def bridge_unbridged_messages(*, session: SQLSession):
 
         if num_messages_bridged == 0:
             logger.warning(
-                "Failed to bridge unbridged messages from channel <#%s>.", channel_id
+                "Failed to bridge unbridged messages from channel <#%s>.",
+                channel_id,
             )
         elif num_messages_bridged < num_messages_to_bridge:
             logger.warning(

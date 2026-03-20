@@ -1,6 +1,7 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from functools import wraps
 from typing import (
+    TYPE_CHECKING,
     Any,
     Callable,
     Coroutine,
@@ -33,6 +34,9 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from common import settings
 from validations import logger
+
+if TYPE_CHECKING:
+    from sqlalchemy.sql.functions import GenericFunction
 
 T = TypeVar("T", bound=Any)
 P = ParamSpec("P")
@@ -128,6 +132,29 @@ class DBMessageMap(DBBase):
     target_channel: Mapped[str] = mapped_column(String(32), nullable=False)
     target_message_order: Mapped[int] = mapped_column(Integer(), nullable=True)
     webhook: Mapped[str] = mapped_column(String(32), nullable=True)
+
+
+class DBMostRecentEventInChannel(DBBase):
+    """
+    An SQLAlchemy ORM class representing a database table with the most recent event observed in a bridged channel.
+
+    Columns
+    -------
+    - `id (INT)`: The id number of a channel's most recent event, has `PRIMARY KEY` and `AUTO_INCREMENT`.
+    - `channel (VARCHAR(32))`: The ID of the channel or thread the event was observed in.
+    - `message (VARCHAR(32))`: The ID of the most recently sent message.
+    - `observed_at (TIMESTAMP)`: When the event was observed.
+    """
+
+    __tablename__ = "most_recent_event_in_channel"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    channel: Mapped[str] = mapped_column(String(32), nullable=False, unique=True)
+    message: Mapped[str] = mapped_column(String(32), nullable=True)
+    observed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+    )
 
 
 class DBReactionMap(DBBase):
@@ -244,6 +271,7 @@ Table = (
     DBBridge
     | DBWebhook
     | DBMessageMap
+    | DBMostRecentEventInChannel
     | DBReactionMap
     | DBAutoBridgeThreadChannels
     | DBEmoji
@@ -709,6 +737,32 @@ def _sync_columns(connection: Connection):
                 logger.info("Modifying column: %s.%s", table_name, column.name)
                 connection.execute(text(ddl))
 
+        # Sync unique constraints on individual columns
+        existing_unique_columns: set[str] = set()
+        for idx in inspector.get_indexes(table_name):
+            col_names = idx.get("column_names", [])
+            if idx.get("unique") and len(col_names) == 1 and col_names[0]:
+                existing_unique_columns.add(col_names[0])
+
+        for uc in inspector.get_unique_constraints(table_name):
+            col_names = uc.get("column_names", [])
+            if len(col_names) == 1 and col_names[0]:
+                existing_unique_columns.add(col_names[0])
+
+        for column in table.columns:
+            if column.primary_key:
+                continue
+
+            if column.unique and column.name not in existing_unique_columns:
+                logger.info(
+                    "Adding missing unique constraint: %s.%s",
+                    table_name,
+                    column.name,
+                )
+                connection.execute(
+                    text(f"ALTER TABLE {table_name} ADD UNIQUE ({column.name})")
+                )
+
 
 async def create_tables(target_engine: AsyncEngine | None = None):
     """Create all tables represented by the ORM classes, if they haven't already been created.
@@ -729,3 +783,78 @@ async def create_tables(target_engine: AsyncEngine | None = None):
         logger.error("An error occurred while trying to create necessary tables: %s", e)
         raise
     logger.info("All necessary tables are available.")
+
+
+@overload
+async def register_observed_event(
+    channel_id: int,
+    message_id: int | None = None,
+    observed_at: datetime | None = None,
+):
+    """Register an event (such as a message send or bridge creation) in the `most_recent_event_in_channel` table.
+
+    Parameters
+    ----------
+    channel_id : int
+        The ID of the channel in which the event occurred.
+    message_id : int | None, optional
+        The ID of a message that triggered the event, if it was a message. Defaults to None.
+    observed_at : :class:`~datetime.tatetime` | None, optional
+        The UTC datetime when the event occurred. Defaults to None, in which case the current time will be used.
+    """
+    ...
+
+
+@overload
+async def register_observed_event(
+    channel_id: int,
+    message_id: int | None = None,
+    observed_at: datetime | None = None,
+    *,
+    session: SQLSession | None,
+): ...
+
+
+@sql_command
+async def register_observed_event(
+    channel_id: int,
+    message_id: int | None = None,
+    observed_at: "datetime | GenericFunction[datetime] | None" = None,
+    *,
+    session: SQLSession,
+):
+    """Register an event (such as a message send or bridge creation) in the `most_recent_event_in_channel` table.
+
+    Parameters
+    ----------
+    channel_id : int
+        The ID of the channel in which the event occurred.
+    message_id : int | None, optional
+        The ID of a message that triggered the event, if it was a message. Defaults to None.
+    observed_at : :class:`~datetime.tatetime` | None, optional
+        The UTC datetime when the event occurred. Defaults to None, in which case the current time will be used.
+    session : :class:`~sqlalchemy.orm.Session` | None, optional
+        An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
+    """
+    if observed_at is None:
+        observed_at = func.now()
+        now = datetime.now(timezone.utc)
+    else:
+        now = observed_at
+
+    logger.debug(
+        "Registering most recent event in channel <#%s> on %s.",
+        channel_id,
+        now,
+    )
+
+    upsert_new_event = await get_sql_upsert_query(
+        DBMostRecentEventInChannel,
+        indices={"channel"},
+        channel=channel_id,
+        message=message_id,
+        observed_at=observed_at,
+    )
+    await session.execute(upsert_new_event)
+
+    logger.debug("Event registered.")
