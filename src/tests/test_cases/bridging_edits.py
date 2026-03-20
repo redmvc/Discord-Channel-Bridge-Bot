@@ -158,8 +158,6 @@ async def does_not_work_if_bridge_demolished(
 
     # Demolish bridge
     await demolish_bridges(channel_1, channel_and_threads=True)
-
-    # Edit message
     edited_content = "edited message"
     await original_message.edit(content=edited_content)
     _, failure_messages = await expect(
@@ -174,8 +172,7 @@ async def does_not_work_if_bridge_demolished(
     await original_message.edit(content=edited_content)
     _, f = await expect(
         bridged_message,
-        to="not_be_edited",
-        timeout=5,
+        to={"be_edited": True, "equal": edited_content},
     )
     failure_messages += f
 
