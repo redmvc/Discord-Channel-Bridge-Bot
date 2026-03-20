@@ -155,8 +155,6 @@ class Bridges:
         session : :class:`~sqlalchemy.orm.Session` | None, optional
             An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
         """
-        logger.info("Loading bridges from database...")
-
         self._outbound_bridges: dict[int, dict[int, Bridge]] = {}
         self._inbound_bridges: dict[int, dict[int, Bridge]] = {}
         self.webhooks = Webhooks()
