@@ -249,7 +249,6 @@ Table = (
     | DBEmoji
     | DBAppWhitelist
 )
-TableType = TypeVar("TableType", bound=Table)
 
 
 async def get_sql_upsert_query(
