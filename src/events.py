@@ -19,6 +19,7 @@ from database import (
     AsyncDataFrame,
     DBAppWhitelist,
     DBAutoBridgeThreadChannels,
+    DBBridge,
     DBMessageMap,
     DBReactionMap,
     Row,
@@ -2897,13 +2898,20 @@ async def bridge_unbridged_messages(*, session: SQLSession):
     logger.debug("Looking for latest bridged message in each channel.")
 
     latest_bridged_messages = await (
-        AsyncDataFrame(session, DBMessageMap)
+        AsyncDataFrame(session, DBBridge)
+        .select(F.col("source").alias("source_channel"), "created_at")
+        .join(AsyncDataFrame(session, DBMessageMap), "source_channel")
+        .where(F.col("sent_at") >= F.col("created_at"))
+        # The logic above is to ensure that if a bridge is demolished and rebuilt,
+        # we don't try to bridge messages that were sent prior to the rebuilding
         .groupBy("source_channel")
         .agg(F.max_by("source_message", "id").alias("source_message"))
         .collect()
     )
 
     logger.debug("Checking each channel with bridges...")
+    assert common.client.user is not None
+    bot_id = common.client.user.id
     for bridged_message_row in latest_bridged_messages:
         # Check whether a channel's latest message has already been bridged
         channel_id = int(bridged_message_row.source_channel)
@@ -2926,36 +2934,19 @@ async def bridge_unbridged_messages(*, session: SQLSession):
             )
             continue
 
-        messages_with_id_result = await (
-            AsyncDataFrame(session, DBMessageMap)
-            .where(
-                (F.col("source_message") == F.lit(latest_bridged_message_id))
-                | (F.col("target_message") == F.lit(latest_bridged_message_id))
-            )
-            .first()
-        )
-        if messages_with_id_result is not None:
-            # Most recent message in the channel has been bridged
-            logger.debug(
-                "Latest message in channel <#%s> was already bridged.",
-                channel_id,
-            )
-            continue
-
         # There might be unbridged messages, try to find them
-        logger.debug("Looking for messages after the latest bridged message...")
         try:
             latest_bridged_message = channel.get_partial_message(
                 latest_bridged_message_id
             )
 
-            messages_after_latest_bridged = [
-                message
-                async for message in channel.history(
-                    after=latest_bridged_message.created_at,
-                    oldest_first=True,
-                )
-            ]
+            messages_after_latest_bridged = []
+            async for message in channel.history(
+                after=latest_bridged_message.created_at,
+                oldest_first=True,
+            ):
+                if message.author.id != bot_id:
+                    messages_after_latest_bridged.append(message)
         except discord.Forbidden as e:
             logger.warning(
                 "An error occurred when attempting to fetch unbridged messages after a disconnection:\n%s",
@@ -2963,16 +2954,49 @@ async def bridge_unbridged_messages(*, session: SQLSession):
             )
             continue
 
+        num_messages_to_bridge = len(messages_after_latest_bridged)
+        if num_messages_to_bridge == 0:
+            # No messages after latest bridged message
+            logger.debug(
+                "Latest message in channel <#%s> was already bridged.",
+                channel_id,
+            )
+            continue
+
         # Try to bridge them
+        num_messages_bridged = 0
+        logger.debug(
+            "%s new unbridged messages were found in channel <#%s>. Attempting to bridge them...",
+            num_messages_to_bridge,
+            channel_id,
+        )
         for message_to_bridge in messages_after_latest_bridged:
             if message_to_bridge.id == latest_bridged_message_id:
-                break
+                continue
 
-            logger.debug("Bridging message with ID %s.", message_to_bridge.id)
             try:
                 await on_message(message_to_bridge)
+                num_messages_bridged += 1
             except Exception:
-                break
+                continue
+
+        if num_messages_bridged == 0:
+            logger.warning(
+                "Failed to bridge unbridged messages from channel <#%s>.", channel_id
+            )
+        elif num_messages_bridged < num_messages_to_bridge:
+            logger.warning(
+                "Not all unbridged messages in channel <#%s> were successfully bridged: %s / %s messages bridged.",
+                channel_id,
+                num_messages_bridged,
+                num_messages_to_bridge,
+            )
+        else:
+            logger.debug(
+                "Successfull bridged all %s unbridged messages from channel <#%s>.",
+                num_messages_to_bridge,
+                channel_id,
+            )
 
 
 @tasks.loop(hours=1)
