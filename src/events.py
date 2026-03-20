@@ -2298,7 +2298,7 @@ async def bridge_reaction_add(
                     ):
                         reactions_added.append(added_reaction)
                     else:
-                        logger.debug(
+                        logger.error(
                             "Attemtping to bridge %s from message with ID %s somehow failed to generate a valid DB insert entry when bridging to channel with ID %s.",
                             emoji,
                             message_id,
@@ -2355,7 +2355,7 @@ async def bridge_reaction_add(
                 ):
                     reactions_added.append(added_reaction)
                 else:
-                    logger.debug(
+                    logger.error(
                         "Attemtping to bridge %s from message with ID %s somehow failed to generate a valid DB insert entry when bridging to channel with ID %s.",
                         emoji,
                         message_id,
