@@ -13,6 +13,7 @@ from database import (
     DBWebhook,
     get_sql_insert_ignore_duplicate_query,
     get_sql_upsert_query,
+    register_observed_event,
     sql_command,
 )
 from database import functions as F
@@ -398,6 +399,9 @@ class Bridges:
             ),
             target_channel.id,
         )
+
+        # Register the bridge creation event
+        await register_observed_event(source_channel.id, session=session)
 
         # First I create the Bridge in memory
         source_id = common.get_id_from_channel(source)
