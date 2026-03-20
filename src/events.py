@@ -2897,25 +2897,40 @@ async def bridge_unbridged_messages(*, session: SQLSession):
     # Find the latest bridged messages from each channel
     logger.debug("Looking for latest bridged message in each channel.")
 
-    latest_bridged_messages = await (
+    latest_bridged_messages = (
         AsyncDataFrame(session, DBBridge)
         .select(F.col("source").alias("source_channel"), "created_at")
         .join(AsyncDataFrame(session, DBMessageMap), "source_channel")
         .where(F.col("sent_at") >= F.col("created_at"))
         # The logic above is to ensure that if a bridge is demolished and rebuilt,
         # we don't try to bridge messages that were sent prior to the rebuilding
-        .groupBy("source_channel")
-        .agg(F.max_by("source_message", "id").alias("source_message"))
+    )
+
+    latest_messages_seen = await (
+        latest_bridged_messages.select(
+            "id",
+            F.col("source_channel").alias("channel_id"),
+            F.col("source_message").alias("message_id"),
+        )
+        .union(
+            latest_bridged_messages.select(
+                "id",
+                F.col("target_channel").alias("channel_id"),
+                F.col("target_message").alias("message_id"),
+            )
+        )
+        .groupBy("channel_id")
+        .agg(F.max_by("message_id", "id").alias("latest_bridged_message_id"))
         .collect()
     )
 
     logger.debug("Checking each channel with bridges...")
     assert common.client.user is not None
     bot_id = common.client.user.id
-    for bridged_message_row in latest_bridged_messages:
+    for bridged_message_row in latest_messages_seen:
         # Check whether a channel's latest message has already been bridged
-        channel_id = int(bridged_message_row.source_channel)
-        latest_bridged_message_id = int(bridged_message_row.source_message)
+        channel_id = int(bridged_message_row.channel_id)
+        latest_bridged_message_id = int(bridged_message_row.latest_bridged_message_id)
         logger.debug(
             "Latest message from channel <#%s> had ID %s.",
             channel_id,
