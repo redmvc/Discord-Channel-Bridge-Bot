@@ -3,7 +3,7 @@ cryptography==43.0.0
 discord.py==2.5.2
 sphinx==7.4.7
 SQLAlchemy==2.0.31
-typing_extensions==4.12.2
+typing_extensions>=4.15
 git+https://github.com/redmvc/sparkqlalchemy.git#egg=sparkqlalchemy
 # Uncomment one of the lines below and choose a version depending on which async SQL dialect your server will be using and make sure to use the correct one in your settings.json file
 # aiomysql==0.2.0
