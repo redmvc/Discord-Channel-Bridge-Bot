@@ -2979,17 +2979,22 @@ async def bridge_unbridged_messages(*, session: SQLSession):
         most_recent_event_datetime: datetime = (
             most_recent_event.most_recent_event_datetime
         )
-        most_recent_message_id: int | None = (
+        most_recent_message_id = (
             int(most_recent_event.most_recent_message_id)
             if most_recent_event.most_recent_message_id
-            else None
+            else 0
         )
+
         # Ensure the datetime is timezone-aware UTC — some DB drivers
         # return naive datetimes even for TIMESTAMP columns
         if most_recent_event_datetime.tzinfo is None:
             most_recent_event_datetime = most_recent_event_datetime.replace(
                 tzinfo=timezone.utc
             )
+        most_recent_event_datetime = max(
+            most_recent_event_datetime,
+            discord.utils.snowflake_time(most_recent_message_id),
+        )
         logger.debug(
             "Most recent event in channel <#%s> happened on %s.",
             channel_id,
