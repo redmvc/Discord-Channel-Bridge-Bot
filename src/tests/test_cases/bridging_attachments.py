@@ -4,14 +4,25 @@ from unittest.mock import PropertyMock, patch
 
 import discord
 import test_runner
-from test_runner import create_bridge, expect, give_manage_webhook_perms
+from test_runner import (
+    create_bridge,
+    demolish_bridges,
+    expect,
+    give_manage_webhook_perms,
+)
 
 ASSET_PATH = Path(__file__).parent.parent / "assets" / "test_file.txt"
 
 
 class BridgingAttachments(test_runner.TestCase):
     order = 40
-    dependencies = ["CreatingBridges", "DemolishingBridges", "BridgingMessages"]
+    dependencies = [
+        "CreatingBridges",
+        "DemolishingBridges",
+        "BridgingMessages",
+        "BridgingEdits",
+        "BridgingDeletions",
+    ]
 
     def __init__(self):
         super().__init__(test_runner.test_runner)
@@ -209,10 +220,17 @@ async def drops_oversized_attachment(
                 "be_from": bridge_bot,
                 "not_have_attachment": True,
                 "have_embed": {
-                    "whose_description_contains": "could not be sent due to message size limits",
+                    "whose_description_contains": "empty apart from attachments too large to be directly bridged",
                 },
             },
         )
+        # Expect footer message with link to oversized attachment
+        _, f = await expect(
+            "next_message",
+            in_channel=channel_2,
+            to={"contain": "could not be added to it due to message size limits"},
+        )
+        failure_messages += f
 
     return failure_messages
 
@@ -261,11 +279,15 @@ async def drops_when_cumulative_too_large(
                     {"whose_filename_equals": "part2.bin"},
                     {"whose_filename_equals": "part4.bin"},
                 ],
-                "have_embed": {
-                    "whose_description_contains": "could not be sent due to message size limits",
-                },
             },
         )
+        # Expect footer message with link to dropped attachment
+        _, f = await expect(
+            "next_message",
+            in_channel=channel_2,
+            to={"contain": "could not be added to it due to message size limits"},
+        )
+        failure_messages += f
 
     return failure_messages
 
@@ -303,11 +325,244 @@ async def drops_oversized_with_real_large_files(
             "have_attachments": [
                 {"whose_filename_equals": "large1.bin"},
             ],
-            "have_embed": {
-                "whose_description_contains": "could not be sent due to message size limits",
-            },
         },
         timeout=20,
     )
+    # Expect footer message with link to dropped attachment
+    _, f = await expect(
+        "next_message",
+        in_channel=channel_2,
+        to={"contain": "could not be added to it due to message size limits"},
+    )
+    failure_messages += f
+
+    return failure_messages
+
+
+@attachment_bridging_tests.test
+async def sends_footer_for_oversized_with_text(
+    bridge_bot: discord.Client,
+    tester_bot: discord.Client,
+    testing_server: discord.Guild,
+    testing_channels: tuple[
+        discord.TextChannel,
+        discord.TextChannel,
+        discord.TextChannel,
+        discord.TextChannel,
+    ],
+) -> list[str]:
+    await give_manage_webhook_perms(tester_bot, testing_server)
+
+    channel_1 = testing_channels[0]
+    channel_2 = testing_channels[1]
+    await demolish_bridges(channel_1, channel_and_threads=True)
+    await create_bridge(channel_1, channel_2.id)
+
+    # Send message with text + oversized attachment
+    with patch.object(
+        discord.Guild,
+        "filesize_limit",
+        new_callable=PropertyMock,
+        return_value=100,
+    ):
+        await channel_1.send(
+            "hello with big file",
+            file=discord.File(io.BytesIO(b"\x00" * 100), filename="big.bin"),
+        )
+        # Main message should have text but no attachment and no "empty" embed
+        _, failure_messages = await expect(
+            "next_message",
+            in_channel=channel_2,
+            to={
+                "equal": "hello with big file",
+                "be_from": bridge_bot,
+                "not_have_attachment": True,
+            },
+        )
+        # Footer message with link to the oversized attachment
+        _, f = await expect(
+            "next_message",
+            in_channel=channel_2,
+            to={"contain": "could not be added to it due to message size limits"},
+        )
+        failure_messages += f
+
+    return failure_messages
+
+
+@attachment_bridging_tests.test
+async def adds_empty_embed_when_removing_text(
+    bridge_bot: discord.Client,
+    tester_bot: discord.Client,
+    testing_server: discord.Guild,
+    testing_channels: tuple[
+        discord.TextChannel,
+        discord.TextChannel,
+        discord.TextChannel,
+        discord.TextChannel,
+    ],
+) -> list[str]:
+    await give_manage_webhook_perms(tester_bot, testing_server)
+
+    channel_1 = testing_channels[0]
+    channel_2 = testing_channels[1]
+    await demolish_bridges(channel_1, channel_and_threads=True)
+    await create_bridge(channel_1, channel_2.id)
+
+    with patch.object(
+        discord.Guild,
+        "filesize_limit",
+        new_callable=PropertyMock,
+        return_value=100,
+    ):
+        # Send "hello" + oversized attachment
+        original_message = await channel_1.send(
+            "hello",
+            file=discord.File(io.BytesIO(b"\x00" * 100), filename="big.bin"),
+        )
+        bridged_message, failure_messages = await expect(
+            "next_message",
+            in_channel=channel_2,
+            to={"equal": "hello", "be_from": bridge_bot, "not_have_attachment": True},
+        )
+        # Consume the footer message
+        await expect(
+            "next_message",
+            in_channel=channel_2,
+            to={"contain": "could not be added to it due to message size limits"},
+        )
+        if not bridged_message:
+            return failure_messages
+
+    # Edit to remove text
+    await original_message.edit(content="")
+    _, f = await expect(
+        bridged_message,
+        to={
+            "be_edited": True,
+            "equal": "",
+            "have_embed": {
+                "whose_description_contains": "empty apart from attachments too large to be directly bridged",
+            },
+        },
+    )
+    failure_messages += f
+
+    return failure_messages
+
+
+@attachment_bridging_tests.test
+async def removes_empty_embed_when_adding_text(
+    bridge_bot: discord.Client,
+    tester_bot: discord.Client,
+    testing_server: discord.Guild,
+    testing_channels: tuple[
+        discord.TextChannel,
+        discord.TextChannel,
+        discord.TextChannel,
+        discord.TextChannel,
+    ],
+) -> list[str]:
+    await give_manage_webhook_perms(tester_bot, testing_server)
+
+    channel_1 = testing_channels[0]
+    channel_2 = testing_channels[1]
+    await demolish_bridges(channel_1, channel_and_threads=True)
+    await create_bridge(channel_1, channel_2.id)
+
+    with patch.object(
+        discord.Guild,
+        "filesize_limit",
+        new_callable=PropertyMock,
+        return_value=100,
+    ):
+        # Send attachment-only message with oversized attachment
+        original_message = await channel_1.send(
+            file=discord.File(io.BytesIO(b"\x00" * 100), filename="big.bin"),
+        )
+        bridged_message, failure_messages = await expect(
+            "next_message",
+            in_channel=channel_2,
+            to={
+                "be_from": bridge_bot,
+                "not_have_attachment": True,
+                "have_embed": {
+                    "whose_description_contains": "empty apart from attachments too large to be directly bridged",
+                },
+            },
+        )
+        # Consume the footer message
+        await expect(
+            "next_message",
+            in_channel=channel_2,
+            to={"contain": "could not be added to it due to message size limits"},
+        )
+        if not bridged_message:
+            return failure_messages
+
+    # Edit to add text
+    await original_message.edit(content="now has text")
+    _, f = await expect(
+        bridged_message,
+        to={
+            "be_edited": True,
+            "equal": "now has text",
+        },
+    )
+    failure_messages += f
+
+    return failure_messages
+
+
+@attachment_bridging_tests.test
+async def deletes_footer_with_parent(
+    bridge_bot: discord.Client,
+    tester_bot: discord.Client,
+    testing_server: discord.Guild,
+    testing_channels: tuple[
+        discord.TextChannel,
+        discord.TextChannel,
+        discord.TextChannel,
+        discord.TextChannel,
+    ],
+) -> list[str]:
+    await give_manage_webhook_perms(tester_bot, testing_server)
+
+    channel_1 = testing_channels[0]
+    channel_2 = testing_channels[1]
+    await demolish_bridges(channel_1, channel_and_threads=True)
+    await create_bridge(channel_1, channel_2.id)
+
+    with patch.object(
+        discord.Guild,
+        "filesize_limit",
+        new_callable=PropertyMock,
+        return_value=100,
+    ):
+        # Send message with oversized attachment
+        original_message = await channel_1.send(
+            "delete me",
+            file=discord.File(io.BytesIO(b"\x00" * 100), filename="big.bin"),
+        )
+        bridged_message, failure_messages = await expect(
+            "next_message",
+            in_channel=channel_2,
+            to={"equal": "delete me", "be_from": bridge_bot},
+        )
+        footer_message, f = await expect(
+            "next_message",
+            in_channel=channel_2,
+            to={"contain": "could not be added to it due to message size limits"},
+        )
+        failure_messages += f
+        if not (bridged_message and footer_message):
+            return failure_messages
+
+    # Delete original — both bridged message and footer should be deleted
+    await original_message.delete()
+    _, f = await expect(bridged_message, to="be_deleted")
+    failure_messages += f
+    _, f = await expect(footer_message, to="be_deleted")
+    failure_messages += f
 
     return failure_messages
