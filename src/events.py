@@ -766,6 +766,7 @@ async def bridge_message_helper(
                     target_message=bridged_message.id,
                     target_channel=bridged_message.channel_id,
                     forward_header_message=bridged_message.forwarded_header_id,
+                    extra_attachments_footer_message=bridged_message.extra_attachments_footer_id,
                     target_message_order=bridged_message.message_order,
                     webhook=bridged_message.webhook_id,
                 )
@@ -806,6 +807,7 @@ class BridgedMessage(NamedTuple):
     channel_id: int
     webhook_id: int | None
     forwarded_header_id: int | None
+    extra_attachments_footer_id: int | None
 
 
 class ReplyEmbedDict(TypedDict, total=False):
@@ -1056,27 +1058,38 @@ async def _bridge_message_to_target_channel(
     attachments: list["discord.File"] = []
     server_max_message_size = webhook_channel.guild.filesize_limit
     total_attachment_size = 0
-    send_message_too_large_embed = False
+    too_large_attachments: list["discord.Attachment"] = []
+    extra_attachments_message = None
     for attachment in message_attachments:
         if ((attachment_size := attachment.size) >= server_max_message_size) or (
             total_attachment_size + attachment_size >= server_max_message_size
         ):
-            send_message_too_large_embed = True
+            too_large_attachments.append(attachment)
             continue
 
         total_attachment_size += attachment_size
 
         attachments.append(await attachment.to_file(spoiler=attachment.is_spoiler()))
 
-    if send_message_too_large_embed:
-        message_embeds += [
-            discord.Embed.from_dict(
-                {
-                    "type": "rich",
-                    "description": "-# This message had at least one attachment that could not be sent due to message size limits.",
-                }
+    if too_large_attachments:
+        # If there are attachments too large to be directly copied onto the bridged message,
+        # the Bridge Bot itself sends an extra message afterwards with them
+        if (message_content.strip() == "") and (total_attachment_size == 0):
+            message_embeds = [
+                discord.Embed.from_dict(
+                    {
+                        "type": "rich",
+                        "description": "-# This message was empty apart from attachments too large to be directly bridged.",
+                    }
+                )
+            ] + message_embeds
+
+        extra_attachments_message = (
+            "> -# The message above had at least one attachment that could not be added to it due to message size limits:\n> -# - "
+            + "\n> -# - ".join(
+                [attachment.url.split("?")[0] for attachment in too_large_attachments]
             )
-        ]
+        )
 
     target_channel_id = target_channel.id
     webhook_id = webhook.id
@@ -1117,6 +1130,13 @@ async def _bridge_message_to_target_channel(
                 sent_message_ids.append(sent_message.id)
                 people_to_ping = set()
 
+            footer_message_id = None
+            if extra_attachments_message:
+                footer_message_id = (
+                    await target_channel.send(content=extra_attachments_message)
+                ).id
+
+            num_messages_sent = len(sent_message_ids)
             return [
                 BridgedMessage(
                     id=message_id,
@@ -1124,6 +1144,9 @@ async def _bridge_message_to_target_channel(
                     channel_id=target_channel_id,
                     webhook_id=webhook_id,
                     forwarded_header_id=None,
+                    extra_attachments_footer_id=(
+                        None if idx < num_messages_sent - 1 else footer_message_id
+                    ),
                 )
                 for idx, message_id in enumerate(sent_message_ids)
             ]
@@ -1148,6 +1171,7 @@ async def _bridge_message_to_target_channel(
                     channel_id=sent_message.channel.id,
                     webhook_id=sent_message.webhook_id,
                     forwarded_header_id=None,
+                    extra_attachments_footer_id=None,
                 )
             ]
 
@@ -1169,6 +1193,7 @@ async def _bridge_message_to_target_channel(
                 channel_id=bridged_forward.channel.id,
                 webhook_id=bridged_forward.webhook_id,
                 forwarded_header_id=forward_header.id,
+                extra_attachments_footer_id=None,
             )
 
         return [await bridge_forwarded_message()]
@@ -1413,6 +1438,21 @@ async def edit_message_helper(
                 .orderBy("target_message_order")
                 .collect()
             )
+
+            # If the message has oversized attachments (indicated by a footer message)
+            # and the content is now empty, add the "empty apart from attachments" embed
+            has_attachment_footer = any(
+                row.extra_attachments_footer_message for row in bridged_messages
+            )
+            if has_attachment_footer and message_content.strip() == "":
+                channel_specific_embeds = [
+                    discord.Embed.from_dict(
+                        {
+                            "type": "rich",
+                            "description": "-# This message was empty apart from attachments too large to be directly bridged.",
+                        }
+                    )
+                ] + channel_specific_embeds
 
             for message_row in bridged_messages:
                 if not message_row.webhook:
@@ -1967,6 +2007,38 @@ async def delete_message_helper(
                                         e,
                                     )
                                 raise
+
+                        if message_row.extra_attachments_footer_message:
+                            # Message had a footer with extra large attachments
+                            extra_attachments_footer_id = int(
+                                message_row.extra_attachments_footer_message
+                            )
+
+                            logger.debug(
+                                "Message being deleted included a footer message with extra attachments with ID %s. Deleting it...",
+                                extra_attachments_footer_id,
+                            )
+
+                            try:
+                                await bridged_channel.get_partial_message(
+                                    extra_attachments_footer_id
+                                ).delete()
+
+                                logger.debug("Footer message successfully deleted.")
+                            except Exception:
+                                try:
+                                    await (
+                                        await bridged_channel.fetch_message(
+                                            extra_attachments_footer_id
+                                        )
+                                    ).delete()
+
+                                    logger.debug("Footer message successfully deleted.")
+                                except Exception as e:
+                                    logger.warning(
+                                        "Exception occurred when trying to delete footer message: %s",
+                                        e,
+                                    )
                     elif message_row.forward_header_message:
                         # If the message doesn't have a webhook, it's forwarded
                         partial_target_channel = common.client.get_partial_messageable(
