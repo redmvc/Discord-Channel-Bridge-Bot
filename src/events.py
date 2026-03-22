@@ -750,7 +750,8 @@ async def bridge_message_helper(
 
             await register_observed_event(
                 bridged_message.channel_id,
-                observed_at=message_timestamp,
+                bridged_message.id,
+                message_timestamp,
                 session=session,
             )
 
@@ -1360,11 +1361,7 @@ async def edit_message_helper(
         include_webhooks=True,
     )
 
-    await register_observed_event(
-        channel_id,
-        observed_at=discord.utils.snowflake_time(message_id),
-        session=session,
-    )
+    await register_observed_event(channel_id, session=session)
 
     # Find all messages matching this one
     try:
@@ -1502,11 +1499,7 @@ async def edit_message_helper(
                         thread_splat,
                         len(channel_specific_message_content) == 0,
                     )
-                    await register_observed_event(
-                        bridged_channel.id,
-                        observed_at=discord.utils.snowflake_time(target_message_id),
-                        session=session,
-                    )
+                    await register_observed_event(bridged_channel.id, session=session)
 
                     at_least_one_edit = True
                 except discord.HTTPException as e:
@@ -1899,11 +1892,7 @@ async def delete_message_helper(
         include_webhooks=True,
     )
 
-    await register_observed_event(
-        channel_id,
-        observed_at=discord.utils.snowflake_time(message_id),
-        session=session,
-    )
+    await register_observed_event(channel_id, session=session)
 
     # Find all messages matching this one
     try:
@@ -1993,11 +1982,7 @@ async def delete_message_helper(
                         # This should never happen
                         return
 
-                    await register_observed_event(
-                        target_channel_id,
-                        observed_at=discord.utils.snowflake_time(target_message_id),
-                        session=session,
-                    )
+                    await register_observed_event(target_channel_id, session=session)
 
                 await delete_message(
                     message_row,
