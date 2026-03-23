@@ -63,7 +63,6 @@ async def warns_when_original_is_not_bridged(
                 "have_embed": {
                     "not_have_url": True,
                     # "whose_description_contains": "-# The message being replied to has not been bridged or has been deleted."
-                    # TODO: uncomment once async sessions land and the warning text is enabled
                 },
             },
             {
@@ -124,7 +123,6 @@ async def warns_when_bridged_message_was_deleted(
                 "have_embed": {
                     "not_have_url": True,
                     # "whose_description_contains": "-# The message being replied to has not been bridged or has been deleted."
-                    # TODO: uncomment once async sessions land and the warning text is enabled
                 },
             },
             {
