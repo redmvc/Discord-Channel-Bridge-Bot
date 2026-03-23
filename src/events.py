@@ -1076,12 +1076,12 @@ async def bridge_message_to_target_channel(
                     embeds=(
                         list(message_embeds)
                         if (len(message_content) == 0)
-                        else []  # Only attach embeds on the last message
+                        else []  # Only attach embeds to the last message
                     ),
                     files=(
                         attachments
                         if (len(message_content) == 0)
-                        else []  # Only attach files on the last message
+                        else []  # Only attach files to the last message
                     ),
                     wait=True,
                     **thread_splat,
