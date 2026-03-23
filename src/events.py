@@ -695,25 +695,28 @@ async def bridge_message_helper(
                 thread_splat = {"thread": target_channel}
 
             try:
-                bridged_message_list = await bridge_message_to_target_channel(
-                    message,
-                    message_content,
-                    message_attachments,
-                    list(deepcopy(message_embeds)),
-                    deepcopy(people_to_ping),
-                    target_channel,
-                    webhook,
-                    webhook_channel,
-                    message_is_reply,
-                    replied_to_author,
-                    replied_to_content,
-                    bridged_reply_to.get(target_id),
-                    reply_has_ping,
-                    forwarded_message,
-                    forwarded_message_channel_is_nsfw,
-                    thread_splat,
-                    session,
-                )
+                # Lock the channel to preserve message ordering (particularly when doing message forwards)
+                lock = common.channel_lock[target_channel.id]
+                async with lock:
+                    bridged_message_list = await bridge_message_to_target_channel(
+                        message,
+                        message_content,
+                        message_attachments,
+                        list(deepcopy(message_embeds)),
+                        deepcopy(people_to_ping),
+                        target_channel,
+                        webhook,
+                        webhook_channel,
+                        message_is_reply,
+                        replied_to_author,
+                        replied_to_content,
+                        bridged_reply_to.get(target_id),
+                        reply_has_ping,
+                        forwarded_message,
+                        forwarded_message_channel_is_nsfw,
+                        thread_splat,
+                        session,
+                    )
 
                 if bridged_message_list is None:
                     continue
@@ -891,50 +894,6 @@ async def bridge_message_to_target_channel(
         target_channel.id,
     )
 
-    # Lock the channel to preserve message ordering (particularly when doing message forwards)
-    lock = common.channel_lock[target_channel.id]
-    async with lock:
-        return await _bridge_message_to_target_channel(
-            sent_message,
-            message_content,
-            message_attachments,
-            message_embeds,
-            people_to_ping,
-            target_channel,
-            webhook,
-            webhook_channel,
-            message_is_reply,
-            replied_to_author,
-            replied_to_content,
-            bridged_reply_to,
-            reply_has_ping,
-            forwarded_message,
-            forwarded_message_channel_is_nsfw,
-            thread_splat,
-            session,
-        )
-
-
-async def _bridge_message_to_target_channel(
-    sent_message: discord.Message,
-    message_content: str,
-    message_attachments: list[discord.Attachment],
-    message_embeds: list[discord.Embed],
-    people_to_ping: set[int],
-    target_channel: TextChannelOrThread,
-    webhook: discord.Webhook,
-    webhook_channel: discord.TextChannel,
-    message_is_reply: bool,
-    replied_to_author: discord.User | discord.Member | None,
-    replied_to_content: str | None,
-    bridged_reply_to: int | None,
-    reply_has_ping: bool,
-    forwarded_message: discord.Message | None,
-    forwarded_message_channel_is_nsfw: bool,
-    thread_splat: ThreadSplat,
-    session: SQLSession,
-) -> list[BridgedMessage] | None:
-    """Helper function to bridge a message to a channel."""
     # Replace Discord links in the message and embed text
     message_content = await replace_discord_links(
         message_content,
