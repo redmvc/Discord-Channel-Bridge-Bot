@@ -805,6 +805,8 @@ class MessageExpectation(Expectation, total=False):
     not_be_a_forward_of: discord.Message
     be_from: int | discord.User | discord.Member | discord.Client
     not_be_from: int | discord.User | discord.Member | discord.Client
+    be_ephemeral: bool
+    not_be_ephemeral: bool
     have_embed: "EmbedExpectation"
     have_embeds: "list[EmbedExpectation]"
     have_attachment: "AttachmentExpectation"
@@ -927,7 +929,7 @@ async def expect(
     in_channel : int | :class:`~discord.TextChannel` | :class:`~discord.Thread`
         A channel in which a message should be expected, or ID of same.
     to : list[:class:`~MessageExpectation`] | :class:`~MessageExpectation`
-        A list of things to expect of that message. The valid expectations are: "contain", "not_contain", "equal", "not_equal", "be_a_reply_to", "not_be_a_reply_to", "be_a_forward_of", "not_be_a_forward_of", "be_from", "not_be_from", "have_embed", "have_embeds", "have_attachment", "have_attachments", and "not_have_attachment".
+        A list of things to expect of that message. The valid expectations are: "contain", "not_contain", "equal", "not_equal", "be_a_reply_to", "not_be_a_reply_to", "be_a_forward_of", "not_be_a_forward_of", "be_from", "not_be_from", "be_ephemeral", "not_be_ephemeral", "have_embed", "have_embeds", "have_attachment", "have_attachments", and "not_have_attachment".
     timeout : float | int, optional
         How long to wait, in seconds, for the message to arrive. If set to less than 1, will be set to 1. Defaults to 10.
 
@@ -943,7 +945,11 @@ async def expect(
     obj: discord.Message,
     *,
     in_channel: int | discord.TextChannel | discord.Thread | None = None,
-    to: list[ExistingMessageExpectation] | ExistingMessageExpectation,
+    to: (
+        list[ExistingMessageExpectation]
+        | ExistingMessageExpectation
+        | Literal["be_ephemeral", "not_be_ephemeral"]
+    ),
     timeout: float | int = 10,
 ) -> tuple[discord.Message | None, list[str]]:
     """Check that a given list of expectations is true of a message, then return a tuple whose first element is the message and whose second element is a list of all the failing tests.
@@ -957,8 +963,8 @@ async def expect(
     obj : :class:`~discord.Message`
     in_channel : int | :class:`~discord.TextChannel` | :class:`~discord.Thread` | None, optional
         A channel in which the message should be expected. Equivalent to setting the "be_in_channel" expectation in `to`.
-    to : list[:class:`~MessageExpectation`] | :class:`~MessageExpectation`
-        A list of things to expect of that message. The valid expectations are: "contain", "not_contain", "equal", "not_equal", "be_a_reply_to", "not_be_a_reply_to", "be_a_forward_of", "not_be_a_forward_of", "be_from", "not_be_from", "have_embed", "have_embeds", "have_attachment", "have_attachments", "not_have_attachment", "be_in_channel", "be_edited", "not_be_edited", "be_deleted", "not_be_deleted", "get_reaction", "still_have_reaction", "have_no_new_reaction", and "have_reaction_removed".
+    to : list[:class:`~MessageExpectation`] | :class:`~MessageExpectation` | Literal["be_ephemeral", "not_be_ephemeral"]
+        A list of things to expect of that message. The valid expectations are: "contain", "not_contain", "equal", "not_equal", "be_a_reply_to", "not_be_a_reply_to", "be_a_forward_of", "not_be_a_forward_of", "be_from", "not_be_from", "be_ephemeral", "not_be_ephemeral", "have_embed", "have_embeds", "have_attachment", "have_attachments", "not_have_attachment", "be_in_channel", "be_edited", "not_be_edited", "be_deleted", "not_be_deleted", "get_reaction", "still_have_reaction", "have_no_new_reaction", and "have_reaction_removed".
     timeout : float | int, optional
         How long to wait for an edit event when `be_edited`, `not_be_edited`, `be_deleted`, or `not_be_deleted` is set. Defaults to 10.
 
@@ -986,7 +992,7 @@ async def expect(
     Parameters
     ----------
     obj : :class:`~discord.Message`
-    to : Literal["not_be_edited"]
+    to : Literal["not_be_edited", "be_deleted", "not_be_deleted", "have_no_new_reaction"]
     timeout : float | int, optional
         How long to wait for an edit, deletion, or reaction add event to happen before declaring it hasn't happened. Defaults to 10.
 
@@ -1054,6 +1060,8 @@ async def expect(
         Sequence[Expectation]
         | Expectation
         | Literal[
+            "be_ephemeral",
+            "not_be_ephemeral",
             "exist",
             "not_exist",
             "not_be_edited",
@@ -1076,7 +1084,7 @@ async def expect(
         A channel in which that object should be expected, or ID of same. Defaults to None.
     with_name : str | None, optional
         The name the object should have. Defaults to None.
-    to : Sequence[:class:`~Expectation`] | :class:`~Expectation` | Literal["exist", "not_exist", "not_be_edited", "be_deleted", "not_be_deleted", "have_no_new_reaction"] | None, optional
+    to : Sequence[:class:`~Expectation`] | :class:`~Expectation` | Literal["be_ephemeral", "not_be_ephemeral", "exist", "not_exist", "not_be_edited", "be_deleted", "not_be_deleted", "have_no_new_reaction"] | None, optional
         A list of things to expect of that object. Defaults to None.
     timeout : float | int, optional
         How long to wait, in seconds, for the expected event to occur. If set to less than 1, will be set to 1. Defaults to 10.
@@ -1095,6 +1103,8 @@ async def expect(
     elif isinstance(to, str) and (
         to
         in (
+            "be_ephemeral",
+            "not_be_ephemeral",
             "not_be_edited",
             "be_deleted",
             "not_be_deleted",
@@ -1685,6 +1695,21 @@ async def expect(
                     failure_msg = f"{log_message} but it was not found (reactions present: {present})"
                     failure_messages.append(failure_msg)
                     log_expectation(failure_msg, "failure")
+        elif expectation == "be_ephemeral":
+            ephemeral_marker = "-# This interaction response was ephemeral."
+            has_marker = any(
+                embed.description and (ephemeral_marker in embed.description)
+                for embed in obj.embeds
+            )
+            log_message = (
+                f"expected message to{' not' if negation else ''} be ephemeral"
+            )
+            if has_marker != negation:
+                log_expectation(log_message, "success")
+            else:
+                log_message += f" but it was{'' if negation else "n't"}"
+                failure_messages.append(log_message)
+                log_expectation(log_message, "failure")
 
         if not isinstance(value, str):
             continue
@@ -1727,8 +1752,6 @@ async def expect(
                 else:
                     failure_messages.append(message)
                     log_expectation(message, "failure")
-
-        # TODO: be ephemeral
 
     return (obj, failure_messages)
 
