@@ -521,6 +521,8 @@ def sql_command(  # pyright: ignore[reportInconsistentOverload]
                             result = await func(*args, **kwargs)
                 else:
                     result = await func(*args, **kwargs)
+            except Exception:
+                raise
             except BaseException as e:
                 logger.error(
                     "An error occurred during database operation in %s: %s",
