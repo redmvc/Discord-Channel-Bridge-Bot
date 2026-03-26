@@ -175,7 +175,7 @@ async def setup_bot(*, session: SQLSession = _MISSING_SESSION):
             }
         )
         logger.info("Auto-thread-bridging channels loaded.")
-    except Exception as e:
+    except BaseException as e:
         await common.client.close()
         logger.error("An error occurred when performing bot startup procedures: %s", e)
         raise
