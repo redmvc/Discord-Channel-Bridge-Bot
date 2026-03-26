@@ -165,12 +165,10 @@ async def setup_bot(*, session: SQLSession = _MISSING_SESSION):
             session,
             DBAutoBridgeThreadChannels,
         ).collect()
-        common.auto_bridge_thread_channels = common.auto_bridge_thread_channels.union(
-            {
-                int(auto_bridge_thread_channel.channel)
-                for auto_bridge_thread_channel in auto_thread_query_result
-            }
-        )
+        common.auto_bridge_thread_channels = common.auto_bridge_thread_channels | {
+            int(auto_bridge_thread_channel.channel)
+            for auto_bridge_thread_channel in auto_thread_query_result
+        }
         logger.info("Auto-thread-bridging channels loaded.")
     except BaseException as e:
         await common.client.close()
@@ -1573,9 +1571,10 @@ async def replace_discord_links(
     if isinstance(channel, discord.Thread):
         parent_channel_id = parent_channel.id
         channel_ids_to_check.add(str(parent_channel_id))
-        bridged_channel_ids = bridged_channel_ids.union(
-            await bridges.get_reachable_channels(parent_channel_id, "outbound"),
-            await bridges.get_reachable_channels(parent_channel_id, "inbound"),
+        bridged_channel_ids = (
+            bridged_channel_ids
+            | (await bridges.get_reachable_channels(parent_channel_id, "outbound"))
+            | (await bridges.get_reachable_channels(parent_channel_id, "inbound"))
         )
 
     # Get the channel IDs of all threads of the channel
@@ -1585,9 +1584,10 @@ async def replace_discord_links(
             continue
 
         channel_ids_to_check.add(str(thread_id))
-        bridged_channel_ids = bridged_channel_ids.union(
-            await bridges.get_reachable_channels(thread_id, "outbound"),
-            await bridges.get_reachable_channels(thread_id, "inbound"),
+        bridged_channel_ids = (
+            bridged_channel_ids
+            | (await bridges.get_reachable_channels(thread_id, "outbound"))
+            | (await bridges.get_reachable_channels(thread_id, "inbound"))
         )
 
     # Now try to find equivalent links if the messages being linked to are bridged

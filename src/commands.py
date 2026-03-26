@@ -1132,7 +1132,7 @@ async def demolish_all_bridges(
                 else:
                     paired_channels.add(target_id)
 
-        channels_affected = channels_affected.union(paired_channels)
+        channels_affected = channels_affected | paired_channels
 
         await bridges.demolish_bridges(
             source_channel=channel_to_demolish_id,
@@ -1262,9 +1262,8 @@ async def whitelist(interaction: discord.Interaction, apps: str):
                 )
 
             common.per_channel_whitelist[channel.id] = (
-                common.per_channel_whitelist[channel.id].union(apps_to_add)
-                - apps_to_remove
-            )
+                common.per_channel_whitelist[channel.id] | apps_to_add
+            ) - apps_to_remove
             if len(common.per_channel_whitelist[channel.id]) == 0:
                 del common.per_channel_whitelist[channel.id]
 

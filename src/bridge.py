@@ -261,7 +261,7 @@ class Bridges:
                     raise e
 
         # Any target channels that don't have valid source channels attached to them should be deleted
-        invalid_channel_ids = invalid_channel_ids.union(
+        invalid_channel_ids = invalid_channel_ids | (
             all_target_channels - targets_with_sources
         )
 
@@ -273,16 +273,14 @@ class Bridges:
                 (channel_id := int(channel_id_str))
                 and (await self.webhooks.get_webhook(channel_id))
             )
-        }.union(
-            {
-                channel_id
-                for channel_id, webhook_id in self.webhooks.webhook_by_channel.items()
-                if (
-                    (str(channel_id) not in targets_with_sources)
-                    or (str(webhook_id) in invalid_webhook_ids)
-                )
-            }
-        )
+        } | {
+            channel_id
+            for channel_id, webhook_id in self.webhooks.webhook_by_channel.items()
+            if (
+                (str(channel_id) not in targets_with_sources)
+                or (str(webhook_id) in invalid_webhook_ids)
+            )
+        }
         for channel_id in channel_ids_with_webhooks_to_delete:
             await self.webhooks.delete_channel(channel_id)
 
@@ -293,9 +291,9 @@ class Bridges:
             or (len(invalid_webhook_ids) > 0)
         ):
             # First fetch the full list of channel IDs to delete
-            channel_ids_to_delete = invalid_channel_ids.union(
-                {str(channel_id) for channel_id in channel_ids_with_webhooks_to_delete}
-            )
+            channel_ids_to_delete = invalid_channel_ids | {
+                str(channel_id) for channel_id in channel_ids_with_webhooks_to_delete
+            }
 
             if len(channel_ids_to_delete) > 0:
                 await (
@@ -1016,12 +1014,12 @@ class Bridges:
                     for channel_id, bridge in bridges_to_check.items()
                 } | reachable_channel_ids_dict
             else:
-                reachable_channel_ids_set = reachable_channel_ids_set.union(
-                    newly_reachable_ids
+                reachable_channel_ids_set = (
+                    reachable_channel_ids_set | newly_reachable_ids
                 )
             channel_ids_to_check = (
-                channel_ids_to_check.union(newly_reachable_ids) - channel_ids_checked
-            )
+                channel_ids_to_check | newly_reachable_ids
+            ) - channel_ids_checked
 
         if not include_starting:
             if include_webhooks:
