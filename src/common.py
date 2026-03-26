@@ -4,7 +4,7 @@ import io
 import json
 from collections import defaultdict
 from hashlib import md5
-from typing import TYPE_CHECKING, Any, AsyncIterator, Callable, TypeVar, overload
+from typing import TYPE_CHECKING, Any, AsyncIterator, TypeVar, overload
 
 import aiohttp
 import discord
@@ -1291,49 +1291,3 @@ async def wait_until_ready(
         logger.warning("Taking forever to get ready.")
         return False
     return True
-
-
-async def run_retries(
-    fun: Callable[..., T],
-    num_retries: int,
-    time_to_wait: float | int = 5,
-    exceptions_to_catch: type | tuple[type] | None = None,
-) -> T:
-    """Run a function and retry it every time an exception occurs up to a certain maximum number of tries. If it succeeds, return its result; otherwise, raise the error.
-
-    Parameters
-    ----------
-    fun : Callable[..., T]
-        The function to run.
-    num_retries : int, optional
-        The number of times to try the function again. If set to 0 or less, will be set to 1.
-    time_to_wait : float | int, optional
-        Time in seconds to wait between retries; only used if `num_retries` is greater than 1. If set to 0 or less, will set `num_retries` to 1. Defaults to 5.
-    exceptions_to_catch : type | tuple[type] | None, optional
-        An exception type or a list of exception types to catch. Defaults to None, in which case all types will be caught.
-
-    Returns
-    -------
-    T
-    """
-    if num_retries < 1:
-        num_retries = 1
-    elif num_retries > 1 and time_to_wait <= 0:
-        num_retries = 1
-
-    for retry in range(num_retries):
-        try:
-            return fun()
-        except Exception as e:
-            if (retry < num_retries - 1) and (
-                (not exceptions_to_catch) or isinstance(e, exceptions_to_catch)
-            ):
-                await asyncio.sleep(time_to_wait)
-            else:
-                raise e
-
-    err = ValueError(
-        f"Error in function {inspect.stack()[1][3]}(): couldn't run function {fun.__name__}() in {num_retries} retries."
-    )
-    logger.error(err)
-    raise err
