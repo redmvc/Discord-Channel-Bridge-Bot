@@ -29,6 +29,7 @@ if TYPE_CHECKING:
 rate_limiter = AsyncLimiter(1, 10)
 
 webhook_permissions_role: discord.Role | None = None
+pin_permissions_role: discord.Role | None = None
 
 test_function_type = Callable[
     [
@@ -154,26 +155,6 @@ async def give_manage_webhook_perms(
     await _give_or_remove_manage_webhook_perms(tester_bot, testing_server, give=True)
 
 
-async def set_nsfw(channels_to_set: dict[discord.TextChannel | int, bool]):
-    """Set some channels to NSFW (or SFW).
-
-    Parameters
-    ----------
-    channels_to_set : dict[:class:`~discord.TextChannel`  |  int, bool]
-        A dictionary whose keys must be either channel IDs or text channels from the perspective of the bridge bot and whose values must be True if we want to set a channel to NSFW and False if we want to set it to SFW.
-    """
-    async_edits = []
-    for key, value in channels_to_set.items():
-        if isinstance(key, int):
-            channel = await common.get_channel_parent(key)
-        else:
-            channel = key
-
-        async_edits.append(channel.edit(nsfw=value))
-
-    await asyncio.gather(*async_edits)
-
-
 async def remove_manage_webhook_perms(
     tester_bot: discord.Client,
     testing_server: discord.Guild,
@@ -208,17 +189,110 @@ async def _give_or_remove_manage_webhook_perms(
         Whether to give or remove Manage Webhook permissions.
     """
     assert tester_bot.user
+
     tester_bot_member = await common.get_server_member(
         testing_server,
         tester_bot.user.id,
     )
+    if not tester_bot_member:
+        return
 
     global webhook_permissions_role
-    if tester_bot_member and webhook_permissions_role:
-        if give and (webhook_permissions_role not in tester_bot_member.roles):
-            await tester_bot_member.add_roles(webhook_permissions_role)
-        elif not give and (webhook_permissions_role in tester_bot_member.roles):
-            await tester_bot_member.remove_roles(webhook_permissions_role)
+    if not webhook_permissions_role:
+        return
+
+    if give and (webhook_permissions_role not in tester_bot_member.roles):
+        await tester_bot_member.add_roles(webhook_permissions_role)
+    elif not give and (webhook_permissions_role in tester_bot_member.roles):
+        await tester_bot_member.remove_roles(webhook_permissions_role)
+
+
+async def give_pin_perms(
+    bot: discord.Client,
+    testing_server: discord.Guild,
+):
+    """Give a bot Pin Messages permissions in a server.
+
+    Parameters
+    ----------
+    bot : :class:`~discord.Client`
+        The bot client to give pin permissions to.
+    testing_server : :class:`~discord.Guild`
+        The testing server from the perspective of the bridge bot client.
+    """
+    await _give_or_remove_pin_perms(bot, testing_server, give=True)
+
+
+async def remove_pin_perms(
+    bot: discord.Client,
+    testing_server: discord.Guild,
+):
+    """Remove Pin Messages permissions from a bot in a server.
+
+    Parameters
+    ----------
+    bot : :class:`~discord.Client`
+        The bot client to remove pin permissions from.
+    testing_server : :class:`~discord.Guild`
+        The testing server from the perspective of the bridge bot client.
+    """
+    await _give_or_remove_pin_perms(bot, testing_server, give=False)
+
+
+async def _give_or_remove_pin_perms(
+    bot: discord.Client,
+    testing_server: discord.Guild,
+    *,
+    give: bool,
+):
+    """Give or remove Pin Messages permissions for a bot in the testing server.
+
+    Parameters
+    ----------
+    bot : :class:`~discord.Client`
+        The bot client.
+    testing_server : :class:`~discord.Guild`
+        The testing server from the perspective of the bridge bot client.
+    give : bool
+        Whether to give or remove Pin Messages permissions.
+    """
+    assert bot.user
+
+    bot_member = await common.get_server_member(
+        testing_server,
+        bot.user.id,
+    )
+    if not bot_member:
+        return
+
+    global pin_permissions_role
+    if not pin_permissions_role:
+        return
+
+    if give and (pin_permissions_role not in bot_member.roles):
+        await bot_member.add_roles(pin_permissions_role)
+    elif not give and (pin_permissions_role in bot_member.roles):
+        await bot_member.remove_roles(pin_permissions_role)
+
+
+async def set_nsfw(channels_to_set: dict[discord.TextChannel | int, bool]):
+    """Set some channels to NSFW (or SFW).
+
+    Parameters
+    ----------
+    channels_to_set : dict[:class:`~discord.TextChannel`  |  int, bool]
+        A dictionary whose keys must be either channel IDs or text channels from the perspective of the bridge bot and whose values must be True if we want to set a channel to NSFW and False if we want to set it to SFW.
+    """
+    async_edits = []
+    for key, value in channels_to_set.items():
+        if isinstance(key, int):
+            channel = await common.get_channel_parent(key)
+        else:
+            channel = key
+
+        async_edits.append(channel.edit(nsfw=value))
+
+    await asyncio.gather(*async_edits)
 
 
 @overload
@@ -560,14 +634,18 @@ class TestRunner:
 
             # Clean up any leftover roles from interrupted previous runs
             for role in testing_server.roles:
-                if role.name == "webhook_permissions_role":
+                if role.name in ("webhook_permissions_role", "pin_permissions_role"):
                     await role.delete()
 
-            # Create a role in the testing server with the necessary permissions
-            global webhook_permissions_role
+            # Create roles in the testing server with the necessary permissions
+            global webhook_permissions_role, pin_permissions_role
             webhook_permissions_role = await testing_server.create_role(
                 name="webhook_permissions_role",
                 permissions=discord.Permissions(manage_webhooks=True),
+            )
+            pin_permissions_role = await testing_server.create_role(
+                name="pin_permissions_role",
+                permissions=discord.Permissions(pin_messages=True),
             )
 
             # Delete all channels in the server
@@ -734,6 +812,9 @@ class TestRunner:
             if webhook_permissions_role:
                 await webhook_permissions_role.delete()
                 webhook_permissions_role = None
+            if pin_permissions_role:
+                await pin_permissions_role.delete()
+                pin_permissions_role = None
 
 
 class TestCase(ABC):
@@ -827,6 +908,8 @@ class ExistingMessageExpectation(MessageExpectation, total=False):
     not_be_edited: bool
     be_deleted: bool
     not_be_deleted: bool
+    be_pinned: bool
+    not_be_pinned: bool
 
 
 class EmbedExpectation(TypedDict, total=False):
@@ -987,17 +1070,19 @@ async def expect(
         'be_deleted',
         'not_be_deleted',
         'have_no_new_reaction',
+        'be_pinned',
+        'not_be_pinned',
     ]""",
     timeout: float | int = 10,
 ) -> tuple[None, list[str]]:
-    """Check that a given message was not edited, was deleted, was not deleted, or had no new reaction within `timeout` seconds.
+    """Check that a given message was not edited, was (not) deleted, had no new reaction, or was (not) pinned within `timeout` seconds.
 
     Parameters
     ----------
     obj : :class:`~discord.Message`
-    to : Literal["not_be_edited", "be_deleted", "not_be_deleted", "have_no_new_reaction"]
+    to : Literal["not_be_edited", "be_deleted", "not_be_deleted", "have_no_new_reaction", "be_pinned", "not_be_pinned"]
     timeout : float | int, optional
-        How long to wait for an edit, deletion, or reaction add event to happen before declaring it hasn't happened. Defaults to 10.
+        How long to wait for an edit, deletion, reaction add, or pin event to happen before declaring it hasn't happened. Defaults to 10.
 
     Returns
     -------
@@ -1073,6 +1158,8 @@ async def expect(
             'be_deleted',
             'not_be_deleted',
             'have_no_new_reaction',
+            'be_pinned',
+            'not_be_pinned',
         ]
         | None
     )""" = None,
@@ -1089,7 +1176,7 @@ async def expect(
         A channel in which that object should be expected, or ID of same. Defaults to None.
     with_name : str | None, optional
         The name the object should have. Defaults to None.
-    to : Sequence[:class:`~Expectation`] | :class:`~Expectation` | Literal["be_ephemeral", "not_be_ephemeral", "exist", "not_exist", "not_be_edited", "be_deleted", "not_be_deleted", "have_no_new_reaction"] | None, optional
+    to : Sequence[:class:`~Expectation`] | :class:`~Expectation` | Literal["be_ephemeral", "not_be_ephemeral", "exist", "not_exist", "not_be_edited", "be_deleted", "not_be_deleted", "have_no_new_reaction", "be_pinned", "not_be_pinned"] | None, optional
         A list of things to expect of that object. Defaults to None.
     timeout : float | int, optional
         How long to wait, in seconds, for the expected event to occur. If set to less than 1, will be set to 1. Defaults to 10.
@@ -1114,6 +1201,8 @@ async def expect(
             "be_deleted",
             "not_be_deleted",
             "have_no_new_reaction",
+            "be_pinned",
+            "not_be_pinned",
         )
     ):
         to = [cast(ExistingMessageExpectation, {to: True})]
@@ -1606,6 +1695,28 @@ async def expect(
                 log_message = f"{log_message} but reaction {f'with ID {payload.emoji.id}' if payload.emoji.id else payload.emoji} was added"
                 failure_messages.append(log_message)
                 log_expectation(log_message, "failure")
+        elif expectation == "be_pinned":
+            log_message = f"expected message {message_id} to{' not' if negation else ''} be pinned"
+
+            # Poll the message's .pinned attribute with a timeout
+            deadline = asyncio.get_event_loop().time() + timeout
+            expected_pinned = not negation
+            is_pinned = not expected_pinned  # opposite so the loop runs at least once
+            while asyncio.get_event_loop().time() < deadline:
+                fetched = await obj.channel.fetch_message(message_id)
+                is_pinned = fetched.pinned
+                if is_pinned == expected_pinned:
+                    break
+                await asyncio.sleep(0.5)
+
+            if is_pinned == expected_pinned:
+                log_expectation(log_message, "success")
+            else:
+                failure_msg = (
+                    f"{log_message} but it was{"n't" if expected_pinned else ''}"
+                )
+                failure_messages.append(failure_msg)
+                log_expectation(failure_msg, "failure")
         elif expectation in (
             "get_reaction",
             "have_reaction_removed",
