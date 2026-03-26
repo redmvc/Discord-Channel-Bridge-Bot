@@ -166,9 +166,6 @@ async def setup_bot(*, session: SQLSession):
                     inaccessible_channels.add(channel_id)
                     continue
 
-            if not common.per_channel_whitelist.get(channel_id):
-                common.per_channel_whitelist[channel_id] = set()
-
             common.per_channel_whitelist[channel_id].add(
                 int(whitelisted_app.application)
             )
@@ -353,9 +350,9 @@ async def on_message(message: discord.Message):
             (
                 not (
                     (
-                        local_whitelist := common.per_channel_whitelist.get(
+                        local_whitelist := common.per_channel_whitelist[
                             message.channel.id
-                        )
+                        ]
                     )
                     and (application_id in local_whitelist)
                 )

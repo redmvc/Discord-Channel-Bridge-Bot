@@ -1370,9 +1370,7 @@ async def whitelist(interaction: discord.Interaction, apps: str):
         await interaction.response.send_message("❌ App IDs not valid.", ephemeral=True)
         return
 
-    channel_whitelist: set[int] | None = common.per_channel_whitelist.get(channel.id)
-    if not channel_whitelist:
-        channel_whitelist = set()
+    channel_whitelist = common.per_channel_whitelist[channel.id]
 
     outbound_bridges = bridges.get_outbound_bridges(channel)
     if (not outbound_bridges) and (
@@ -1441,8 +1439,6 @@ async def whitelist(interaction: discord.Interaction, apps: str):
                     f"✅ Removed the following app(s) from this channel's whitelist: {apps_to_remove_str}."
                 )
 
-            if not common.per_channel_whitelist.get(channel.id):
-                common.per_channel_whitelist[channel.id] = set()
             common.per_channel_whitelist[channel.id] = (
                 common.per_channel_whitelist[channel.id].union(apps_to_add)
                 - apps_to_remove

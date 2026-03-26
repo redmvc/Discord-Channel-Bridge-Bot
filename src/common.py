@@ -174,7 +174,7 @@ emoji_server: discord.Guild | None = None
 test_app: discord.User | None = None
 
 # Dictionary listing all apps whitelisted per channel
-per_channel_whitelist: dict[int, set[int]] = {}
+per_channel_whitelist: dict[int, set[int]] = defaultdict(set)
 
 # Helper to prevent us from being rate limited
 rate_limiter = AsyncLimiter(1, 10)
