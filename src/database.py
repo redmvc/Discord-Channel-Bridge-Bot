@@ -45,16 +45,14 @@ P = ParamSpec("P")
 _MISSING_SESSION: SQLSession = cast("SQLSession", None)
 
 
+# -----
+# SQL ORM classes
 class DBBase(DeclarativeBase):
     """
     This class serves as a base for all tables used by the bot. It should not be referenced directly, as its only purpose is running the create_all() command at the end of this file.
     """
 
     pass
-
-
-class AsyncDFBase(AsyncDataFrame):
-    db_base: type["DBBases"]
 
 
 class _DBBridge(DBBase):
@@ -87,13 +85,6 @@ class _DBBridge(DBBase):
     target: Mapped[str] = mapped_column(String(32), nullable=False)
 
 
-class DBBridge(AsyncDFBase):
-    db_base = _DBBridge
-
-    def __init__(self, session: SQLSession):
-        super().__init__(session, _DBBridge)
-
-
 class _DBWebhook(DBBase):
     """
     An SQLAlchemy ORM class representing a database table tracking webhooks managed by the bot in each channel.
@@ -113,13 +104,6 @@ class _DBWebhook(DBBase):
         DateTime(timezone=True),
         server_default=func.now(),
     )
-
-
-class DBWebhook(AsyncDFBase):
-    db_base = _DBWebhook
-
-    def __init__(self, session: SQLSession):
-        super().__init__(session, _DBWebhook)
 
 
 class _DBMessageMap(DBBase):
@@ -160,13 +144,6 @@ class _DBMessageMap(DBBase):
     webhook: Mapped[str] = mapped_column(String(32), nullable=True)
 
 
-class DBMessageMap(AsyncDFBase):
-    db_base = _DBMessageMap
-
-    def __init__(self, session: SQLSession):
-        super().__init__(session, _DBMessageMap)
-
-
 class _DBMostRecentEventInChannel(DBBase):
     """
     An SQLAlchemy ORM class representing a database table with the most recent event observed in a bridged channel.
@@ -188,13 +165,6 @@ class _DBMostRecentEventInChannel(DBBase):
         DateTime(timezone=True),
         server_default=func.now(),
     )
-
-
-class DBMostRecentEventInChannel(AsyncDFBase):
-    db_base = _DBMostRecentEventInChannel
-
-    def __init__(self, session: SQLSession):
-        super().__init__(session, _DBMostRecentEventInChannel)
 
 
 class _DBReactionMap(DBBase):
@@ -242,13 +212,6 @@ class _DBReactionMap(DBBase):
     target_emoji_name: Mapped[str] = mapped_column(String(32), nullable=True)
 
 
-class DBReactionMap(AsyncDFBase):
-    db_base = _DBReactionMap
-
-    def __init__(self, session: SQLSession):
-        super().__init__(session, _DBReactionMap)
-
-
 class _DBAutoBridgeThreadChannels(DBBase):
     """
     An SQLAlchemy ORM class representing a database table listing all channels that will automatically bridge newly-created threads.
@@ -263,13 +226,6 @@ class _DBAutoBridgeThreadChannels(DBBase):
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     channel: Mapped[str] = mapped_column(String(32), nullable=False)
-
-
-class DBAutoBridgeThreadChannels(AsyncDFBase):
-    db_base = _DBAutoBridgeThreadChannels
-
-    def __init__(self, session: SQLSession):
-        super().__init__(session, _DBAutoBridgeThreadChannels)
 
 
 class _DBEmoji(DBBase):
@@ -294,13 +250,6 @@ class _DBEmoji(DBBase):
     animated: Mapped[bool] = mapped_column(Boolean, nullable=True)
     image_hash: Mapped[str] = mapped_column(String(32), nullable=True)
     accessible: Mapped[bool] = mapped_column(Boolean, nullable=False)
-
-
-class DBEmoji(AsyncDFBase):
-    db_base = _DBEmoji
-
-    def __init__(self, session: SQLSession):
-        super().__init__(session, _DBEmoji)
 
 
 class _DBAppWhitelist(DBBase):
@@ -328,6 +277,70 @@ class _DBAppWhitelist(DBBase):
     application: Mapped[str] = mapped_column(String(32), nullable=False)
 
 
+# -----
+# Async DataFrames
+class AsyncDFBase(AsyncDataFrame):
+    db_base: type[
+        _DBBridge
+        | _DBWebhook
+        | _DBMessageMap
+        | _DBMostRecentEventInChannel
+        | _DBReactionMap
+        | _DBAutoBridgeThreadChannels
+        | _DBEmoji
+        | _DBAppWhitelist
+    ]
+
+
+class DBBridge(AsyncDFBase):
+    db_base = _DBBridge
+
+    def __init__(self, session: SQLSession):
+        super().__init__(session, _DBBridge)
+
+
+class DBWebhook(AsyncDFBase):
+    db_base = _DBWebhook
+
+    def __init__(self, session: SQLSession):
+        super().__init__(session, _DBWebhook)
+
+
+class DBMessageMap(AsyncDFBase):
+    db_base = _DBMessageMap
+
+    def __init__(self, session: SQLSession):
+        super().__init__(session, _DBMessageMap)
+
+
+class DBMostRecentEventInChannel(AsyncDFBase):
+    db_base = _DBMostRecentEventInChannel
+
+    def __init__(self, session: SQLSession):
+        super().__init__(session, _DBMostRecentEventInChannel)
+
+
+class DBReactionMap(AsyncDFBase):
+    db_base = _DBReactionMap
+
+    def __init__(self, session: SQLSession):
+        super().__init__(session, _DBReactionMap)
+
+
+class DBAutoBridgeThreadChannels(AsyncDFBase):
+    db_base = _DBAutoBridgeThreadChannels
+
+    def __init__(self, session: SQLSession):
+        super().__init__(session, _DBAutoBridgeThreadChannels)
+
+
+class DBEmoji(AsyncDFBase):
+    db_base = _DBEmoji
+
+    def __init__(self, session: SQLSession):
+        super().__init__(session, _DBEmoji)
+
+
 class DBAppWhitelist(AsyncDFBase):
     db_base = _DBAppWhitelist
 
@@ -335,30 +348,10 @@ class DBAppWhitelist(AsyncDFBase):
         super().__init__(session, _DBAppWhitelist)
 
 
-DBBases = (
-    _DBBridge
-    | _DBWebhook
-    | _DBMessageMap
-    | _DBMostRecentEventInChannel
-    | _DBReactionMap
-    | _DBAutoBridgeThreadChannels
-    | _DBEmoji
-    | _DBAppWhitelist
-)
-Table = (
-    DBBridge
-    | DBWebhook
-    | DBMessageMap
-    | DBMostRecentEventInChannel
-    | DBReactionMap
-    | DBAutoBridgeThreadChannels
-    | DBEmoji
-    | DBAppWhitelist
-)
-
-
+# -----
+# Functions
 async def get_sql_upsert_query(
-    table: type[Table],
+    table: type[AsyncDFBase],
     *,
     indices: Iterable[str],
     ignored_cols: Iterable[str] | None = None,
@@ -446,7 +439,7 @@ async def get_sql_upsert_query(
 
 
 async def get_sql_insert_ignore_duplicate_query(
-    table: type[Table],
+    table: type[AsyncDFBase],
     *,
     indices: Iterable[str],
     **kwargs: Any,
