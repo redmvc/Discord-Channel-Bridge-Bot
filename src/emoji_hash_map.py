@@ -31,10 +31,16 @@ class EmojiHashMap:
         self._hash_to_internal_emoji: dict[str, int] = {}
 
     @classmethod
-    async def create(cls) -> "EmojiHashMap":
-        """Create and initialise the emoji hash map from the emoji table."""
+    async def create(cls, *, session: SQLSession = _MISSING_SESSION) -> "EmojiHashMap":
+        """Create and initialise the emoji hash map from the emoji table.
+
+        Parameters
+        ----------
+        session : :class:`~sqlalchemy.ext.asyncio.AsyncSession`, optional
+            An async SQLAlchemy Session connecting to the database. If it's not present, a new one will be created.
+        """
         instance = cls()
-        await instance._load_from_database()
+        await instance._load_from_database(session=session)
         return instance
 
     @sql_command

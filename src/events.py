@@ -106,18 +106,19 @@ async def setup_bot(*, session: SQLSession = _MISSING_SESSION):
     try:
         # -----
         logger.info("Loading bridges from database...")
-        await bridges.load_from_database()
+        await bridges.load_from_database(session=session)
         logger.info("Bridges loaded.")
 
         # -----
         logger.info("Loading emoji hash map from database...")
-        emoji_hash_map.map = await emoji_hash_map.EmojiHashMap.create()
+        emoji_hash_map.map = await emoji_hash_map.EmojiHashMap.create(session=session)
         logger.info("Emoji hash map loaded.")
 
         # -----
         logger.info("Loading whitelisted apps...")
         whitelisted_apps_query_result = await AsyncDataFrame(
-            session, DBAppWhitelist
+            session,
+            DBAppWhitelist,
         ).collect()
         accessible_channels: set[int] = set()
         inaccessible_channels: set[int] = set()

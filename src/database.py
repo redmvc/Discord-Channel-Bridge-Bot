@@ -781,7 +781,7 @@ async def create_tables(target_engine: AsyncEngine | None = None):
     Parameters
     ----------
     target_engine : :class:`~sqlalchemy.ext.asyncio.AsyncEngine` | None, optional
-        The engine to create/update tables on. Defaults to the module-level engine.
+        The engine to create/update tables on. Defaults to None, in which case the module-level engine will be used.
     """
     _engine = target_engine or engine
     logger.info("Ensuring all necessary tables exist...")
