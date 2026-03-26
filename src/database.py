@@ -441,7 +441,7 @@ async def get_sql_insert_ignore_duplicate_query(
 
 @overload
 def sql_command(
-    commit_results: Callable[P, Coroutine[Any, Any, T]],
+    calling_function: Callable[P, Coroutine[Any, Any, T]],
 ) -> Callable[P, Coroutine[Any, Any, T]]:
     """Decorator that wraps an async function with database session and transaction management.
 
@@ -470,7 +470,7 @@ def sql_command(
     pass
 
 
-def sql_command(
+def sql_command(  # pyright: ignore[reportInconsistentOverload]
     commit_results: Callable[P, Coroutine[Any, Any, T]] | bool = True,
     session_keyword: str = "session",
 ) -> (
