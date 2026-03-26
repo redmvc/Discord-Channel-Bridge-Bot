@@ -1608,7 +1608,7 @@ async def _replace_message_links(
     bridged_channel_ids: set[int],
     session: SQLSession,
 ) -> str:
-    """Replace links in a message to links in a bridged message that is (in order of priority) in this channel or its parent,"""
+    """Replace message links in a message to links to a bridged message that is (in order of priority) in this channel or its parent or this channel (or its parent)'s threads, this channel's server, or bridged to this channel."""
     # Now try to find equivalent links if the messages being linked to are bridged
     for _, link_guild_id, link_channel_id, link_message_id in message_links:
         if int(link_channel_id) in channel_and_thread_ids:
