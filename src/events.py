@@ -1626,25 +1626,18 @@ async def _replace_message_links(
 
         # Try to see whether the linked message is bridged to a message in this channel or its parent,
         # in another channel in this server, or in a channel bridged to this one
-        source_messages = (
+        bridged_messages = await (
             AsyncDataFrame(session, DBMessageMap)
             .where(F.col("target_message") == F.lit(link_message_id))
             .select(F.col("source_message").alias("link_message_source"))
-        )
-        bridged_messages = await (
-            AsyncDataFrame(session, DBMessageMap)
             .join(
-                source_messages,
+                AsyncDataFrame(session, DBMessageMap),
                 F.col("source_message") == F.col("link_message_source"),
-                "left",
+                "right",
             )
             .where(
-                F.col("source_message").isin(
-                    [
-                        F.lit(link_message_id),
-                        F.col("link_message_source"),
-                    ]
-                )
+                (F.col("source_message") == F.lit(link_message_id))
+                | (F.col("source_message") == F.col("link_message_source"))
             )
             .collect()
         )
