@@ -873,7 +873,7 @@ class Bridges:
     async def get_reachable_channels(
         self,
         starting_channel: TextChannelOrThread | int,
-        direction: "Literal['outbound', 'inbound']",
+        direction: "Literal['outbound', 'inbound'] | None" = None,
         *,
         include_webhooks: "Literal[True]",
         include_starting: bool = False,
@@ -884,8 +884,8 @@ class Bridges:
         ----------
         starting_channel : :class:`~discord.TextChannel` | :class:`~discord.Thread` | int
             The channel other channels must be reachable from, or ID of same.
-        direction : Literal["outbound", "inbound"]
-            Whether to look down an outbound chain or up an inbound chain.
+        direction : Literal["outbound", "inbound"] | None, optional
+            Whether to look down an outbound chain or up an inbound chain. Defaults to None, in which case both will be checked.
         include_starting : bool, optional
             Whether to include the starting channel ID in the list. Defaults to False.
 
@@ -899,7 +899,7 @@ class Bridges:
     async def get_reachable_channels(
         self,
         starting_channel: TextChannelOrThread | int,
-        direction: "Literal['outbound', 'inbound']",
+        direction: "Literal['outbound', 'inbound'] | None" = None,
         *,
         include_webhooks: "Literal[False]",
         include_starting: bool = False,
@@ -910,8 +910,8 @@ class Bridges:
         ----------
         starting_channel : :class:`~discord.TextChannel` | :class:`~discord.Thread` | int
             The channel other channels must be reachable from, or ID of same.
-        direction : Literal["outbound", "inbound"]
-            Whether to look down an outbound chain or up an inbound chain.
+        direction : Literal["outbound", "inbound"] | None, optional
+            Whether to look down an outbound chain or up an inbound chain. Defaults to None, in which case both will be checked.
         include_starting : bool, optional
             Whether to include the starting channel ID in the list. Defaults to False.
 
@@ -925,7 +925,7 @@ class Bridges:
     async def get_reachable_channels(
         self,
         starting_channel: TextChannelOrThread | int,
-        direction: "Literal['outbound', 'inbound']",
+        direction: "Literal['outbound', 'inbound'] | None" = None,
         *,
         include_starting: bool = False,
     ) -> set[int]:
@@ -935,8 +935,8 @@ class Bridges:
         ----------
         starting_channel : :class:`~discord.TextChannel` | :class:`~discord.Thread` | int
             The channel other channels must be reachable from, or ID of same.
-        direction : Literal["outbound", "inbound"]
-            Whether to look down an outbound chain or up an inbound chain.
+        direction : Literal["outbound", "inbound"] | None, optional
+            Whether to look down an outbound chain or up an inbound chain. Defaults to None, in which case both will be checked.
         include_starting : bool, optional
             Whether to include the starting channel ID in the list. Defaults to False.
 
@@ -949,7 +949,7 @@ class Bridges:
     async def get_reachable_channels(
         self,
         starting_channel: TextChannelOrThread | int,
-        direction: "Literal['outbound', 'inbound']",
+        direction: "Literal['outbound', 'inbound'] | None" = None,
         *,
         include_webhooks: bool = False,
         include_starting: bool = False,
@@ -960,8 +960,8 @@ class Bridges:
         ----------
         starting_channel : :class:`~discord.TextChannel` | :class:`~discord.Thread` | int
             The channel other channels must be reachable from, or ID of same.
-        direction : Literal["outbound", "inbound"]
-            Whether to look down an outbound chain or up an inbound chain.
+        direction : Literal["outbound", "inbound"] | None, optional
+            Whether to look down an outbound chain or up an inbound chain. Defaults to None, in which case both will be checked.
         include_webhooks : bool, optional
             Whether to include a list of webhooks attached to the reachable channels in the output. Will only include one webhook per channel. Defaults to False.
         include_starting : bool, optional
@@ -971,6 +971,28 @@ class Bridges:
         -------
         set[int] | dict[int, :class:`~discord.Webhook`]
         """
+        if direction is None:
+            # Both directions
+            outbound_result = await self.get_reachable_channels(
+                starting_channel,
+                "outbound",
+                include_webhooks=include_webhooks,
+                include_starting=include_starting,
+            )
+            inbound_result = await self.get_reachable_channels(
+                starting_channel,
+                "inbound",
+                include_webhooks=include_webhooks,
+                include_starting=include_starting,
+            )
+
+            assert (
+                isinstance(outbound_result, set) and isinstance(inbound_result, set)
+            ) or (
+                isinstance(outbound_result, dict) and isinstance(inbound_result, dict)
+            )
+            return outbound_result | inbound_result  # pyright: ignore[reportOperatorIssue]
+
         logger.debug(
             "Fetching all channels reachable from %s through chains of %s bridges.",
             starting_channel,
