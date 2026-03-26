@@ -447,7 +447,7 @@ def sql_command(
 
     Using the decorator with no arguments will commit the results of running the function to the database and will assume that the name of the argument to the function that should contain the session is "session".
     """
-    ...
+    pass
 
 
 @overload
@@ -467,7 +467,7 @@ def sql_command(
     session_keyword : str, optional
         The name of the argument that is meant to store the session in the function. Defaults to "session".
     """
-    ...
+    pass
 
 
 def sql_command(
@@ -791,33 +791,14 @@ async def create_tables(target_engine: AsyncEngine | None = None):
 
 
 @overload
-async def register_observed_event(
-    channel_id: int,
-    message_id: int | None = None,
-    observed_at: datetime | None = None,
-):
-    """Register an event (such as a message send or bridge creation) in the `most_recent_event_in_channel` table.
-
-    Parameters
-    ----------
-    channel_id : int
-        The ID of the channel in which the event occurred.
-    message_id : int | None, optional
-        The ID of a message that triggered the event, if it was a message. Defaults to None.
-    observed_at : :class:`~datetime.tatetime` | None, optional
-        The UTC datetime when the event occurred. Defaults to None, in which case the current time will be used.
-    """
-    ...
-
-
-@overload
-async def register_observed_event(
+async def register_observed_event(  # pyright: ignore[reportInconsistentOverload]
     channel_id: int,
     message_id: int | None = None,
     observed_at: datetime | None = None,
     *,
-    session: SQLSession | None,
-): ...
+    session: SQLSession | None = None,
+):
+    pass
 
 
 @sql_command

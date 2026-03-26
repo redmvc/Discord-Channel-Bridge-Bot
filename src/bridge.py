@@ -138,17 +138,8 @@ class Bridges:
         self._inbound_bridges: dict[int, dict[int, Bridge]] = {}
         self.webhooks = Webhooks()
 
-    @overload
-    async def load_from_database(self, *, session: SQLSession): ...
-
-    @overload
-    async def load_from_database(self, *, session: None): ...
-
-    @overload
-    async def load_from_database(self): ...
-
     @sql_command
-    async def load_from_database(self, *, session: SQLSession):
+    async def load_from_database(self, *, session: SQLSession | None = None):
         """Load all bridges saved in the bot's connected database.
 
         Parameters
@@ -156,6 +147,8 @@ class Bridges:
         session : :class:`~sqlalchemy.orm.Session` | None, optional
             An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
         """
+        assert session is not None
+
         self._outbound_bridges: dict[int, dict[int, Bridge]] = {}
         self._inbound_bridges: dict[int, dict[int, Bridge]] = {}
         self.webhooks = Webhooks()
@@ -511,30 +504,6 @@ class Bridges:
 
             raise
 
-    @overload
-    async def _add_bridge_to_db(
-        self,
-        *,
-        source_channel: TextChannelOrThread,
-        source_id: int,
-        target_channel: TextChannelOrThread,
-        target_id: int,
-        bridge: Bridge,
-        session: SQLSession,
-    ) -> Bridge: ...
-
-    @overload
-    async def _add_bridge_to_db(
-        self,
-        *,
-        source_channel: TextChannelOrThread,
-        source_id: int,
-        target_channel: TextChannelOrThread,
-        target_id: int,
-        bridge: Bridge,
-        session: SQLSession | None,
-    ) -> Bridge: ...
-
     @sql_command
     async def _add_bridge_to_db(
         self,
@@ -544,9 +513,11 @@ class Bridges:
         target_channel: TextChannelOrThread,
         target_id: int,
         bridge: Bridge,
-        session: SQLSession,
+        session: SQLSession | None = None,
     ) -> Bridge:
         """Add the bridge from source channel to target channel to the database."""
+        assert session is not None
+
         logger.debug(
             "Inserting bridge from #%s to #%s into database...",
             source_channel.name,
@@ -774,33 +745,17 @@ class Bridges:
             session=session,
         )
 
-    @overload
-    async def _remove_bridges_from_db(
-        self,
-        *,
-        bridges_to_demolish: list[tuple[int, int]],
-        webhooks_deleted: set[str],
-        session: SQLSession,
-    ): ...
-
-    @overload
-    async def _remove_bridges_from_db(
-        self,
-        *,
-        bridges_to_demolish: list[tuple[int, int]],
-        webhooks_deleted: set[str],
-        session: SQLSession | None,
-    ): ...
-
     @sql_command
     async def _remove_bridges_from_db(
         self,
         *,
         bridges_to_demolish: list[tuple[int, int]],
         webhooks_deleted: set[str],
-        session: SQLSession,
+        session: SQLSession | None = None,
     ):
         """Remove bridges from database."""
+        assert session is not None
+
         logger.debug("Removing bridge(s) from database...")
 
         for sid, tid in bridges_to_demolish:
@@ -944,7 +899,7 @@ class Bridges:
         -------
         dict[int, :class:`~discord.Webhook`]
         """
-        ...
+        pass
 
     @overload
     async def get_reachable_channels(
@@ -970,7 +925,7 @@ class Bridges:
         -------
         set[int]
         """
-        ...
+        pass
 
     @overload
     async def get_reachable_channels(
@@ -995,7 +950,7 @@ class Bridges:
         -------
         set[int]
         """
-        ...
+        pass
 
     async def get_reachable_channels(
         self,

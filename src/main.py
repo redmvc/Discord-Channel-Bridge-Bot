@@ -11,13 +11,13 @@ if TYPE_CHECKING:
 @overload
 def start_client() -> None:
     """Start the client and connect to Discord. This function is blocking."""
-    ...
+    pass
 
 
 @overload
 def start_client(blocking: "Literal[True]") -> None:
     """Start the client and connect to Discord. This function is blocking."""
-    ...
+    pass
 
 
 @overload
@@ -28,7 +28,7 @@ def start_client(blocking: "Literal[False]") -> Coroutine[Any, Any, None]:
     -------
     Coroutine[Any, Any, None]
     """
-    ...
+    pass
 
 
 def start_client(blocking: bool = True) -> Coroutine[Any, Any, None] | None:

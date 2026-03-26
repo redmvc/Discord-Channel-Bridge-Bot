@@ -80,30 +80,8 @@ async def on_ready():
     logger.info("Bot is ready.")
 
 
-@overload
-async def setup_bot():
-    """Load the data registered in the database into memory.
-
-    Raises
-    ------
-    ChannelTypeError
-        The source or target channels of some existing Bridge are not text channels nor threads off a text channel.
-    WebhookChannelError
-        Webhook of some existing Bridge is not attached to Bridge's target channel.
-    :class:`~discord.HTTPException`
-        Deleting an existing webhook or creating a new one failed.
-    :class:`~discord.Forbidden`
-        You do not have permissions to create or delete webhooks for some of the channels in existing Bridges.
-    """
-    ...
-
-
-@overload
-async def setup_bot(*, session: SQLSession | None = None): ...
-
-
 @sql_command
-async def setup_bot(*, session: SQLSession):
+async def setup_bot(*, session: SQLSession | None = None):
     """Load the data registered in the database into memory.
 
     Parameters
@@ -122,6 +100,8 @@ async def setup_bot(*, session: SQLSession):
     :class:`~discord.Forbidden`
         You do not have permissions to create or delete webhooks for some of the channels in existing Bridges.
     """
+    assert session is not None
+
     await create_tables()
 
     try:
@@ -405,46 +385,12 @@ async def on_message(message: discord.Message):
             pass
 
 
-@overload
-async def bridge_message_helper(message: discord.Message, message_channel_id: int):
-    """Mirror a message to all of its outbound bridge targets.
-
-    Parameters
-    ----------
-    message : :class:`~discord.Message`
-        The message to bridge.
-    message_channel_id : int
-        The ID of the channel the message is in.
-
-    Raises
-    ------
-    :class:`~discord.HTTPException`
-        Sending a message failed.
-    :class:`~discord.NotFound`
-        One of the webhooks was not found.
-    :class:`~discord.Forbidden`
-        The authorization token for one of the webhooks is incorrect.
-    ValueError
-        The length of embeds was invalid, there was no token associated with one of the webhooks or ephemeral was passed with the improper webhook type or there was no state attached with one of the webhooks when giving it a view.
-    """
-    ...
-
-
-@overload
-async def bridge_message_helper(
-    message: discord.Message,
-    message_channel_id: int,
-    *,
-    session: SQLSession | None,
-): ...
-
-
 @sql_command
 async def bridge_message_helper(
     message: discord.Message,
     message_channel_id: int,
     *,
-    session: SQLSession,
+    session: SQLSession | None = None,
 ):
     """Mirror a message to all of its outbound bridge targets.
 
@@ -468,6 +414,8 @@ async def bridge_message_helper(
     ValueError
         The length of embeds was invalid, there was no token associated with one of the webhooks or ephemeral was passed with the improper webhook type or there was no state attached with one of the webhooks when giving it a view.
     """
+    assert session is not None
+
     logger.debug(
         "Bridging message with ID %s from channel with ID %s.",
         message.id,
@@ -1244,7 +1192,7 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
             del common.messages_to_edit[message_id]
 
 
-@overload
+@sql_command
 async def edit_message_helper(
     *,
     message_content: str,
@@ -1252,59 +1200,7 @@ async def edit_message_helper(
     message_id: int,
     channel_id: int,
     message_is_reply: bool,
-) -> bool:
-    """Edit bridged versions of a message, if possible, and return True if at least one edit was performed.
-
-    Parameters
-    ----------
-    message_content : str
-        The updated contents of the message.
-    embeds : list[:class:`~discord.Embed`]
-        The updated embeds of the message.
-    message_id : int
-        The message ID.
-    channel_id : int
-        The ID of the channel the message being edited is in.
-    message_is_reply : bool
-        Whether the message being edited is a reply.
-
-    Returns
-    -------
-    bool
-
-    Raises
-    ------
-    :class:`~discord.HTTPException`
-        Editing a message failed.
-    :class:`~discord.Forbidden`
-        Tried to edit a message that is not the Bridge's.
-    ValueError
-        The length of embeds was invalid, there was no token associated with a webhook or a webhook had no state.
-    """
-    ...
-
-
-@overload
-async def edit_message_helper(
-    *,
-    message_content: str,
-    embeds: list[discord.Embed],
-    message_id: int,
-    channel_id: int,
-    message_is_reply: bool,
-    session: SQLSession | None,
-) -> bool: ...
-
-
-@sql_command(commit_results=False)
-async def edit_message_helper(
-    *,
-    message_content: str,
-    embeds: list[discord.Embed],
-    message_id: int,
-    channel_id: int,
-    message_is_reply: bool,
-    session: SQLSession,
+    session: SQLSession | None = None,
 ) -> bool:
     """Edit bridged versions of a message, if possible, and return True if at least one edit was performed.
 
@@ -1336,6 +1232,8 @@ async def edit_message_helper(
     ValueError
         The length of embeds was invalid, there was no token associated with a webhook or a webhook had no state.
     """
+    assert session is not None
+
     logger.debug("Bridging edit to message with ID %s.", message_id)
 
     # Get all channels reachable from this one via an unbroken sequence of outbound bridges as well as their webhooks
@@ -1526,46 +1424,11 @@ async def edit_message_helper(
     return at_least_one_edit
 
 
-@overload
-async def replace_missing_emoji(message_content: str) -> str:
-    """Return a version of the contents of a message that replaces any instances of an emoji that the bot can't find with matching ones, if possible.
-
-    Parameters
-    ----------
-    message_content : str
-        The content of the message to process.
-
-    Returns
-    -------
-    str
-
-    Raises
-    ------
-    :class:`~discord.HTTPResponseError`
-        HTTP request to fetch image returned a status other than 200.
-    :class:`~discord.InvalidURL`
-        URL generated from emoji was not valid.
-    :class:`~discord.RuntimeError`
-        Session connection failed.
-    :class:`~discord.ServerTimeoutError`
-        Connection to server timed out.
-    """
-    ...
-
-
-@overload
-async def replace_missing_emoji(
-    message_content: str,
-    *,
-    session: SQLSession | None = None,
-) -> str: ...
-
-
 @sql_command
 async def replace_missing_emoji(
     message_content: str,
     *,
-    session: SQLSession,
+    session: SQLSession | None = None,
 ) -> str:
     """Return a version of the contents of a message that replaces any instances of an emoji that the bot can't find with matching ones, if possible.
 
@@ -1591,6 +1454,8 @@ async def replace_missing_emoji(
     :class:`~discord.ServerTimeoutError`
         Connection to server timed out.
     """
+    assert session is not None
+
     if not common.emoji_server:
         # If we don't have an emoji server to store our own versions of emoji in then there's nothing we can do
         return message_content
@@ -1649,7 +1514,8 @@ async def replace_discord_links(
     content: None,
     channel: TextChannelOrThread,
     session: SQLSession,
-) -> None: ...
+) -> None:
+    pass
 
 
 @overload
@@ -1657,7 +1523,8 @@ async def replace_discord_links(
     content: str,
     channel: TextChannelOrThread,
     session: SQLSession,
-) -> str: ...
+) -> str:
+    pass
 
 
 async def replace_discord_links(
@@ -1815,48 +1682,12 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
         del common.message_lock[message_id]
 
 
-@overload
-async def delete_message_helper(message_id: int, channel_id: int) -> bool:
-    """Delete bridged versions of a message, if possible, and return True if at least one deletion was performed.
-
-    Parameters
-    ----------
-    message_id : int
-        The message ID.
-    channel_id : int
-        The ID of the channel the message being deleted is in.
-
-    Returns
-    -------
-    bool
-
-    Raises
-    ------
-    :class:`~discord.HTTPException`
-        Deleting a message failed.
-    :class:`~discord.Forbidden`
-        Tried to delete a message that is not yours.
-    ValueError
-        A webhook does not have a token associated with it.
-    """
-    ...
-
-
-@overload
-async def delete_message_helper(
-    message_id: int,
-    channel_id: int,
-    *,
-    session: SQLSession | None,
-) -> bool: ...
-
-
 @sql_command
 async def delete_message_helper(
     message_id: int,
     channel_id: int,
     *,
-    session: SQLSession,
+    session: SQLSession | None = None,
 ) -> bool:
     """Delete bridged versions of a message, if possible, and return True if at least one deletion was performed.
 
@@ -1882,6 +1713,8 @@ async def delete_message_helper(
     ValueError
         A webhook does not have a token associated with it.
     """
+    assert session is not None
+
     logger.debug("Bridging deletion of message with ID %s.", message_id)
 
     # Get all channels reachable from this one via an unbroken sequence of outbound bridges as well as their webhooks
@@ -2098,55 +1931,13 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         )
 
 
-@overload
-async def bridge_reaction_add(
-    *,
-    message_id: int,
-    channel_id: int,
-    emoji: discord.PartialEmoji,
-):
-    """Bridge reactions added to a message, if possible.
-
-    Parameters
-    ----------
-    message_id : int
-        The ID of the message being reacted to.
-    channel_id : int
-        The ID of the channel the message is in.
-    emoji : :class:`~discord.PartialEmoji`
-        The emoji being added to the message.
-
-    Raises
-    ------
-    :class:`~discord.HTTPResponseError`
-        HTTP request to fetch image returned a status other than 200.
-    :class:`~discord.InvalidURL`
-        URL generated from emoji was not valid.
-    :class:`~discord.RuntimeError`
-        Session connection failed.
-    :class:`~discord.ServerTimeoutError`
-        Connection to server timed out.
-    """
-    ...
-
-
-@overload
-async def bridge_reaction_add(
-    *,
-    message_id: int,
-    channel_id: int,
-    emoji: discord.PartialEmoji,
-    session: SQLSession | None,
-): ...
-
-
 @sql_command
 async def bridge_reaction_add(
     *,
     message_id: int,
     channel_id: int,
     emoji: discord.PartialEmoji,
-    session: SQLSession,
+    session: SQLSession | None = None,
 ):
     """Bridge reactions added to a message, if possible.
 
@@ -2172,6 +1963,8 @@ async def bridge_reaction_add(
     :class:`~discord.ServerTimeoutError`
         Connection to server timed out.
     """
+    assert session is not None
+
     logger.debug(
         "Bridging reaction add of %s to message with ID %s.",
         emoji,
@@ -2606,7 +2399,7 @@ async def unreact(*, message_id: int):
     message_id : int
         The ID of the message a reaction is being removed from.
     """
-    ...
+    pass
 
 
 @overload
@@ -2620,7 +2413,7 @@ async def unreact(*, message_id: int, emoji_to_remove: discord.PartialEmoji):
     emoji : :class:`~discord.PartialEmoji`
         The emoji being removed.
     """
-    ...
+    pass
 
 
 @overload
@@ -2629,7 +2422,8 @@ async def unreact(
     message_id: int,
     emoji_to_remove: discord.PartialEmoji | None,
     session: SQLSession | None = None,
-): ...
+):
+    pass
 
 
 @sql_command
@@ -2843,24 +2637,12 @@ async def on_thread_create(thread: discord.Thread):
     await auto_bridge_thread(thread)
 
 
-@overload
-async def auto_bridge_thread(thread: discord.Thread):
-    """Create matching threads across a bridge if the created thread's parent channel has auto-bridge-threads enabled.
-
-    Parameters
-    ----------
-    thread : :class:`~discord.Thread`
-        The thread that was created.
-    """
-    ...
-
-
-@overload
-async def auto_bridge_thread(thread: discord.Thread, *, session: SQLSession | None): ...
-
-
 @sql_command
-async def auto_bridge_thread(thread: discord.Thread, *, session: SQLSession):
+async def auto_bridge_thread(
+    thread: discord.Thread,
+    *,
+    session: SQLSession | None = None,
+):
     """Create matching threads across a bridge if the created thread's parent channel has auto-bridge-threads enabled.
 
     Parameters
@@ -2952,18 +2734,8 @@ async def reconnect():
     logger.info("Finished bridging unbridged messages.")
 
 
-@overload
-async def bridge_unbridged_messages():
-    """Find all messages that were meant to be bridged while the bot was disconnected and bridge them."""
-    ...
-
-
-@overload
-async def bridge_unbridged_messages(*, session: SQLSession | None): ...
-
-
 @sql_command
-async def bridge_unbridged_messages(*, session: SQLSession):
+async def bridge_unbridged_messages(*, session: SQLSession | None = None):
     """Find all messages that were meant to be bridged while the bot was disconnected and bridge them.
 
     Parameters
@@ -2971,6 +2743,8 @@ async def bridge_unbridged_messages(*, session: SQLSession):
     session : :class:`~sqlalchemy.orm.Session` | None, optional
         An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
     """
+    assert session is not None
+
     # Find the latest bridged messages from each channel
     logger.debug("Looking for latest event in each channel.")
 

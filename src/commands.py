@@ -1,6 +1,6 @@
 import asyncio
 import re
-from typing import TYPE_CHECKING, Any, Iterable, Literal, overload
+from typing import TYPE_CHECKING, Any, Iterable, Literal
 
 import discord
 from sqlalchemy.exc import StatementError as SQLError
@@ -269,43 +269,13 @@ async def bridge(
     logger.debug("Call to /bridge with interaction ID %s successful.", interaction.id)
 
 
-@overload
-async def create_bridges(
-    source_channel: TextChannelOrThread,
-    target_channel: TextChannelOrThread,
-    direction: Literal["outbound", "inbound"] | None,
-):
-    """Create bridges between `source_channel` and `target_channel`.
-
-    Parameters
-    ----------
-    source_channel : :class:`~discord.TextChannel` | :class:`~discord.Thread`
-        The channel from which to create bridges.
-    target_channel : :class:`~discord.TextChannel` | :class:`~discord.Thread`
-        The channel to which to create bridges.
-    direction : Literal["outbound", "inbound"] | None
-        If this equals "outbound", only a bridge from `source_channel` to `target_channel` will be created; if it equals "inbound", only a bridge from `target_channel` to `source_channel` will be created; if it equals None, both will be created.
-    """
-    ...
-
-
-@overload
-async def create_bridges(
-    source_channel: TextChannelOrThread,
-    target_channel: TextChannelOrThread,
-    direction: Literal["outbound", "inbound"] | None,
-    *,
-    session: SQLSession | None,
-): ...
-
-
 @sql_command
 async def create_bridges(
     source_channel: TextChannelOrThread,
     target_channel: TextChannelOrThread,
     direction: Literal["outbound", "inbound"] | None,
     *,
-    session: SQLSession,
+    session: SQLSession | None = None,
 ):
     """Create bridges between `source_channel` and `target_channel`.
 
@@ -320,6 +290,8 @@ async def create_bridges(
     session : :class:`~sqlalchemy.orm.Session` | None, optional
         An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
     """
+    assert session is not None
+
     if direction != "inbound":
         await bridges.create_bridge(
             source=source_channel,
@@ -513,35 +485,11 @@ async def auto_bridge_threads(interaction: discord.Interaction):
     )
 
 
-@overload
-async def toggle_auto_bridge_threads(message_channel_id: int) -> bool:
-    """Toggle thread auto-bridging for the channel identified by `channel_id` and return True if auto-bridging was enabled and False otherwise.
-
-    Parameters
-    ----------
-    channel_id : int
-        The ID of the channel to toggle thread auto-bridging for.
-
-    Returns
-    -------
-    bool
-    """
-    ...
-
-
-@overload
-async def toggle_auto_bridge_threads(
-    message_channel_id: int,
-    *,
-    session: SQLSession | None,
-) -> bool: ...
-
-
 @sql_command
 async def toggle_auto_bridge_threads(
     channel_id: int,
     *,
-    session: SQLSession,
+    session: SQLSession | None = None,
 ) -> bool:
     """Toggle thread auto-bridging for the channel identified by `channel_id` and return True if auto-bridging was enabled and False otherwise.
 
@@ -556,6 +504,8 @@ async def toggle_auto_bridge_threads(
     -------
     bool
     """
+    assert session is not None
+
     if channel_id not in common.auto_bridge_thread_channels:
         session.add(DBAutoBridgeThreadChannels(channel=str(channel_id)))
         common.auto_bridge_thread_channels.add(channel_id)
@@ -567,43 +517,13 @@ async def toggle_auto_bridge_threads(
         return False
 
 
-@overload
-async def bridge_thread_helper(
-    thread_to_bridge: discord.Thread,
-    user_id: int,
-    interaction: discord.Interaction | None = None,
-):
-    """Create threads matching the current one across bridges.
-
-    Parameters
-    ----------
-    thread_to_bridge : :class:`~discord.Thread`
-        The thread to bridge.
-    user_id : int
-        The ID of the user that created the thread.
-    interaction : :class:`~discord.Interaction` | None, optional
-        The interaction that called this function, if any. Defaults to None.
-    """
-    ...
-
-
-@overload
-async def bridge_thread_helper(
-    thread_to_bridge: discord.Thread,
-    user_id: int,
-    interaction: discord.Interaction | None = None,
-    *,
-    session: SQLSession | None,
-): ...
-
-
 @sql_command
 async def bridge_thread_helper(
     thread_to_bridge: discord.Thread,
     user_id: int,
     interaction: discord.Interaction | None = None,
     *,
-    session: SQLSession,
+    session: SQLSession | None = None,
 ):
     """Create threads matching the current one across bridges.
 
@@ -618,6 +538,8 @@ async def bridge_thread_helper(
     session : :class:`~sqlalchemy.orm.Session` | None, optional
         An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
     """
+    assert session is not None
+
     thread_parent = await common.get_channel_parent(thread_to_bridge)
 
     outbound_bridges = bridges.get_outbound_bridges(thread_parent.id)
@@ -790,38 +712,11 @@ async def bridge_thread_helper(
         await interaction.followup.send(response, ephemeral=True)
 
 
-@overload
-async def stop_auto_bridging_threads_helper(
-    channel_ids_to_remove: int | Iterable[int],
-):
-    """Remove a group of channels from the auto_bridge_thread_channels table and list.
-
-    Parameters
-    ----------
-    channel_ids_to_remove : int | Iterable[int]
-        The IDs of the channels to remove.
-
-    Raises
-    ------
-    `sqlalchemy.exc.StatementError`
-        Something went wrong accessing or modifying the database.
-    """
-    ...
-
-
-@overload
-async def stop_auto_bridging_threads_helper(
-    channel_ids_to_remove: int | Iterable[int],
-    *,
-    session: SQLSession | None = None,
-): ...
-
-
 @sql_command
 async def stop_auto_bridging_threads_helper(
     channel_ids_to_remove: int | Iterable[int],
     *,
-    session: SQLSession,
+    session: SQLSession | None = None,
 ):
     """Remove a group of channels from the auto_bridge_thread_channels table and list.
 
@@ -837,6 +732,8 @@ async def stop_auto_bridging_threads_helper(
     `sqlalchemy.exc.StatementError`
         Something went wrong accessing or modifying the database.
     """
+    assert session is not None
+
     if not isinstance(channel_ids_to_remove, set):
         if isinstance(channel_ids_to_remove, int):
             channel_ids_to_remove = {channel_ids_to_remove}
@@ -1022,38 +919,12 @@ async def demolish(interaction: discord.Interaction, target: str):
     logger.debug("Call to /demolish with interaction ID %s successful.", interaction.id)
 
 
-@overload
-async def demolish_bridges(
-    source_channel: TextChannelOrThread,
-    target_channel: TextChannelOrThread,
-):
-    """Demolish bridges between `source_channel` and `target_channel`.
-
-    Parameters
-    ----------
-    source_channel : :class:`~discord.TextChannel` | :class:`~discord.Thread`
-        A Discord text channel or a thread off one.
-    target_channel : :class:`~discord.TextChannel` | :class:`~discord.Thread`
-        A Discord text channel or a thread off one.
-    """
-    ...
-
-
-@overload
-async def demolish_bridges(
-    source_channel: TextChannelOrThread,
-    target_channel: TextChannelOrThread,
-    *,
-    session: SQLSession | None,
-): ...
-
-
 @sql_command
-async def demolish_bridges(
+async def demolish_bridges(  # pyright: ignore[reportInconsistentOverload]
     source_channel: TextChannelOrThread,
     target_channel: TextChannelOrThread,
     *,
-    session: SQLSession,
+    session: SQLSession | None = None,
 ):
     """Demolish bridges between `source_channel` and `target_channel`.
 
@@ -1066,6 +937,8 @@ async def demolish_bridges(
     session : :class:`~sqlalchemy.orm.Session` | None, optional
         An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
     """
+    assert session is not None
+
     await bridges.demolish_bridges(
         source_channel=source_channel,
         target_channel=target_channel,
@@ -1204,48 +1077,8 @@ async def demolish_all(
     )
 
 
-@overload
-async def demolish_all_bridges(
-    user_id: int,
-    lists_of_bridges: dict[
-        int,
-        tuple[dict[int, Bridge] | None, dict[int, Bridge] | None],
-    ],
-    channels_affected: set[int],
-) -> bool:
-    """Try to demolish all bridges listed, then return True if all were demolished or False if some failed to be demolished for some reason.
-
-    Parameters
-    ----------
-    user_id : int
-        The ID of the user who ran the remolish command.
-    lists_of_bridges : dict[int, tuple[dict[int, Bridge]  |  None, dict[int, Bridge]  |  None]]
-        A dictionary whose keys are the IDs of channels and whose keys are a tuple with all inbound and all outbound bridges associated with that channel.
-    channels_affected : set[int]
-        A set of channels that were or will be affected by the demolition.
-
-    Returns
-    -------
-    bool
-    """
-    ...
-
-
-@overload
-async def demolish_all_bridges(
-    user_id: int,
-    lists_of_bridges: dict[
-        int,
-        tuple[dict[int, Bridge] | None, dict[int, Bridge] | None],
-    ],
-    channels_affected: set[int],
-    *,
-    session: SQLSession | None,
-) -> bool: ...
-
-
 @sql_command
-async def demolish_all_bridges(
+async def demolish_all_bridges(  # pyright: ignore[reportInconsistentOverload]
     user_id: int,
     lists_of_bridges: dict[
         int,
@@ -1253,7 +1086,7 @@ async def demolish_all_bridges(
     ],
     channels_affected: set[int],
     *,
-    session: SQLSession,
+    session: SQLSession | None = None,
 ) -> bool:
     """Try to demolish all bridges listed, then return True if all were demolished or False if some failed to be demolished for some reason.
 
@@ -1272,6 +1105,8 @@ async def demolish_all_bridges(
     -------
     bool
     """
+    assert session is not None
+
     demolished_all = True
 
     for channel_to_demolish_id, (

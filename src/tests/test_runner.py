@@ -238,7 +238,7 @@ async def create_bridge(
     direction : Literal["inbound", "outbound"] | None, optional
         The direction of bridge to create. If set to "inbound", will create a bridge from `target_channel` to `source_channel`; if set to "outbound", will create a bridge from `source_channel` to `target_channel`; if set to None, will create both. Defaults to None.
     """
-    ...
+    pass
 
 
 @overload
@@ -264,7 +264,7 @@ async def create_bridge(
     -------
     :class:`~discord.Message`
     """
-    ...
+    pass
 
 
 async def create_bridge(
@@ -326,7 +326,7 @@ async def demolish_bridges(
     source_channel : :class:`~discord.TextChannel` | :class:`~discord.Thread` | int
         The channel to and from which to demolish bridges, or ID of same.
     """
-    ...
+    pass
 
 
 @overload
@@ -346,7 +346,7 @@ async def demolish_bridges(
     -------
     :class:`~discord.Message`
     """
-    ...
+    pass
 
 
 @overload
@@ -362,7 +362,7 @@ async def demolish_bridges(
     source_channel : :class:`~discord.TextChannel` | :class:`~discord.Thread` | int
         The channel to and from which to demolish bridges, or ID of same.
     """
-    ...
+    pass
 
 
 @overload
@@ -383,7 +383,7 @@ async def demolish_bridges(
     -------
     :class:`~discord.Message`
     """
-    ...
+    pass
 
 
 @overload
@@ -400,7 +400,7 @@ async def demolish_bridges(
     target_channel : :class:`~discord.TextChannel` | :class:`~discord.Thread` | int
         The other channel to and from which to demolish bridges, or ID of same.
     """
-    ...
+    pass
 
 
 @overload
@@ -423,7 +423,7 @@ async def demolish_bridges(
     -------
     :class:`~discord.Message`
     """
-    ...
+    pass
 
 
 async def demolish_bridges(
@@ -937,7 +937,7 @@ async def expect(
     -------
     tuple[:class:`~discord.Message` | None, list[str]]
     """
-    ...
+    pass
 
 
 @overload
@@ -972,7 +972,7 @@ async def expect(
     -------
     tuple[:class:`~discord.Message` | None, list[str]]
     """
-    ...
+    pass
 
 
 @overload
@@ -1000,7 +1000,7 @@ async def expect(
     -------
     tuple[None, list[str]]
     """
-    ...
+    pass
 
 
 @overload
@@ -1024,7 +1024,7 @@ async def expect(
     -------
     tuple[None, list[str]]
     """
-    ...
+    pass
 
 
 @overload
@@ -1036,7 +1036,8 @@ async def expect(
     to: Literal["exist"],
     timeout: float | int = 10,
     heartbeat: float | int = 0.5,
-) -> tuple[discord.Thread | None, list[str]]: ...
+) -> tuple[discord.Thread | None, list[str]]:
+    pass
 
 
 @overload
@@ -1048,7 +1049,8 @@ async def expect(
     to: Literal["not_exist"],
     timeout: float | int = 10,
     heartbeat: float | int = 0.5,
-) -> tuple[None, list[str]]: ...
+) -> tuple[None, list[str]]:
+    pass
 
 
 async def expect(

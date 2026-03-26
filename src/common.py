@@ -235,7 +235,7 @@ async def get_channel_from_id(
     :class:`~discord.Forbidden`
         The client does not not have permission to fetch the channel with that ID.
     """
-    ...
+    pass
 
 
 @overload
@@ -271,7 +271,7 @@ async def get_channel_from_id(
     :class:`~discord.Forbidden`
         The client does not not have permission to fetch the channel with that ID.
     """
-    ...
+    pass
 
 
 @overload
@@ -309,7 +309,7 @@ async def get_channel_from_id(
     :class:`~discord.Forbidden`
         The client does not not have permission to fetch the channel with that ID.
     """
-    ...
+    pass
 
 
 @overload
@@ -331,7 +331,7 @@ async def get_channel_from_id(
     -------
     :class:`~discord.abc.GuildChannel` | :class:`~discord.abc.PrivateChannel` | :class:`~discord.Thread` | :class:`~discord.PartialMessageable`
     """
-    ...
+    pass
 
 
 @overload
@@ -356,7 +356,7 @@ async def get_channel_from_id(
     -------
     :class:`~discord.abc.GuildChannel` | :class:`~discord.abc.PrivateChannel` | :class:`~discord.Thread` | :class:`~discord.PartialMessageable`
     """
-    ...
+    pass
 
 
 @overload
@@ -386,7 +386,7 @@ async def get_channel_from_id(
     ChannelTypeError
         The channel passed as argument is not a Discord text channel or a Thread.
     """
-    ...
+    pass
 
 
 async def get_channel_from_id(
@@ -462,7 +462,7 @@ def get_id_from_channel(channel_or_id: int) -> int:
     -------
     int
     """
-    ...
+    pass
 
 
 @overload
@@ -478,7 +478,7 @@ def get_id_from_channel(channel_or_id: DiscordChannel) -> int:
     -------
     int
     """
-    ...
+    pass
 
 
 def get_id_from_channel(channel_or_id: DiscordChannel | int) -> int:
@@ -517,7 +517,7 @@ async def get_channel_parent(channel_or_id: int) -> discord.TextChannel:
     ChannelTypeError
         The ID passed as argument does not refer to a Discord text channel or a Thread.
     """
-    ...
+    pass
 
 
 @overload
@@ -538,7 +538,7 @@ async def get_channel_parent(channel_or_id: DiscordChannel) -> discord.TextChann
     ChannelTypeError
         The channel passed as argument is not a Discord text channel or a thread off one.
     """
-    ...
+    pass
 
 
 async def get_channel_parent(
@@ -691,7 +691,7 @@ async def get_emoji_information(
     ValueError
         `emoji` had type :class:`~discord.PartialEmoji` but it was not a custom emoji.
     """
-    ...
+    pass
 
 
 @overload
@@ -725,7 +725,7 @@ async def get_emoji_information(
     ValueError
         `emoji_id` argument had type `str` but it was not a valid numerical ID.
     """
-    ...
+    pass
 
 
 @overload
@@ -760,7 +760,7 @@ async def get_emoji_information(
     ValueError
         `emoji_id` had type `str` but it was not a valid numerical ID.
     """
-    ...
+    pass
 
 
 @overload
@@ -770,7 +770,8 @@ async def get_emoji_information(
     emoji_name: str | None = None,
     *,
     emoji_size: int | None = 96,
-) -> tuple[int, str, bool, str]: ...
+) -> tuple[int, str, bool, str]:
+    pass
 
 
 async def get_emoji_information(
@@ -895,7 +896,7 @@ async def get_emoji_image(
     ValueError
         `emoji` had type `PartialEmoji` but it was not a custom emoji.
     """
-    ...
+    pass
 
 
 @overload
@@ -924,7 +925,7 @@ async def get_emoji_image(
     ValueError
         `emoji_id` had type `str` but it was not a valid numerical ID.
     """
-    ...
+    pass
 
 
 async def get_emoji_image(  # pyright: ignore[reportInconsistentOverload]
@@ -979,7 +980,7 @@ def get_emoji_url(
     ValueError
         `emoji` had type `PartialEmoji` but it was not a custom emoji.
     """
-    ...
+    pass
 
 
 @overload
@@ -1008,13 +1009,14 @@ def get_emoji_url(
     ValueError
         `emoji_id` had type `str` but it was not a valid numerical ID.
     """
-    ...
+    pass
 
 
 @overload
 def get_emoji_url(
     *args: discord.PartialEmoji | discord.Emoji | int | str | bool,
-) -> str: ...
+) -> str:
+    pass
 
 
 def get_emoji_url(  # pyright: ignore[reportInconsistentOverload]

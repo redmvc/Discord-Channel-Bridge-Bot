@@ -31,21 +31,17 @@ class EmojiHashMap:
         await instance._load_from_database()
         return instance
 
-    @overload
-    async def _load_from_database(self): ...
-
-    @overload
-    async def _load_from_database(self, *, session: SQLSession | None): ...
-
     @sql_command
-    async def _load_from_database(self, *, session: SQLSession):
+    async def _load_from_database(self, *, session: SQLSession | None = None):
         """Load emoji data from the database into the hash map.
 
         Parameters
         ----------
-        session : :class:`~sqlalchemy.ext.asyncio.AsyncSession`
-            An SQLAlchemy AsyncSession connecting to the database.
+        session : :class:`~sqlalchemy.ext.asyncio.AsyncSession` | None, optional
+            An SQLAlchemy AsyncSession connecting to the database. Defaults to None, in which case a new one will be created.
         """
+        assert session is not None
+
         logger.info("Initialising emoji hash map...")
 
         try:
@@ -162,35 +158,6 @@ class EmojiHashMap:
 
         logger.debug("Emoji with ID %s added to map.", emoji_id)
 
-    @overload
-    async def _add_emoji_to_database(
-        self,
-        *,
-        emoji: discord.PartialEmoji | discord.Emoji | None = None,
-        emoji_id: int | str | None = None,
-        emoji_name: str | None = None,
-        emoji_server_id: int | str | None = None,
-        emoji_animated: bool | None = None,
-        image: bytes | None = None,
-        image_hash: str | None = None,
-        accessible: bool = False,
-    ): ...
-
-    @overload
-    async def _add_emoji_to_database(
-        self,
-        *,
-        emoji: discord.PartialEmoji | discord.Emoji | None = None,
-        emoji_id: int | str | None = None,
-        emoji_name: str | None = None,
-        emoji_server_id: int | str | None = None,
-        emoji_animated: bool | None = None,
-        image: bytes | None = None,
-        image_hash: str | None = None,
-        accessible: bool = False,
-        session: SQLSession | None = None,
-    ): ...
-
     @sql_command
     async def _add_emoji_to_database(
         self,
@@ -203,7 +170,7 @@ class EmojiHashMap:
         image: bytes | None = None,
         image_hash: str | None = None,
         accessible: bool = False,
-        session: SQLSession,
+        session: SQLSession | None = None,
     ):
         """Inserts an emoji into the `emoji` database table.
 
@@ -245,6 +212,8 @@ class EmojiHashMap:
         ServerTimeoutError
             Connection to server timed out.
         """
+        assert session is not None
+
         (
             emoji_id,
             emoji_name,
@@ -466,24 +435,15 @@ class EmojiHashMap:
         if update_db or session:
             await self._delete_emoji_from_db(emoji_id, session=session)
 
-    @overload
-    async def _delete_emoji_from_db(self, emoji_id: int): ...
-
-    @overload
-    async def _delete_emoji_from_db(
-        self,
-        emoji_id: int,
-        *,
-        session: SQLSession | None = None,
-    ): ...
-
     @sql_command
     async def _delete_emoji_from_db(
         self,
         emoji_id: int,
         *,
-        session: SQLSession,
+        session: SQLSession | None = None,
     ):
+        assert session is not None
+
         logger.debug("Deleting emoji with ID %s from database...", emoji_id)
 
         await (
@@ -509,7 +469,7 @@ class EmojiHashMap:
         ServerTimeoutError
             Connection to server timed out.
         """
-        ...
+        pass
 
     @overload
     async def load_server_emoji(self, server_id: int):
@@ -533,7 +493,7 @@ class EmojiHashMap:
         ServerTimeoutError
             Connection to server timed out.
         """
-        ...
+        pass
 
     @overload
     async def load_server_emoji(
@@ -541,7 +501,8 @@ class EmojiHashMap:
         server_id: int | None = None,
         *,
         session: SQLSession | None = None,
-    ): ...
+    ):
+        pass
 
     @sql_command
     async def load_server_emoji(
@@ -749,26 +710,6 @@ class EmojiHashMap:
             session=session,
         )
 
-    @overload
-    async def _copy_emoji_into_db(
-        self,
-        emoji_image_hash: str,
-        emoji_to_delete_id: int | None,
-        emoji: discord.Emoji,
-        emoji_server_id: int,
-    ) -> discord.Emoji | None: ...
-
-    @overload
-    async def _copy_emoji_into_db(
-        self,
-        emoji_image_hash: str,
-        emoji_to_delete_id: int | None,
-        emoji: discord.Emoji,
-        emoji_server_id: int,
-        *,
-        session: SQLSession | None,
-    ) -> discord.Emoji | None: ...
-
     @sql_command
     async def _copy_emoji_into_db(
         self,
@@ -777,8 +718,10 @@ class EmojiHashMap:
         emoji: discord.Emoji,
         emoji_server_id: int,
         *,
-        session: SQLSession,
+        session: SQLSession | None,
     ) -> discord.Emoji | None:
+        assert session is not None
+
         # Copied the emoji, going to update my table
         if emoji_to_delete_id is not None:
             logger.debug(
@@ -918,7 +861,7 @@ class EmojiHashMap:
         -------
         frozenset[int] | None
         """
-        ...
+        pass
 
     @overload
     def get_matches(
@@ -943,7 +886,7 @@ class EmojiHashMap:
         -------
         frozenset[int] | None
         """
-        ...
+        pass
 
     @overload
     def get_matches(
@@ -968,7 +911,7 @@ class EmojiHashMap:
         -------
         frozenset[str] | None
         """
-        ...
+        pass
 
     def get_matches(
         self,
@@ -1067,7 +1010,7 @@ class EmojiHashMap:
         -------
         :class:`~discord.Emoji` | None
         """
-        ...
+        pass
 
     @overload
     def get_accessible_emoji(
@@ -1089,7 +1032,7 @@ class EmojiHashMap:
         -------
         :class:`~discord.Emoji` | None
         """
-        ...
+        pass
 
     @overload
     def get_accessible_emoji(
@@ -1111,7 +1054,7 @@ class EmojiHashMap:
         -------
         :class:`~discord.Emoji` | None
         """
-        ...
+        pass
 
     def get_accessible_emoji(
         self,
@@ -1184,7 +1127,7 @@ class EmojiHashMap:
         ValueError
             `emoji` had type `PartialEmoji` but it was not a custom emoji.
         """
-        ...
+        pass
 
     @overload
     async def get_hash(
@@ -1219,7 +1162,7 @@ class EmojiHashMap:
         ServerTimeoutError
             Connection to server timed out.
         """
-        ...
+        pass
 
     @overload
     async def get_hash(
@@ -1256,7 +1199,7 @@ class EmojiHashMap:
         ServerTimeoutError
             Connection to server timed out.
         """
-        ...
+        pass
 
     @overload
     async def get_hash(
@@ -1286,7 +1229,7 @@ class EmojiHashMap:
         ValueError
             `emoji_id` had type `str` but it was not a valid numerical ID.
         """
-        ...
+        pass
 
     async def get_hash(
         self,
