@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession as SQLSession
 
 import common
 from database import (
+    _MISSING_SESSION,
     AsyncDataFrame,
     DBBridge,
     DBWebhook,
@@ -138,23 +139,14 @@ class Bridges:
         self._inbound_bridges: dict[int, dict[int, Bridge]] = {}
         self.webhooks = Webhooks()
 
-    @overload
-    async def load_from_database(self, *, session: SQLSession): ...
-
-    @overload
-    async def load_from_database(self, *, session: None): ...
-
-    @overload
-    async def load_from_database(self): ...
-
     @sql_command
-    async def load_from_database(self, *, session: SQLSession):
+    async def load_from_database(self, *, session: SQLSession = _MISSING_SESSION):
         """Load all bridges saved in the bot's connected database.
 
         Parameters
         ----------
-        session : :class:`~sqlalchemy.orm.Session` | None, optional
-            An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
+        session : :class:`~sqlalchemy.ext.asyncio.AsyncSession`, optional
+            An async SQLAlchemy Session connecting to the database. If it's not present, a new one will be created.
         """
         self._outbound_bridges: dict[int, dict[int, Bridge]] = {}
         self._inbound_bridges: dict[int, dict[int, Bridge]] = {}
@@ -326,6 +318,7 @@ class Bridges:
 
         logger.info("Bridges successfully loaded from database!")
 
+    @sql_command
     async def create_bridge(
         self,
         *,
@@ -333,7 +326,7 @@ class Bridges:
         target: TextChannelOrThread | int,
         webhook: discord.Webhook | None = None,
         update_db: bool = True,
-        session: SQLSession | None = None,
+        session: SQLSession = _MISSING_SESSION,
     ) -> Bridge:
         """Create a new Bridge from source channel to target channel (and a new webhook if necessary).
 
@@ -347,8 +340,8 @@ class Bridges:
             An already-existing webhook connecting these channels. Defaults to None, in which case a new one will be created.
         update_db : bool, optional
             Whether to update the database when creating the Bridge. Defaults to True.
-        session : :class:`~sqlalchemy.orm.Session` | None, optional
-            An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created. Only used if `update_db` is True.
+        session : :class:`~sqlalchemy.ext.asyncio.AsyncSession`, optional
+            An async SQLAlchemy Session connecting to the database. If it's not present, a new one will be created.
 
         Returns
         -------
@@ -511,30 +504,6 @@ class Bridges:
 
             raise
 
-    @overload
-    async def _add_bridge_to_db(
-        self,
-        *,
-        source_channel: TextChannelOrThread,
-        source_id: int,
-        target_channel: TextChannelOrThread,
-        target_id: int,
-        bridge: Bridge,
-        session: SQLSession,
-    ) -> Bridge: ...
-
-    @overload
-    async def _add_bridge_to_db(
-        self,
-        *,
-        source_channel: TextChannelOrThread,
-        source_id: int,
-        target_channel: TextChannelOrThread,
-        target_id: int,
-        bridge: Bridge,
-        session: SQLSession | None,
-    ) -> Bridge: ...
-
     @sql_command
     async def _add_bridge_to_db(
         self,
@@ -544,7 +513,7 @@ class Bridges:
         target_channel: TextChannelOrThread,
         target_id: int,
         bridge: Bridge,
-        session: SQLSession,
+        session: SQLSession = _MISSING_SESSION,
     ) -> Bridge:
         """Add the bridge from source channel to target channel to the database."""
         logger.debug(
@@ -585,7 +554,7 @@ class Bridges:
         source_channel: TextChannelOrThread | int | None = None,
         target_channel: TextChannelOrThread | int | None = None,
         update_db: bool = True,
-        session: SQLSession | None = None,
+        session: SQLSession = _MISSING_SESSION,
         one_sided: bool = False,
     ):
         """Destroy Bridges from source and/or to target channel.
@@ -598,8 +567,8 @@ class Bridges:
             Target channel or ID of same. Defaults to None, in which case will demolish all outbound bridges from `source_channel`.
         update_db : bool, optional
             Whether to update the database when creating the Bridge. Defaults to True.
-        session : :class:`~sqlalchemy.orm.Session` | None, optional
-            An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created. Only used if `update_db` is True.
+        session : :class:`~sqlalchemy.ext.asyncio.AsyncSession`, optional
+            An async SQLAlchemy Session connecting to the database. If it's not present, a new one will be created. Only used if `update_db` is True.
         one_sided : bool, optional
             Whether to demolish only the bridge going from `source_channel` to `target_channel`, rather than both. Defaults to False. Only used if both `source_channel` and `target_channel` are present.
 
@@ -774,31 +743,13 @@ class Bridges:
             session=session,
         )
 
-    @overload
-    async def _remove_bridges_from_db(
-        self,
-        *,
-        bridges_to_demolish: list[tuple[int, int]],
-        webhooks_deleted: set[str],
-        session: SQLSession,
-    ): ...
-
-    @overload
-    async def _remove_bridges_from_db(
-        self,
-        *,
-        bridges_to_demolish: list[tuple[int, int]],
-        webhooks_deleted: set[str],
-        session: SQLSession | None,
-    ): ...
-
     @sql_command
     async def _remove_bridges_from_db(
         self,
         *,
         bridges_to_demolish: list[tuple[int, int]],
         webhooks_deleted: set[str],
-        session: SQLSession,
+        session: SQLSession = _MISSING_SESSION,
     ):
         """Remove bridges from database."""
         logger.debug("Removing bridge(s) from database...")
@@ -944,7 +895,7 @@ class Bridges:
         -------
         dict[int, :class:`~discord.Webhook`]
         """
-        ...
+        pass
 
     @overload
     async def get_reachable_channels(
@@ -970,7 +921,7 @@ class Bridges:
         -------
         set[int]
         """
-        ...
+        pass
 
     @overload
     async def get_reachable_channels(
@@ -995,7 +946,7 @@ class Bridges:
         -------
         set[int]
         """
-        ...
+        pass
 
     async def get_reachable_channels(
         self,

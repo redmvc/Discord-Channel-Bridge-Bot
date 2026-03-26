@@ -8,6 +8,7 @@ from typing import (
     Iterable,
     ParamSpec,
     TypeVar,
+    cast,
     overload,
 )
 
@@ -40,6 +41,8 @@ if TYPE_CHECKING:
 
 T = TypeVar("T", bound=Any)
 P = ParamSpec("P")
+
+_MISSING_SESSION: SQLSession = cast("SQLSession", None)
 
 
 class DBBase(DeclarativeBase):
@@ -441,13 +444,13 @@ async def get_sql_insert_ignore_duplicate_query(
 
 @overload
 def sql_command(
-    commit_results: Callable[P, Coroutine[Any, Any, T]],
+    calling_function: Callable[P, Coroutine[Any, Any, T]],
 ) -> Callable[P, Coroutine[Any, Any, T]]:
     """Decorator that wraps an async function with database session and transaction management.
 
     Using the decorator with no arguments will commit the results of running the function to the database and will assume that the name of the argument to the function that should contain the session is "session".
     """
-    ...
+    pass
 
 
 @overload
@@ -467,10 +470,10 @@ def sql_command(
     session_keyword : str, optional
         The name of the argument that is meant to store the session in the function. Defaults to "session".
     """
-    ...
+    pass
 
 
-def sql_command(
+def sql_command(  # pyright: ignore[reportInconsistentOverload]
     commit_results: Callable[P, Coroutine[Any, Any, T]] | bool = True,
     session_keyword: str = "session",
 ) -> (
@@ -518,6 +521,8 @@ def sql_command(
                             result = await func(*args, **kwargs)
                 else:
                     result = await func(*args, **kwargs)
+            except Exception:
+                raise
             except BaseException as e:
                 logger.error(
                     "An error occurred during database operation in %s: %s",
@@ -776,7 +781,7 @@ async def create_tables(target_engine: AsyncEngine | None = None):
     Parameters
     ----------
     target_engine : :class:`~sqlalchemy.ext.asyncio.AsyncEngine` | None, optional
-        The engine to create/update tables on. Defaults to the module-level engine.
+        The engine to create/update tables on. Defaults to None, in which case the module-level engine will be used.
     """
     _engine = target_engine or engine
     logger.info("Ensuring all necessary tables exist...")
@@ -790,43 +795,13 @@ async def create_tables(target_engine: AsyncEngine | None = None):
     logger.info("All necessary tables are available.")
 
 
-@overload
-async def register_observed_event(
-    channel_id: int,
-    message_id: int | None = None,
-    observed_at: datetime | None = None,
-):
-    """Register an event (such as a message send or bridge creation) in the `most_recent_event_in_channel` table.
-
-    Parameters
-    ----------
-    channel_id : int
-        The ID of the channel in which the event occurred.
-    message_id : int | None, optional
-        The ID of a message that triggered the event, if it was a message. Defaults to None.
-    observed_at : :class:`~datetime.tatetime` | None, optional
-        The UTC datetime when the event occurred. Defaults to None, in which case the current time will be used.
-    """
-    ...
-
-
-@overload
-async def register_observed_event(
-    channel_id: int,
-    message_id: int | None = None,
-    observed_at: datetime | None = None,
-    *,
-    session: SQLSession | None,
-): ...
-
-
 @sql_command
 async def register_observed_event(
     channel_id: int,
     message_id: int | None = None,
     observed_at: "datetime | GenericFunction[datetime] | None" = None,
     *,
-    session: SQLSession,
+    session: SQLSession = _MISSING_SESSION,
 ):
     """Register an event (such as a message send or bridge creation) in the `most_recent_event_in_channel` table.
 
@@ -838,8 +813,8 @@ async def register_observed_event(
         The ID of a message that triggered the event, if it was a message. Defaults to None.
     observed_at : :class:`~datetime.tatetime` | None, optional
         The UTC datetime when the event occurred. Defaults to None, in which case the current time will be used.
-    session : :class:`~sqlalchemy.orm.Session` | None, optional
-        An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
+    session : :class:`~sqlalchemy.ext.asyncio.AsyncSession`, optional
+        An async SQLAlchemy Session connecting to the database. If it's not present, a new one will be created.
     """
     if observed_at is None:
         observed_at = func.now()
