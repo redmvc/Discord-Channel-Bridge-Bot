@@ -1377,6 +1377,9 @@ async def _toggle_pin_message(channel_id: int, target_msg_id: int, pin: bool):
     if not isinstance(target_channel, TextChannelOrThread):
         return
 
+    if not target_channel.permissions_for(target_channel.guild.me).pin_messages:
+        return
+
     partial_message = target_channel.get_partial_message(target_msg_id)
     try:
         common.expected_pin_changes[channel_id] += 1
