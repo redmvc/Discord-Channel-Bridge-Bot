@@ -319,6 +319,7 @@ class Bridges:
 
         logger.info("Bridges successfully loaded from database!")
 
+    @sql_command
     async def create_bridge(
         self,
         *,
@@ -341,7 +342,7 @@ class Bridges:
         update_db : bool, optional
             Whether to update the database when creating the Bridge. Defaults to True.
         session : :class:`~sqlalchemy.orm.Session` | None, optional
-            An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created. Only used if `update_db` is True.
+            An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
 
         Returns
         -------
@@ -356,6 +357,8 @@ class Bridges:
         Forbidden
             You do not have permissions to create or delete webhooks.
         """
+        assert session is not None
+
         validated_channels = validate_channels(
             source=await common.get_channel_from_id(source),
             target=await common.get_channel_from_id(target),
