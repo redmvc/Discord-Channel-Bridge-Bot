@@ -10,6 +10,7 @@ import common
 from database import (
     _MISSING_SESSION,
     DBBridge,
+    DBMessageMap,
     DBWebhook,
     get_sql_insert_ignore_duplicate_query,
     get_sql_upsert_query,
@@ -471,6 +472,13 @@ class Bridges:
             elif not existing_webhook:
                 # Target channel does not already have a webhook, create one
                 await self.webhooks.add_webhook(target_channel)
+
+        if source_id not in common.pinned_messages_cache:
+            logger.debug(
+                "Loading pinned messages from <#%s> into local cache...", source_id
+            )
+            await toggle_pins_helper(source_channel, session=session)
+            logger.debug("<#%s>'s pinned messages loaded.", source_id)
 
         # If I don't need to update the database I end here
         if not update_db:
@@ -1260,3 +1268,130 @@ class Webhooks:
 
 
 bridges = Bridges()
+
+
+@sql_command(commit_results=False)
+async def toggle_pins_helper(
+    channel: TextChannelOrThread,
+    *,
+    session: SQLSession = _MISSING_SESSION,
+):
+    """Bridge message pins and unpins.
+
+    Parameters
+    ----------
+    channel : :class:`~discord.abc.GuildChannel` | :class:`~discord.Thread`
+        The guild channel that had its pins updated.
+    session : :class:`~sqlalchemy.ext.asyncio.AsyncSession`, optional
+        An async SQLAlchemy Session connecting to the database. If it's not present, a new one will be created.
+    """
+    channel_id = channel.id
+
+    # Fetch current pins and build set of IDs
+    current_pin_ids: set[int] = {msg.id async for msg in channel.pins()}
+
+    # Get previous state from cache
+    previous_pin_ids = common.pinned_messages_cache.get(channel_id)
+    if previous_pin_ids is None:
+        # First event for a channel not in cache (e.g. bridge created after startup)
+        common.pinned_messages_cache[channel_id] = current_pin_ids
+        return
+
+    # Compute diff
+    newly_pinned = current_pin_ids - previous_pin_ids
+    newly_unpinned = previous_pin_ids - current_pin_ids
+
+    # Update cache
+    common.pinned_messages_cache[channel_id] = current_pin_ids
+
+    if not (newly_pinned or newly_unpinned):
+        return
+
+    # Get reachable destination channels
+    reachable_channels = await bridges.get_reachable_channels(channel_id, "outbound")
+    if not reachable_channels:
+        return
+
+    for pin_toggled_msg_id, pin in [
+        *((msg_id, True) for msg_id in newly_pinned),
+        *((msg_id, False) for msg_id in newly_unpinned),
+    ]:
+        pin_toggled_msg_src = await (
+            DBMessageMap(session)
+            .where(
+                (F.col("source_message") == F.lit(pin_toggled_msg_id))
+                | (F.col("target_message") == F.lit(pin_toggled_msg_id))
+            )
+            .limit(1)
+            .collect()
+        )
+        if not pin_toggled_msg_src:
+            continue
+
+        source_msg_id = int(pin_toggled_msg_src[0].source_message)
+        bridged_messages = await (
+            DBMessageMap(session)
+            .where(
+                (F.col("source_message") == F.lit(source_msg_id))
+                & (
+                    F.col("source_channel").isin(reachable_channels)
+                    | F.col("target_channel").isin(reachable_channels)
+                )
+            )
+            .collect()
+        )
+
+        if (int(bridged_messages[0].source_message) != pin_toggled_msg_id) and (
+            int(bridged_messages[0].source_channel) in reachable_channels
+        ):
+            await _toggle_pin_message(
+                int(bridged_messages[0].source_channel),
+                int(bridged_messages[0].source_message),
+                pin,
+            )
+
+        for message_row in bridged_messages:
+            target_channel_id = int(message_row.target_channel)
+            target_message_id = int(message_row.target_message)
+            if (target_channel_id not in reachable_channels) or (
+                target_message_id == pin_toggled_msg_id
+            ):
+                continue
+
+            # Only pin the primary message (order 0 or NULL), not split parts
+            if message_row.target_message_order and (
+                int(message_row.target_message_order) != 0
+            ):
+                continue
+
+            await _toggle_pin_message(
+                target_channel_id,
+                target_message_id,
+                pin,
+            )
+
+
+async def _toggle_pin_message(channel_id: int, target_msg_id: int, pin: bool):
+    """Pin or unpin a message in a channel."""
+    target_channel = await common.get_channel_from_id(channel_id)
+    if not isinstance(target_channel, TextChannelOrThread):
+        return
+
+    partial_message = target_channel.get_partial_message(target_msg_id)
+    try:
+        common.expected_pin_changes[channel_id] += 1
+        if pin:
+            await partial_message.pin()
+        else:
+            await partial_message.unpin()
+    except discord.HTTPException as e:
+        common.expected_pin_changes[channel_id] -= 1
+        if common.expected_pin_changes[channel_id] == 0:
+            del common.expected_pin_changes[channel_id]
+        logger.warning(
+            "Failed to %s message %s in channel <#%s>: %s",
+            "pin" if pin else "unpin",
+            target_msg_id,
+            channel_id,
+            e,
+        )

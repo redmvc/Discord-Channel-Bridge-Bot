@@ -193,6 +193,12 @@ messages_to_edit: dict[int, discord.RawMessageUpdateEvent] = {}
 # Variable to keep track of channels that are being sent messages to to try to preserve ordering
 channel_lock: dict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
 
+# Cache of pinned message IDs per channel, for detecting what changed on pin update events
+pinned_messages_cache: dict[int, set[int]] = {}
+
+# Counter of self-triggered pin/unpin events to ignore per channel
+expected_pin_changes: dict[int, int] = defaultdict(int)
+
 # Type wildcard
 T = TypeVar("T", bound=Any)
 

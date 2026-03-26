@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession as SQLSession
 import commands
 import common
 import emoji_hash_map
-from bridge import Bridge, bridges
+from bridge import Bridge, bridges, toggle_pins_helper
 from database import (
     _MISSING_SESSION,
     DBAppWhitelist,
@@ -2703,6 +2703,42 @@ async def unreact(
 
 
 @common.client.event
+async def on_guild_channel_pins_update(
+    channel: TextChannelOrThread,
+    last_pin: datetime | None,
+):
+    """Called whenever a message is pinned or unpinned from a guild channel.
+
+    Parameters
+    ----------
+    channel : :class:`~discord.abc.GuildChannel` | :class:`~discord.Thread`
+        The guild channel that had its pins updated.
+    last_pin : :class:`~datetime.datetime` | None
+        The latest message that was pinned as an aware datetime in UTC. Could be `None`.
+    """
+    channel_id = channel.id
+    lock = common.channel_lock[channel_id]
+    async with lock:
+        if (
+            not isinstance(channel, TextChannelOrThread)
+            or (not await common.wait_until_ready())
+            or (not bridges.get_outbound_bridges(channel_id))
+        ):
+            return
+
+        await register_observed_event(channel_id)
+
+        if common.expected_pin_changes.get(channel_id, 0) > 0:
+            # Pin change due to bot itself
+            common.expected_pin_changes[channel_id] -= 1
+            if common.expected_pin_changes[channel_id] == 0:
+                del common.expected_pin_changes[channel_id]
+            return
+
+        await toggle_pins_helper(channel)
+
+
+@common.client.event
 async def on_thread_create(thread: discord.Thread):
     """This function is called whenever a thread is created.
 
@@ -3029,6 +3065,7 @@ def register_events():
         on_raw_reaction_remove,
         on_raw_reaction_clear_emoji,
         on_raw_reaction_clear,
+        on_guild_channel_pins_update,
         on_thread_create,
         on_guild_join,
         on_guild_remove,
