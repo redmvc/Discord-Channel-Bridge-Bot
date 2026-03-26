@@ -1551,7 +1551,7 @@ async def replace_discord_links(
     )
 
     channel_links_and_mentions: set[tuple[str, str, str] | str] = set(
-        re.findall(r"discord(app)?.com/channels/(\d+|@me)/(\d+)", content)
+        re.findall(r"discord(app)?.com/channels/(\d+)/(\d+)", content)
     ) | set(re.findall(r"<#(\d+)>", content))
 
     if not (message_links or channel_links_and_mentions):
@@ -1560,6 +1560,40 @@ async def replace_discord_links(
 
     # Get all reachable channel IDs from the current channel
     guild_id = channel.guild.id
+
+    logger.debug(
+        "Replacing discord links to messages when bridging message into channel with ID %s.",
+        channel.id,
+    )
+    content = await _replace_message_links(
+        content,
+        channel,
+        message_links,
+        guild_id,
+        session,
+    )
+
+    logger.debug(
+        "Replacing discord links to channels when bridging message into channel with ID %s.",
+        channel.id,
+    )
+    content = await _replace_channel_links_and_mentions(
+        content,
+        channel_links_and_mentions,
+        guild_id,
+    )
+
+    return content
+
+
+async def _replace_message_links(
+    content: str,
+    channel: TextChannelOrThread,
+    message_links: set[tuple[str, str, str, str]],
+    guild_id: int,
+    session: SQLSession,
+) -> str:
+    """Replace message links in a message to links to a bridged message that is (in order of priority) in this channel or its parent or this channel (or its parent)'s threads, this channel's server, or bridged to this channel."""
     channel_id = channel.id
     channel_and_thread_ids = {channel_id}
     bridged_channel_ids = await bridges.get_reachable_channels(channel_id)
@@ -1584,31 +1618,6 @@ async def replace_discord_links(
             await bridges.get_reachable_channels(thread_id)
         )
 
-    logger.debug(
-        "Replacing discord links to messages when bridging message into channel with ID %s.",
-        channel_id,
-    )
-    content = await _replace_message_links(
-        content,
-        message_links,
-        channel_and_thread_ids,
-        guild_id,
-        bridged_channel_ids,
-        session,
-    )
-
-    return content
-
-
-async def _replace_message_links(
-    content: str,
-    message_links: set[tuple[str, str, str, str]],
-    channel_and_thread_ids: set[int],
-    guild_id: int,
-    bridged_channel_ids: set[int],
-    session: SQLSession,
-) -> str:
-    """Replace message links in a message to links to a bridged message that is (in order of priority) in this channel or its parent or this channel (or its parent)'s threads, this channel's server, or bridged to this channel."""
     # Now try to find equivalent links if the messages being linked to are bridged
     for _, link_guild_id, link_channel_id, link_message_id in message_links:
         if int(link_channel_id) in channel_and_thread_ids:
@@ -1704,6 +1713,52 @@ async def _replace_message_links(
                 link_channel_id = message_row.target_channel
                 link_message_id = message_row.target_message
                 link_message_is_in_guild = target_message_is_in_guild
+
+    return content
+
+
+async def _replace_channel_links_and_mentions(
+    content: str,
+    channel_links_and_mentions: set[tuple[str, str, str] | str],
+    guild_id: int,
+) -> str:
+    """Replace channel links and mentions in a message to links and mentions to a bridged channel in the same server."""
+    channels_already_visited: set[str] = set()
+
+    for link_or_mention in channel_links_and_mentions:
+        if isinstance(link_or_mention, tuple):
+            _, link_guild_id, link_channel_id = link_or_mention
+        else:
+            link_channel_id = link_or_mention
+            link_guild_id = await common.get_channel_guild_id(int(link_channel_id))
+            if not link_guild_id:
+                continue
+
+        if link_channel_id in channels_already_visited:
+            continue
+        channels_already_visited.add(link_channel_id)
+
+        if int(link_guild_id) == guild_id:
+            # Linked channel is already in the same server as the current channel
+            continue
+
+        channels_reachable_from_link_channel = await bridges.get_reachable_channels(
+            int(link_channel_id)
+        )
+        for rechable_channel_id in channels_reachable_from_link_channel:
+            reachable_guild_id = await common.get_channel_guild_id(rechable_channel_id)
+            if reachable_guild_id != guild_id:
+                continue
+
+            content = content.replace(
+                f"{link_guild_id}/{link_channel_id}",
+                f"{guild_id}/{rechable_channel_id}",
+            ).replace(
+                f"<#{link_channel_id}>",
+                f"<#{rechable_channel_id}>",
+            )
+
+            break
 
     return content
 
