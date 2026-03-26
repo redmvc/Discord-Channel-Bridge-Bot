@@ -53,7 +53,11 @@ class DBBase(DeclarativeBase):
     pass
 
 
-class DBBridge(DBBase):
+class AsyncDFBase(AsyncDataFrame):
+    db_base: type["DBBases"]
+
+
+class _DBBridge(DBBase):
     """
     An SQLAlchemy ORM class representing a database table tracking existing bridges between channels and/or threads.
 
@@ -83,7 +87,14 @@ class DBBridge(DBBase):
     target: Mapped[str] = mapped_column(String(32), nullable=False)
 
 
-class DBWebhook(DBBase):
+class DBBridge(AsyncDFBase):
+    db_base = _DBBridge
+
+    def __init__(self, session: SQLSession):
+        super().__init__(session, _DBBridge)
+
+
+class _DBWebhook(DBBase):
     """
     An SQLAlchemy ORM class representing a database table tracking webhooks managed by the bot in each channel.
 
@@ -104,7 +115,14 @@ class DBWebhook(DBBase):
     )
 
 
-class DBMessageMap(DBBase):
+class DBWebhook(AsyncDFBase):
+    db_base = _DBWebhook
+
+    def __init__(self, session: SQLSession):
+        super().__init__(session, _DBWebhook)
+
+
+class _DBMessageMap(DBBase):
     """
     An SQLAlchemy ORM class representing a database table listing the mappings between bridged messages.
 
@@ -142,7 +160,14 @@ class DBMessageMap(DBBase):
     webhook: Mapped[str] = mapped_column(String(32), nullable=True)
 
 
-class DBMostRecentEventInChannel(DBBase):
+class DBMessageMap(AsyncDFBase):
+    db_base = _DBMessageMap
+
+    def __init__(self, session: SQLSession):
+        super().__init__(session, _DBMessageMap)
+
+
+class _DBMostRecentEventInChannel(DBBase):
     """
     An SQLAlchemy ORM class representing a database table with the most recent event observed in a bridged channel.
 
@@ -165,7 +190,14 @@ class DBMostRecentEventInChannel(DBBase):
     )
 
 
-class DBReactionMap(DBBase):
+class DBMostRecentEventInChannel(AsyncDFBase):
+    db_base = _DBMostRecentEventInChannel
+
+    def __init__(self, session: SQLSession):
+        super().__init__(session, _DBMostRecentEventInChannel)
+
+
+class _DBReactionMap(DBBase):
     """
     An SQLAlchemy ORM class representing a database table listing the mappings between bridged reactions.
 
@@ -210,7 +242,14 @@ class DBReactionMap(DBBase):
     target_emoji_name: Mapped[str] = mapped_column(String(32), nullable=True)
 
 
-class DBAutoBridgeThreadChannels(DBBase):
+class DBReactionMap(AsyncDFBase):
+    db_base = _DBReactionMap
+
+    def __init__(self, session: SQLSession):
+        super().__init__(session, _DBReactionMap)
+
+
+class _DBAutoBridgeThreadChannels(DBBase):
     """
     An SQLAlchemy ORM class representing a database table listing all channels that will automatically bridge newly-created threads.
 
@@ -226,7 +265,14 @@ class DBAutoBridgeThreadChannels(DBBase):
     channel: Mapped[str] = mapped_column(String(32), nullable=False)
 
 
-class DBEmoji(DBBase):
+class DBAutoBridgeThreadChannels(AsyncDFBase):
+    db_base = _DBAutoBridgeThreadChannels
+
+    def __init__(self, session: SQLSession):
+        super().__init__(session, _DBAutoBridgeThreadChannels)
+
+
+class _DBEmoji(DBBase):
     """
     An SQLAlchemy ORM class representing a database table storing information about emoji.
 
@@ -250,7 +296,14 @@ class DBEmoji(DBBase):
     accessible: Mapped[bool] = mapped_column(Boolean, nullable=False)
 
 
-class DBAppWhitelist(DBBase):
+class DBEmoji(AsyncDFBase):
+    db_base = _DBEmoji
+
+    def __init__(self, session: SQLSession):
+        super().__init__(session, _DBEmoji)
+
+
+class _DBAppWhitelist(DBBase):
     """
     An SQLAlchemy ORM class representing a database table storing IDs for applications/bots that are whitelisted for bridging messages in a given channel.
 
@@ -275,6 +328,23 @@ class DBAppWhitelist(DBBase):
     application: Mapped[str] = mapped_column(String(32), nullable=False)
 
 
+class DBAppWhitelist(AsyncDFBase):
+    db_base = _DBAppWhitelist
+
+    def __init__(self, session: SQLSession):
+        super().__init__(session, _DBAppWhitelist)
+
+
+DBBases = (
+    _DBBridge
+    | _DBWebhook
+    | _DBMessageMap
+    | _DBMostRecentEventInChannel
+    | _DBReactionMap
+    | _DBAutoBridgeThreadChannels
+    | _DBEmoji
+    | _DBAppWhitelist
+)
 Table = (
     DBBridge
     | DBWebhook
@@ -318,6 +388,8 @@ async def get_sql_upsert_query(
     :class:`~sqlalchemy.exc.StatementError`
         SQL statement inferred from arguments was invalid or database connection failed. This error can only be raised if the database dialect is not MySQL, PostgreSQL, nor SQLite.
     """
+    _table = table.db_base
+
     indices = set(indices)
     insert_values = kwargs
     insert_value_keys = set(insert_values.keys())
@@ -337,16 +409,16 @@ async def get_sql_upsert_query(
     db_dialect = engine.dialect.name
     if db_dialect == "mysql":
         return (
-            mysql.insert(table)
+            mysql.insert(_table)
             .values(**insert_values)
             .on_duplicate_key_update(**update_values)
         )
     elif db_dialect in {"postgresql", "sqlite"}:
         insert: postgresql.Insert | sqlite.Insert
         if db_dialect == "postgresql":
-            insert = postgresql.insert(table)
+            insert = postgresql.insert(_table)
         else:
-            insert = sqlite.insert(table)
+            insert = sqlite.insert(_table)
 
         return insert.values(**insert_values).on_conflict_do_update(
             index_elements=indices,
@@ -356,19 +428,19 @@ async def get_sql_upsert_query(
         # I'll do a manual update in this case
         async with Session() as session:
             index_values = [
-                getattr(table, idx) == insert_values[idx] for idx in indices
+                getattr(_table, idx) == insert_values[idx] for idx in indices
             ]
             upsert: UpdateBase
 
             existing = (
-                await session.execute(sql.select(table).where(*index_values))
+                await session.execute(sql.select(_table).where(*index_values))
             ).first()
 
             if existing:
                 # Values with those keys do exist, so I update
-                upsert = sql.Update(table).where(*index_values).values(**update_values)
+                upsert = sql.Update(_table).where(*index_values).values(**update_values)
             else:
-                upsert = sql.insert(table).values(**insert_values)
+                upsert = sql.insert(_table).values(**insert_values)
 
         return upsert
 
@@ -399,6 +471,8 @@ async def get_sql_insert_ignore_duplicate_query(
     :class:`~sqlalchemy.exc.StatementError`
         SQL statement inferred from arguments was invalid or database connection failed. This error can only be raised if the database dialect is not MySQL, PostgreSQL, nor SQLite.
     """
+    _table = table.db_base
+
     indices = set(indices)
     insert_values = kwargs
 
@@ -406,38 +480,38 @@ async def get_sql_insert_ignore_duplicate_query(
     if db_dialect == "mysql":
         random_index = indices.pop()
         return (
-            mysql.insert(table)
+            mysql.insert(_table)
             .values(**insert_values)
-            .on_duplicate_key_update(**{random_index: getattr(table, random_index)})
+            .on_duplicate_key_update(**{random_index: getattr(_table, random_index)})
         )
     elif db_dialect in {"postgresql", "sqlite"}:
         insert: postgresql.Insert | sqlite.Insert
         if db_dialect == "postgresql":
-            insert = postgresql.insert(table)
+            insert = postgresql.insert(_table)
         else:
-            insert = sqlite.insert(table)
+            insert = sqlite.insert(_table)
 
         return insert.values(**insert_values).on_conflict_do_nothing()
     else:
         # I'll do a manual update in this case
         async with Session() as session:
             index_values = [
-                getattr(table, idx) == insert_values[idx] for idx in indices
+                getattr(_table, idx) == insert_values[idx] for idx in indices
             ]
             insert_unknown: UpdateBase
 
             existing = (
-                await session.execute(sql.select(table).where(*index_values))
+                await session.execute(sql.select(_table).where(*index_values))
             ).first()
 
             if existing:
                 # Values with those keys do exist, so I do nothing
                 random_index = indices.pop()
-                insert_unknown = sql.Update(table).values(
-                    **{random_index: getattr(table, random_index)}
+                insert_unknown = sql.Update(_table).values(
+                    **{random_index: getattr(_table, random_index)}
                 )
             else:
-                insert_unknown = sql.insert(table).values(**insert_values)
+                insert_unknown = sql.insert(_table).values(**insert_values)
 
         return insert_unknown
 

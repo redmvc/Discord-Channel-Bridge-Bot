@@ -8,7 +8,6 @@ from sqlalchemy.ext.asyncio import AsyncSession as SQLSession
 import common
 from database import (
     _MISSING_SESSION,
-    AsyncDataFrame,
     DBEmoji,
     get_sql_upsert_query,
     sql_command,
@@ -55,7 +54,7 @@ class EmojiHashMap:
         logger.info("Initialising emoji hash map...")
 
         try:
-            hashed_emoji_query_result = await AsyncDataFrame(session, DBEmoji).collect()
+            hashed_emoji_query_result = await DBEmoji(session).collect()
             emoji_ids_to_delete: set[str] = set()
             accessibility_flips: set[str] = set()
             for row in hashed_emoji_query_result:
@@ -91,14 +90,14 @@ class EmojiHashMap:
 
             if len(emoji_ids_to_delete) > 0:
                 await (
-                    AsyncDataFrame(session, DBEmoji)
+                    DBEmoji(session)
                     .where(F.col("id").isin(emoji_ids_to_delete))
                     .delete()
                 )
 
             if len(accessibility_flips) > 0:
                 await (
-                    AsyncDataFrame(session, DBEmoji)
+                    DBEmoji(session)
                     .where(F.col("id").isin(accessibility_flips))
                     .update(set_={"accessible": ~F.col("accessible")})
                 )
@@ -452,11 +451,7 @@ class EmojiHashMap:
     ):
         logger.debug("Deleting emoji with ID %s from database...", emoji_id)
 
-        await (
-            AsyncDataFrame(session, DBEmoji)
-            .where(F.col("id") == F.lit(emoji_id))
-            .delete()
-        )
+        await DBEmoji(session).where(F.col("id") == F.lit(emoji_id)).delete()
 
         logger.debug("Emoji with ID %s deleted from database.", emoji_id)
 

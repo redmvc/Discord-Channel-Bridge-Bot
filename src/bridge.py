@@ -9,7 +9,6 @@ from sqlalchemy.ext.asyncio import AsyncSession as SQLSession
 import common
 from database import (
     _MISSING_SESSION,
-    AsyncDataFrame,
     DBBridge,
     DBWebhook,
     get_sql_insert_ignore_duplicate_query,
@@ -157,7 +156,7 @@ class Bridges:
         invalid_channel_ids: set[str] = set()
         invalid_webhook_ids: set[str] = set()
 
-        webhook_query_result = await AsyncDataFrame(session, DBWebhook).collect()
+        webhook_query_result = await DBWebhook(session).collect()
         for channel_webhook in webhook_query_result:
             channel_id = int(channel_webhook.channel)
             webhook_id = int(channel_webhook.webhook)
@@ -197,7 +196,7 @@ class Bridges:
         all_target_channels: set[str] = set()
         targets_with_sources: set[str] = set()
 
-        bridge_query_result = await AsyncDataFrame(session, DBBridge).collect()
+        bridge_query_result = await DBBridge(session).collect()
         for bridge in bridge_query_result:
             target_id_str = bridge.target
             if target_id_str in invalid_channel_ids:
@@ -297,7 +296,7 @@ class Bridges:
 
             if len(channel_ids_to_delete) > 0:
                 await (
-                    AsyncDataFrame(session, DBBridge)
+                    DBBridge(session)
                     .where(
                         F.col("source").isin(channel_ids_to_delete)
                         | F.col("target").isin(channel_ids_to_delete)
@@ -306,7 +305,7 @@ class Bridges:
                 )
 
             await (
-                AsyncDataFrame(session, DBWebhook)
+                DBWebhook(session)
                 .where(
                     F.col("channel").isin(channel_ids_to_delete)
                     | F.col("webhook").isin(invalid_webhook_ids)
@@ -756,7 +755,7 @@ class Bridges:
             source_id_str = str(sid)
             target_id_str = str(tid)
             await (
-                AsyncDataFrame(session, DBBridge)
+                DBBridge(session)
                 .where(
                     (F.col("source") == F.lit(source_id_str))
                     & (F.col("target") == F.lit(target_id_str))
@@ -766,7 +765,7 @@ class Bridges:
 
         if len(webhooks_deleted) > 0:
             await (
-                AsyncDataFrame(session, DBWebhook)
+                DBWebhook(session)
                 .where(F.col("webhook").isin(webhooks_deleted))
                 .delete()
             )

@@ -11,7 +11,6 @@ import emoji_hash_map
 from bridge import Bridge, bridges
 from database import (
     _MISSING_SESSION,
-    AsyncDataFrame,
     DBAppWhitelist,
     DBAutoBridgeThreadChannels,
     DBMessageMap,
@@ -504,7 +503,7 @@ async def toggle_auto_bridge_threads(
     bool
     """
     if channel_id not in common.auto_bridge_thread_channels:
-        session.add(DBAutoBridgeThreadChannels(channel=str(channel_id)))
+        session.add(DBAutoBridgeThreadChannels.db_base(channel=str(channel_id)))
         common.auto_bridge_thread_channels.add(channel_id)
 
         return True
@@ -572,7 +571,7 @@ async def bridge_thread_helper(
         # I don't need to store it I just need to know whether it exists
         await thread_parent.fetch_message(thread_to_bridge.id)
         source_starting_message = await (
-            AsyncDataFrame(session, DBMessageMap)
+            DBMessageMap(session)
             .where(F.col("target_message") == F.lit(thread_to_bridge.id))
             .first()
         )
@@ -586,7 +585,7 @@ async def bridge_thread_helper(
             source_message_id = thread_to_bridge.id
 
         target_starting_messages = await (
-            AsyncDataFrame(session, DBMessageMap)
+            DBMessageMap(session)
             .where(F.col("source_message") == F.lit(source_message_id))
             .collect()
         )
@@ -734,7 +733,7 @@ async def stop_auto_bridging_threads_helper(
             channel_ids_to_remove = set(channel_ids_to_remove)
 
     await (
-        AsyncDataFrame(session, DBAutoBridgeThreadChannels)
+        DBAutoBridgeThreadChannels(session)
         .where(F.col("channel").isin(channel_ids_to_remove))
         .delete()
     )
@@ -1234,7 +1233,10 @@ async def whitelist(interaction: discord.Interaction, apps: str):
             if len(apps_to_add) > 0:
                 session.add_all(
                     [
-                        DBAppWhitelist(channel=channel_id_str, application=str(app_id))
+                        DBAppWhitelist.db_base(
+                            channel=channel_id_str,
+                            application=str(app_id),
+                        )
                         for app_id in apps_to_add
                     ]
                 )
@@ -1246,7 +1248,7 @@ async def whitelist(interaction: discord.Interaction, apps: str):
 
             if len(apps_to_remove) > 0:
                 await (
-                    AsyncDataFrame(session, DBAppWhitelist)
+                    DBAppWhitelist(session)
                     .where(
                         (F.col("channel") == F.lit(channel_id_str))
                         & F.col("application").isin(apps_to_remove)
@@ -1681,7 +1683,7 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
         ) -> tuple[dict[str, list["Coroutine[Any, Any, set[int]]"]], bool]:
             # We need to see whether this message is a bridged message and, if so, find its source
             source_message_map = await (
-                AsyncDataFrame(session, DBMessageMap)
+                DBMessageMap(session)
                 .where(F.col("target_message") == F.lit(message.id))
                 .first()
             )
@@ -1714,7 +1716,7 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
             outbound_bridges = bridges.get_outbound_bridges(source_channel_id)
             if outbound_bridges:
                 bridged_messages = await (
-                    AsyncDataFrame(session, DBMessageMap)
+                    DBMessageMap(session)
                     .where(F.col("source_message") == F.lit(source_message_id))
                     .collect()
                 )
