@@ -1564,10 +1564,9 @@ async def replace_discord_links(
     # Get all reachable channel IDs from the current channel
     channel_id = channel.id
     channel_ids_to_check = {str(channel_id)}
-    bridged_channel_ids: set[int] = set().union(
-        await bridges.get_reachable_channels(channel_id, "outbound"),
-        await bridges.get_reachable_channels(channel_id, "inbound"),
-    )
+    bridged_channel_ids: set[int] = (
+        await bridges.get_reachable_channels(channel_id, "outbound")
+    ) | (await bridges.get_reachable_channels(channel_id, "inbound"))
 
     # If the current channel is actually a thread, get reachable channel IDs from its parent
     parent_channel = await common.get_channel_parent(channel)
