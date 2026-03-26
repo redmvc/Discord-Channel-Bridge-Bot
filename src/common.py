@@ -573,6 +573,71 @@ async def get_channel_parent(
     return channel
 
 
+async def get_channel_guild_id(
+    channel_or_id: DiscordChannel | int,
+    *,
+    bot_client: discord.Client | None = None,
+) -> int | None:
+    """Return the ID of the Discord server the channel given by `channel_or_id` is in, if any, or None if there isn't any.
+
+    Parameters
+    ----------
+    channel_or_id : :class:`~discord.abc.GuildChannel` | :class:`~discord.abc.PrivateChannel` | :class:`~discord.Thread` | :class:`~discord.PartialMessageable` | int
+        Either a Discord channel or an ID of same.
+    bot_client : :class:`~discord.Client` | None, optional
+        The client of the bot from whose perspective to fetch the channel. Defaults to None, in which case the Bridge Bot's client will be used. If this argument is not None and `channel_or_id` is a channel, will get the channel's ID and then try to fetch it from `bot_client`'s perspective.
+
+    Returns
+    -------
+    int | None
+    """
+    try:
+        channel = await get_channel_from_id(channel_or_id, bot_client=bot_client)
+    except Exception:
+        return None
+
+    return (
+        channel
+        and (not isinstance(channel, discord.abc.PrivateChannel))
+        and channel.guild
+        and channel.guild.id
+    ) or None
+
+
+async def channel_is_in_guild(
+    channel_or_id: DiscordChannel | int,
+    guild_or_id: discord.Guild | int,
+    *,
+    bot_client: discord.Client | None = None,
+) -> bool:
+    """Return True if `channel_or_id` is a channel (or an ID of same) in `guild_or_id` (or a server with it as ID) and False otherwise.
+
+    Parameters
+    ----------
+    channel_or_id : :class:`~discord.abc.GuildChannel` | :class:`~discord.abc.PrivateChannel` | :class:`~discord.Thread` | :class:`~discord.PartialMessageable` | int
+        Either a Discord channel or an ID of same.
+    guild_or_id : :class:`~discord.Guild` | int
+        Either a Discord server or an ID of same.
+    bot_client : :class:`~discord.Client` | None, optional
+        The client of the bot from whose perspective to fetch the channel. Defaults to None, in which case the Bridge Bot's client will be used. If this argument is not None and `channel_or_id` is a channel, will get the channel's ID and then try to fetch it from `bot_client`'s perspective.
+
+    Returns
+    -------
+    bool
+    """
+    try:
+        channel = await get_channel_from_id(channel_or_id, bot_client=bot_client)
+    except Exception:
+        return False
+
+    if not channel:
+        return False
+
+    guild_id = guild_or_id if isinstance(guild_or_id, int) else guild_or_id.id
+    channel_guild_id = await get_channel_guild_id(channel, bot_client=bot_client)
+    return guild_id == channel_guild_id
+
+
 async def get_channel_member(
     channel: discord.abc.GuildChannel | discord.Thread,
     member_id: int,
