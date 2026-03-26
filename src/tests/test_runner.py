@@ -1316,7 +1316,7 @@ async def expect(
             if TYPE_CHECKING:
                 assert isinstance(value, int | discord.TextChannel | discord.Thread)
 
-            log_message = f"expected message to {' not' if negation else ''}be in channel <#{value}>"
+            log_message = f"expected message to{' not' if negation else ''} be in channel <#{value}>"
             if (message_channel_id == value) != negation:
                 log_expectation(log_message, "success")
             elif not negation:
@@ -1333,7 +1333,7 @@ async def expect(
             if TYPE_CHECKING:
                 assert isinstance(value, discord.Message)
 
-            log_message = f"expected message to {' not' if negation else ''}be a reply to message with ID {value.id}"
+            log_message = f"expected message to{' not' if negation else ''} be a reply to message with ID {value.id}"
             if not (message_reference := obj.reference):
                 message = f"{log_message} {'but' if not negation else 'and'} it was not a reply"
                 if not negation:
@@ -1359,7 +1359,7 @@ async def expect(
             if TYPE_CHECKING:
                 assert isinstance(value, discord.Message)
 
-            log_message = f"expected message to {' not' if negation else ''}be a forward of message with ID {value.id}"
+            log_message = f"expected message to{' not' if negation else ''} be a forward of message with ID {value.id}"
             if not (message_reference := obj.reference):
                 message = f"{log_message} {'but' if not negation else 'and'} it was not a forward"
                 if not negation:
@@ -1395,7 +1395,7 @@ async def expect(
             elif isinstance(value, discord.User | discord.Member):
                 value = value.id
 
-            log_message = f"expected message to {' not' if negation else ''}be from user with ID {value}"
+            log_message = f"expected message to{' not' if negation else ''} be from user with ID {value}"
             if value in [
                 (application_id := obj.application_id),
                 (author_id := obj.author.id),
@@ -1720,7 +1720,7 @@ async def expect(
             continue
 
         if expectation == "contain":
-            log_message = f"expected message to {' not' if negation else ''}contain text\n    {value}"
+            log_message = f"expected message to{' not' if negation else ''} contain text\n    {value}"
             if value in content:
                 message = f"{log_message}{' but it did' if negation else ''}"
                 if not negation:
@@ -1739,7 +1739,7 @@ async def expect(
                     log_expectation(message, "failure")
         elif expectation == "equal":
             log_message = (
-                f"expected message to {' not' if negation else ''}equal\n    {value}"
+                f"expected message to{' not' if negation else ''} equal\n    {value}"
             )
             if content == value:
                 message = f"{log_message}{'  \nbut it did' if negation else ''}"
