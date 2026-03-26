@@ -3,7 +3,7 @@ import inspect
 import json
 import logging
 from collections import defaultdict
-from typing import TYPE_CHECKING, List, Optional, Sequence, Union, cast
+from typing import TYPE_CHECKING, cast
 
 import discord
 
@@ -11,7 +11,7 @@ import common
 from validations import setup_logger
 
 if TYPE_CHECKING:
-    from typing import Any, Coroutine
+    from typing import Any, Coroutine, List, Sequence
 
     from common import SettingsRoot
 
@@ -254,12 +254,12 @@ class InteractionTester:
     async def edit_original_response(
         self,
         *,
-        content: Optional[str] = MISSING,
-        embed: Optional[discord.Embed] = MISSING,
-        embeds: Sequence[discord.Embed] = MISSING,
-        attachments: (Sequence[Union[discord.Attachment, discord.File]]) = MISSING,
-        view: Optional[discord.ui.View] = MISSING,
-        allowed_mentions: Optional[discord.AllowedMentions] = None,
+        content: str | None = MISSING,
+        embed: discord.Embed | None = MISSING,
+        embeds: "Sequence[discord.Embed]" = MISSING,
+        attachments: "Sequence[discord.Attachment | discord.File]" = MISSING,
+        view: discord.ui.View | None = MISSING,
+        allowed_mentions: discord.AllowedMentions | None = None,
         poll: discord.Poll = MISSING,
     ) -> "discord.Message | FakeMessage | None":
         message_to_edit = (
@@ -329,19 +329,19 @@ class InteractionResponseTester:
 
     async def send_message(
         self,
-        content: Optional["Any"] = None,
+        content: "Any | None" = None,
         *,
         embed: discord.Embed = MISSING,
-        embeds: Sequence[discord.Embed] = MISSING,
+        embeds: "Sequence[discord.Embed]" = MISSING,
         file: discord.File = MISSING,
-        files: Sequence[discord.File] = MISSING,
+        files: "Sequence[discord.File]" = MISSING,
         view: discord.ui.View = MISSING,
         tts: bool = MISSING,
         ephemeral: bool = False,
         allowed_mentions: discord.AllowedMentions = MISSING,
         suppress_embeds: bool = False,
         silent: bool = MISSING,
-        delete_after: Optional[float] = None,
+        delete_after: float | None = None,
         poll: discord.Poll = MISSING,
     ) -> "discord.Message | FakeMessage | None":
         logger.debug("Sending interaction response...")
@@ -433,9 +433,9 @@ class WebhookTester(InteractionResponseTester):
         tts: bool = False,
         ephemeral: bool = False,
         file: discord.File = MISSING,
-        files: Sequence[discord.File] = MISSING,
+        files: "Sequence[discord.File]" = MISSING,
         embed: discord.Embed = MISSING,
-        embeds: Sequence[discord.Embed] = MISSING,
+        embeds: "Sequence[discord.Embed]" = MISSING,
         allowed_mentions: discord.AllowedMentions = MISSING,
         view: discord.ui.View = MISSING,
         thread: discord.abc.Snowflake = MISSING,
@@ -443,7 +443,7 @@ class WebhookTester(InteractionResponseTester):
         wait: bool = False,
         suppress_embeds: bool = False,
         silent: bool = False,
-        applied_tags: List[discord.ForumTag] = MISSING,
+        applied_tags: "List[discord.ForumTag]" = MISSING,
         poll: discord.Poll = MISSING,
     ) -> "discord.Message | FakeMessage | None":
         return await self.send_message(

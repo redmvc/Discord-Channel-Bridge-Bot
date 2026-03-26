@@ -7,8 +7,6 @@ from typing import (
     TYPE_CHECKING,
     Any,
     Callable,
-    Coroutine,
-    Literal,
     Required,
     Sequence,
     TypedDict,
@@ -23,6 +21,9 @@ from aiolimiter import AsyncLimiter
 from tester_bot import logger
 
 import common
+
+if TYPE_CHECKING:
+    from typing import Coroutine, Literal
 
 # Helper to prevent us from being rate limited
 rate_limiter = AsyncLimiter(1, 10)
@@ -41,7 +42,7 @@ test_function_type = Callable[
             discord.TextChannel,
         ],
     ],
-    Coroutine[Any, Any, list[str]],
+    "Coroutine[Any, Any, list[str]]",
 ]
 T = TypeVar("T", bound=Any)
 CoroT = TypeVar("CoroT", bound=test_function_type)
@@ -105,7 +106,7 @@ def camel_case_split(
 
 def log_expectation(
     message: str,
-    result: Literal["success", "failure"],
+    result: "Literal['success', 'failure']",
     *,
     print_success_to_console: bool = False,
     print_failure_to_console: bool = True,
@@ -225,7 +226,7 @@ async def create_bridge(
     source_channel: discord.TextChannel | discord.Thread | int,
     target_channel: discord.TextChannel | discord.Thread | int,
     *,
-    direction: Literal["inbound", "outbound"] | None = None,
+    direction: "Literal['inbound', 'outbound'] | None" = None,
 ) -> None:
     """Create a bridge between `source_channel` and `target_channel` without sending a message in `source_channel` to do so.
 
@@ -235,7 +236,7 @@ async def create_bridge(
         The channel from which to create a bridge, or ID of same.
     target_channel : :class:`~discord.TextChannel` | :class:`~discord.Thread` | int
         The channel to which to create a bridge, or ID of same.
-    direction : Literal["inbound", "outbound"] | None, optional
+    direction : Literal['inbound', 'outbound'] | None, optional
         The direction of bridge to create. If set to "inbound", will create a bridge from `target_channel` to `source_channel`; if set to "outbound", will create a bridge from `source_channel` to `target_channel`; if set to None, will create both. Defaults to None.
     """
     pass
@@ -246,8 +247,8 @@ async def create_bridge(
     source_channel: discord.TextChannel | discord.Thread | int,
     target_channel: discord.TextChannel | discord.Thread | int,
     *,
-    direction: Literal["inbound", "outbound"] | None = None,
-    send_message: Literal[True],
+    direction: "Literal['inbound', 'outbound'] | None" = None,
+    send_message: "Literal[True]",
 ) -> discord.Message:
     """Send a message in `source_channel` to create a bridge between it and `target_channel`, then return that message.
 
@@ -257,7 +258,7 @@ async def create_bridge(
         The channel from which to create a bridge, or ID of same.
     target_channel : :class:`~discord.TextChannel` | :class:`~discord.Thread` | int
         The channel to which to create a bridge, or ID of same.
-    direction : Literal["inbound", "outbound"] | None, optional
+    direction : Literal['inbound', 'outbound'] | None, optional
         The direction of bridge to create. If set to "inbound", will create a bridge from `target_channel` to `source_channel`; if set to "outbound", will create a bridge from `source_channel` to `target_channel`; if set to None, will create both. Defaults to None.
 
     Returns
@@ -271,7 +272,7 @@ async def create_bridge(
     source_channel: discord.TextChannel | discord.Thread | int,
     target_channel: discord.TextChannel | discord.Thread | int,
     *,
-    direction: Literal["inbound", "outbound"] | None = None,
+    direction: "Literal['inbound', 'outbound'] | None" = None,
     send_message: bool = False,
 ) -> discord.Message | None:
     """Create a bridge between `source_channel` and `target_channel` and, if a message was sent in `source_channel` to do so, return it.
@@ -282,7 +283,7 @@ async def create_bridge(
         The channel from which to create a bridge, or ID of same.
     target_channel : :class:`~discord.TextChannel` | :class:`~discord.Thread` | int
         The channel to which to create a bridge, or ID of same.
-    direction : Literal["inbound", "outbound"] | None, optional
+    direction : Literal['inbound', 'outbound'] | None, optional
         The direction of bridge to create. If set to "inbound", will create a bridge from `target_channel` to `source_channel`; if set to "outbound", will create a bridge from `source_channel` to `target_channel`; if set to None, will create both. Defaults to None.
     send_message : bool, optional
         Whether to send an actual message in `source_channel` instead of faking it. Defaults to False.
@@ -333,7 +334,7 @@ async def demolish_bridges(
 async def demolish_bridges(
     source_channel: discord.TextChannel | discord.Thread | int,
     *,
-    send_message: Literal[True],
+    send_message: "Literal[True]",
 ) -> discord.Message:
     """Send a message in `source_channel` to demolish all bridges to and from it, then return that message.
 
@@ -353,7 +354,7 @@ async def demolish_bridges(
 async def demolish_bridges(
     source_channel: discord.TextChannel | discord.Thread | int,
     *,
-    channel_and_threads: Literal[True],
+    channel_and_threads: "Literal[True]",
 ) -> None:
     """Demolish all bridges to and from `source_channel`, as well as those to and from its threads (if it's a text channel) or to and from its parent channel and its parent channel's threads (if it's a thread), without sending a message in `source_channel` to do so.
 
@@ -369,8 +370,8 @@ async def demolish_bridges(
 async def demolish_bridges(
     source_channel: discord.TextChannel | discord.Thread | int,
     *,
-    channel_and_threads: Literal[True],
-    send_message: Literal[True],
+    channel_and_threads: "Literal[True]",
+    send_message: "Literal[True]",
 ) -> discord.Message:
     """Send a message in `source_channel` to demolish all bridges to and from it, as well as those to and from its threads (if it's a text channel) or to and from its parent channel and its parent channel's threads (if it's a thread), then return that message.
 
@@ -408,7 +409,7 @@ async def demolish_bridges(
     source_channel: discord.TextChannel | discord.Thread | int,
     target_channel: discord.TextChannel | discord.Thread | int,
     *,
-    send_message: Literal[True],
+    send_message: "Literal[True]",
 ) -> discord.Message:
     """Send a message in `source_channel` to demolish the bridge between it and `target_channel`, then return that message.
 
@@ -572,7 +573,7 @@ class TestRunner:
             # Delete all channels in the server
             logger.info("Deleting server channels...")
             server_channels = await testing_server.fetch_channels()
-            delete_channels: list[Coroutine[Any, Any, None]] = []
+            delete_channels: list["Coroutine[Any, Any, None]"] = []
             await give_manage_webhook_perms(self.tester_bot, testing_server)
             for channel in server_channels:
                 await demolish_bridges(channel.id, channel_and_threads=True)
@@ -582,7 +583,9 @@ class TestRunner:
 
             # Create four channels for testing
             logger.info("Creating test channels...")
-            create_testing_channels: list[Coroutine[Any, Any, discord.TextChannel]] = []
+            create_testing_channels: list[
+                "Coroutine[Any, Any, discord.TextChannel]"
+            ] = []
             for i in range(4):
                 create_testing_channels.append(
                     testing_server.create_text_channel(f"testing_channel_{i + 1}")
@@ -915,7 +918,7 @@ async def _poll_set(
 
 @overload
 async def expect(
-    obj: Literal["next_message"],
+    obj: "Literal['next_message']",
     *,
     in_channel: int | discord.TextChannel | discord.Thread,
     to: list[MessageExpectation] | MessageExpectation,
@@ -945,11 +948,11 @@ async def expect(
     obj: discord.Message,
     *,
     in_channel: int | discord.TextChannel | discord.Thread | None = None,
-    to: (
+    to: """(
         list[ExistingMessageExpectation]
         | ExistingMessageExpectation
-        | Literal["be_ephemeral", "not_be_ephemeral"]
-    ),
+        | Literal['be_ephemeral', 'not_be_ephemeral']
+    )""",
     timeout: float | int = 10,
 ) -> tuple[discord.Message | None, list[str]]:
     """Check that a given list of expectations is true of a message, then return a tuple whose first element is the message and whose second element is a list of all the failing tests.
@@ -979,12 +982,12 @@ async def expect(
 async def expect(
     obj: discord.Message,
     *,
-    to: Literal[
-        "not_be_edited",
-        "be_deleted",
-        "not_be_deleted",
-        "have_no_new_reaction",
-    ],
+    to: """Literal[
+        'not_be_edited',
+        'be_deleted',
+        'not_be_deleted',
+        'have_no_new_reaction',
+    ]""",
     timeout: float | int = 10,
 ) -> tuple[None, list[str]]:
     """Check that a given message was not edited, was deleted, was not deleted, or had no new reaction within `timeout` seconds.
@@ -1005,7 +1008,7 @@ async def expect(
 
 @overload
 async def expect(
-    obj: Literal["no_new_message"],
+    obj: "Literal['no_new_message']",
     *,
     in_channel: int | discord.TextChannel | discord.Thread,
     timeout: float | int = 10,
@@ -1029,11 +1032,11 @@ async def expect(
 
 @overload
 async def expect(
-    obj: Literal["thread"],
+    obj: "Literal['thread']",
     *,
     in_channel: int | discord.TextChannel,
     with_name: str,
-    to: Literal["exist"],
+    to: "Literal['exist']",
     timeout: float | int = 10,
     heartbeat: float | int = 0.5,
 ) -> tuple[discord.Thread | None, list[str]]:
@@ -1042,11 +1045,11 @@ async def expect(
 
 @overload
 async def expect(
-    obj: Literal["thread"],
+    obj: "Literal['thread']",
     *,
     in_channel: int | discord.TextChannel,
     with_name: str,
-    to: Literal["not_exist"],
+    to: "Literal['not_exist']",
     timeout: float | int = 10,
     heartbeat: float | int = 0.5,
 ) -> tuple[None, list[str]]:
@@ -1054,25 +1057,25 @@ async def expect(
 
 
 async def expect(
-    obj: Literal["next_message", "no_new_message", "thread"] | discord.Message,
+    obj: "Literal['next_message', 'no_new_message', 'thread'] | discord.Message",
     *,
     in_channel: int | discord.TextChannel | discord.Thread | None = None,
     with_name: str | None = None,
-    to: (
+    to: """(
         Sequence[Expectation]
         | Expectation
         | Literal[
-            "be_ephemeral",
-            "not_be_ephemeral",
-            "exist",
-            "not_exist",
-            "not_be_edited",
-            "be_deleted",
-            "not_be_deleted",
-            "have_no_new_reaction",
+            'be_ephemeral',
+            'not_be_ephemeral',
+            'exist',
+            'not_exist',
+            'not_be_edited',
+            'be_deleted',
+            'not_be_deleted',
+            'have_no_new_reaction',
         ]
         | None
-    ) = None,
+    )""" = None,
     timeout: float | int = 10,
     heartbeat: float | int = 0.5,
 ) -> tuple[discord.Message | discord.Thread | None, list[str]]:

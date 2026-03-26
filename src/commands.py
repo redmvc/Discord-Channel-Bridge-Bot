@@ -1,6 +1,6 @@
 import asyncio
 import re
-from typing import TYPE_CHECKING, Any, Iterable, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import discord
 from sqlalchemy.exc import StatementError as SQLError
@@ -26,7 +26,7 @@ from validations import (
 )
 
 if TYPE_CHECKING:
-    from typing import Coroutine
+    from typing import Coroutine, Iterable
 
 
 @common.command_tree.command(
@@ -709,7 +709,7 @@ async def bridge_thread_helper(
 
 @sql_command
 async def stop_auto_bridging_threads_helper(
-    channel_ids_to_remove: int | Iterable[int],
+    channel_ids_to_remove: "int | Iterable[int]",
     *,
     session: SQLSession = _MISSING_SESSION,
 ):
@@ -743,7 +743,7 @@ async def stop_auto_bridging_threads_helper(
 
 
 async def validate_auto_bridge_thread_channels(
-    channel_ids_to_check: int | Iterable[int],
+    channel_ids_to_check: "int | Iterable[int]",
     session: SQLSession = _MISSING_SESSION,
 ):
     """Check whether each one of a list of channels are in auto_bridge_thread_channels and, if so, whether they should be and, if not, remove them from there.

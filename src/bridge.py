@@ -1,6 +1,6 @@
 import inspect
 from copy import deepcopy
-from typing import TYPE_CHECKING, Literal, overload
+from typing import TYPE_CHECKING, overload
 
 import discord
 from sqlalchemy.exc import StatementError
@@ -28,7 +28,7 @@ from validations import (
 )
 
 if TYPE_CHECKING:
-    from typing import Callable
+    from typing import Callable, Literal
 
 
 class Bridge:
@@ -873,9 +873,9 @@ class Bridges:
     async def get_reachable_channels(
         self,
         starting_channel: TextChannelOrThread | int,
-        direction: Literal["outbound", "inbound"],
+        direction: "Literal['outbound', 'inbound']",
         *,
-        include_webhooks: Literal[True],
+        include_webhooks: "Literal[True]",
         include_starting: bool = False,
     ) -> dict[int, discord.Webhook]:
         """Return a dictionary with those channels as keys and one webhook attached to each of those channels as values.
@@ -899,9 +899,9 @@ class Bridges:
     async def get_reachable_channels(
         self,
         starting_channel: TextChannelOrThread | int,
-        direction: Literal["outbound", "inbound"],
+        direction: "Literal['outbound', 'inbound']",
         *,
-        include_webhooks: Literal[False],
+        include_webhooks: "Literal[False]",
         include_starting: bool = False,
     ) -> set[int]:
         """Return a set with all channel IDs reachable from a given source channel down an unbroken series of outbound or inbound bridges.
@@ -925,7 +925,7 @@ class Bridges:
     async def get_reachable_channels(
         self,
         starting_channel: TextChannelOrThread | int,
-        direction: Literal["outbound", "inbound"],
+        direction: "Literal['outbound', 'inbound']",
         *,
         include_starting: bool = False,
     ) -> set[int]:
@@ -949,7 +949,7 @@ class Bridges:
     async def get_reachable_channels(
         self,
         starting_channel: TextChannelOrThread | int,
-        direction: Literal["outbound", "inbound"],
+        direction: "Literal['outbound', 'inbound']",
         *,
         include_webhooks: bool = False,
         include_starting: bool = False,
