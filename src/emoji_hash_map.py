@@ -6,7 +6,13 @@ from sqlalchemy import UpdateBase
 from sqlalchemy.ext.asyncio import AsyncSession as SQLSession
 
 import common
-from database import AsyncDataFrame, DBEmoji, get_sql_upsert_query, sql_command
+from database import (
+    _MISSING_SESSION,
+    AsyncDataFrame,
+    DBEmoji,
+    get_sql_upsert_query,
+    sql_command,
+)
 from database import functions as F
 from validations import ArgumentError, logger
 
@@ -32,16 +38,14 @@ class EmojiHashMap:
         return instance
 
     @sql_command
-    async def _load_from_database(self, *, session: SQLSession | None = None):
+    async def _load_from_database(self, *, session: SQLSession = _MISSING_SESSION):
         """Load emoji data from the database into the hash map.
 
         Parameters
         ----------
-        session : :class:`~sqlalchemy.ext.asyncio.AsyncSession` | None, optional
-            An SQLAlchemy AsyncSession connecting to the database. Defaults to None, in which case a new one will be created.
+        session : :class:`~sqlalchemy.ext.asyncio.AsyncSession`, optional
+            An async SQLAlchemy Session connecting to the database. If it's not present, a new one will be created.
         """
-        assert session is not None
-
         logger.info("Initialising emoji hash map...")
 
         try:
@@ -170,7 +174,7 @@ class EmojiHashMap:
         image: bytes | None = None,
         image_hash: str | None = None,
         accessible: bool = False,
-        session: SQLSession | None = None,
+        session: SQLSession = _MISSING_SESSION,
     ):
         """Inserts an emoji into the `emoji` database table.
 
@@ -192,8 +196,8 @@ class EmojiHashMap:
             The hash of the emoji image. Defaults to None, in which case it will be calculated from the other arguments.
         accessible : bool, optional
             Whether the bot can access the emoji. Defaults to False.
-        session : :class:`~sqlalchemy.orm.Session` | None, optional
-            An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
+        session : :class:`~sqlalchemy.ext.asyncio.AsyncSession`, optional
+            An async SQLAlchemy Session connecting to the database. If it's not present, a new one will be created.
 
         Raises
         ------
@@ -212,8 +216,6 @@ class EmojiHashMap:
         ServerTimeoutError
             Connection to server timed out.
         """
-        assert session is not None
-
         (
             emoji_id,
             emoji_name,
@@ -260,7 +262,7 @@ class EmojiHashMap:
         accessible: bool = False,
         is_internal: bool = False,
         update_db: bool = False,
-        session: SQLSession | None = None,
+        session: SQLSession = _MISSING_SESSION,
     ) -> tuple[int, str]:
         """Insert an emoji into the hash map and, optionally, into the emoji database table, then return a tuple with the emoji ID and the hash of its image.
 
@@ -286,8 +288,8 @@ class EmojiHashMap:
             If set to True, will set `accessible` to True and add the emoji to the internal emoji hash map. Defaults to False.
         update_db : bool, optional
             Whether the emoji should be inserted into the database. Defaults to False. Including `session` is equivalent to setting this variable to True.
-        session : :class:`~sqlalchemy.orm.Session` | None, optional
-            An SQLAlchemy ORM Session connecting to the database. Defaults to None, but if `update_db` is set to True a new one will be created.
+        session : :class:`~sqlalchemy.ext.asyncio.AsyncSession`, optional
+            An async SQLAlchemy Session connecting to the database. If it's not present and `update_db` is set to True, a new one will be created.
 
         Returns
         -------
@@ -392,7 +394,7 @@ class EmojiHashMap:
         self,
         emoji_id: int,
         update_db: bool = False,
-        session: SQLSession | None = None,
+        session: SQLSession = _MISSING_SESSION,
     ):
         """Delete an emoji from the hash map. If `session` is included, delete it from the database also.
 
@@ -402,8 +404,8 @@ class EmojiHashMap:
             The ID of the emoji to delete.
         update_db : bool, optional
             Whether the emoji should be deleted from the database. Defaults to False. Including `session` is equivalent to setting this variable to True.
-        session : :class:`~sqlalchemy.ext.asyncio.AsyncSession` | None, optional
-            An SQLAlchemy AsyncSession connecting to the database. If set to None and `update_db` is True a new one will be created. Defaults to None
+        session : :class:`~sqlalchemy.ext.asyncio.AsyncSession`, optional
+            An async SQLAlchemy Session connecting to the database. If it's not present and `update_db` is set to True, a new one will be created.
         """
         if not self._emoji_to_hash.get(emoji_id):
             logger.debug(
@@ -440,10 +442,8 @@ class EmojiHashMap:
         self,
         emoji_id: int,
         *,
-        session: SQLSession | None = None,
+        session: SQLSession = _MISSING_SESSION,
     ):
-        assert session is not None
-
         logger.debug("Deleting emoji with ID %s from database...", emoji_id)
 
         await (
@@ -455,8 +455,15 @@ class EmojiHashMap:
         logger.debug("Emoji with ID %s deleted from database.", emoji_id)
 
     @overload
-    async def load_server_emoji(self):
+    async def load_server_emoji(self, *, session: SQLSession = _MISSING_SESSION):
         """Load all emoji in all servers the bot is connected to into the hash map.
+
+        Parameters
+        ----------
+        server_id : int | None, optional
+            The ID of the server to load. Defaults to None, in which case will load the emoji from all servers the bot is connected to.
+        session : :class:`~sqlalchemy.ext.asyncio.AsyncSession`, optional
+            An async SQLAlchemy Session connecting to the database. If it's not present, a new one will be created.
 
         Raises
         ------
@@ -472,13 +479,17 @@ class EmojiHashMap:
         pass
 
     @overload
-    async def load_server_emoji(self, server_id: int):
+    async def load_server_emoji(
+        self, server_id: int, *, session: SQLSession = _MISSING_SESSION
+    ):
         """Load all emoji in a server into the hash map.
 
         Parameters
         ----------
         server_id : int
             The ID of the server to load.
+        session : :class:`~sqlalchemy.ext.asyncio.AsyncSession`, optional
+            An async SQLAlchemy Session connecting to the database. If it's not present, a new one will be created.
 
         Raises
         ------
@@ -500,7 +511,7 @@ class EmojiHashMap:
         self,
         server_id: int | None = None,
         *,
-        session: SQLSession | None = None,
+        session: SQLSession = _MISSING_SESSION,
     ):
         pass
 
@@ -509,7 +520,7 @@ class EmojiHashMap:
         self,
         server_id: int | None = None,
         *,
-        session: SQLSession,
+        session: SQLSession = _MISSING_SESSION,
     ):
         """Load all emoji in a server or in all servers the bot is connected to into the hash map.
 
@@ -517,8 +528,8 @@ class EmojiHashMap:
         ----------
         server_id : int | None, optional
             The ID of the server to load. Defaults to None, in which case will load the emoji from all servers the bot is connected to.
-        session : :class:`~sqlalchemy.orm.Session` | None, optional
-            An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
+        session : :class:`~sqlalchemy.ext.asyncio.AsyncSession`, optional
+            An async SQLAlchemy Session connecting to the database. If it's not present, a new one will be created.
 
         Raises
         ------
@@ -594,7 +605,7 @@ class EmojiHashMap:
         emoji_image: bytes | None = None,
         emoji_image_hash: str | None = None,
         emoji_to_copy_name: str | None = None,
-        session: SQLSession | None = None,
+        session: SQLSession = _MISSING_SESSION,
     ) -> discord.Emoji | None:
         """Try to create an emoji in the emoji server and, if successful, return it.
 
@@ -610,8 +621,8 @@ class EmojiHashMap:
             The hash of `emoji_image`. Defaults to None, in which case it will be calculated from `emoji_image`.
         emoji_to_copy_name : str | None, optional
             The name of a missing emoji, optionally preceded by an "a:" in case it's animated. Defaults to None, but must be included if either `emoji_to_copy_id` or `emoji_image` is.
-        session : :class:`~sqlalchemy.orm.Session` | None, optional
-            An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
+        session : :class:`~sqlalchemy.ext.asyncio.AsyncSession`, optional
+            An async SQLAlchemy Session connecting to the database. If it's not present, a new one will be created.
 
         Returns
         -------
@@ -718,10 +729,8 @@ class EmojiHashMap:
         emoji: discord.Emoji,
         emoji_server_id: int,
         *,
-        session: SQLSession | None,
+        session: SQLSession = _MISSING_SESSION,
     ) -> discord.Emoji | None:
-        assert session is not None
-
         # Copied the emoji, going to update my table
         if emoji_to_delete_id is not None:
             logger.debug(
@@ -763,7 +772,7 @@ class EmojiHashMap:
         external_emoji_name: str | None = None,
         internal_emoji: discord.Emoji,
         image_hash: str | None = None,
-        session: SQLSession | None = None,
+        session: SQLSession = _MISSING_SESSION,
     ) -> bool:
         """Attempt to create a mapping between external and internal emoji, recording it locally and saving it in the emoji table. Return True if creating the map succeeded and False otherwise.
 
@@ -779,8 +788,8 @@ class EmojiHashMap:
             An emoji the bot has in its emoji server.
         image_hash : str | None, optional
             The hash of the image associated with this emoji. Defaults to None, in which case will use the hash associated with `internal_emoji`.
-        session : :class:`~sqlalchemy.orm.Session` | None, optional
-            An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
+        session : :class:`~sqlalchemy.ext.asyncio.AsyncSession`, optional
+            An async SQLAlchemy Session connecting to the database. If it's not present, a new one will be created.
 
         Returns
         -------
@@ -1107,7 +1116,7 @@ class EmojiHashMap:
         self,
         *,
         emoji: discord.PartialEmoji | discord.Emoji,
-        session: SQLSession | None = None,
+        session: SQLSession = _MISSING_SESSION,
     ) -> str:
         """Return the hash of an emoji. Will ensure the emoji is in the hash map by adding it if it's not.
 
@@ -1115,8 +1124,8 @@ class EmojiHashMap:
         ----------
         emoji : :class:`~discord.PartialEmoji` | :class:`~discord.Emoji`
             The emoji to get a hash for.
-        session : :class:`~sqlalchemy.orm.Session` | None, optional
-            An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
+        session : :class:`~sqlalchemy.ext.asyncio.AsyncSession`, optional
+            An async SQLAlchemy Session connecting to the database. If it's not present, a new one will be created.
 
         Returns
         -------
@@ -1134,7 +1143,7 @@ class EmojiHashMap:
         self,
         *,
         emoji_id: int | str,
-        session: SQLSession | None = None,
+        session: SQLSession = _MISSING_SESSION,
     ) -> str | None:
         """Return the hash of an emoji. If an emoji with this ID can't be found in our existing hash map nor fetched from the client, returns None; otherwise will ensure the emoji is in the hash map by adding it if it's not.
 
@@ -1142,8 +1151,8 @@ class EmojiHashMap:
         ----------
         emoji_id : int | str
             The ID of the emoji to get a hash for.
-        session : :class:`~sqlalchemy.orm.Session` | None, optional
-            An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
+        session : :class:`~sqlalchemy.ext.asyncio.AsyncSession`, optional
+            An async SQLAlchemy Session connecting to the database. If it's not present, a new one will be created.
 
         Returns
         -------
@@ -1171,7 +1180,7 @@ class EmojiHashMap:
         emoji: None,
         emoji_id: int | str,
         emoji_name: None,
-        session: SQLSession | None = None,
+        session: SQLSession = _MISSING_SESSION,
     ) -> str | None:
         """Return the hash of an emoji. If an emoji with this ID can't be found in our existing hash map nor fetched from the client, returns None; otherwise will ensure the emoji is in the hash map by adding it if it's not.
 
@@ -1179,8 +1188,8 @@ class EmojiHashMap:
         ----------
         emoji_id : int | str
             The ID of the emoji to get a hash for.
-        session : :class:`~sqlalchemy.orm.Session` | None, optional
-            An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
+        session : :class:`~sqlalchemy.ext.asyncio.AsyncSession`, optional
+            An async SQLAlchemy Session connecting to the database. If it's not present, a new one will be created.
 
         Returns
         -------
@@ -1207,7 +1216,7 @@ class EmojiHashMap:
         *,
         emoji_id: int | str,
         emoji_name: str,
-        session: SQLSession | None = None,
+        session: SQLSession = _MISSING_SESSION,
     ) -> str:
         """Return the hash of an emoji. Will ensure the emoji is in the hash map by adding it if it's not.
 
@@ -1217,8 +1226,8 @@ class EmojiHashMap:
             The ID of the emoji to get a hash for.
         emoji_name : str
             The name of the emoji. It must start with the string "a:" if the emoji animated.
-        session : :class:`~sqlalchemy.orm.Session` | None, optional
-            An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
+        session : :class:`~sqlalchemy.ext.asyncio.AsyncSession`, optional
+            An async SQLAlchemy Session connecting to the database. If it's not present, a new one will be created.
 
         Returns
         -------
@@ -1237,7 +1246,7 @@ class EmojiHashMap:
         emoji: discord.PartialEmoji | discord.Emoji | None = None,
         emoji_id: int | str | None = None,
         emoji_name: str | None = None,
-        session: SQLSession | None = None,
+        session: SQLSession = _MISSING_SESSION,
     ) -> str | None:
         """Return the hash of an emoji.
 
@@ -1251,8 +1260,8 @@ class EmojiHashMap:
             The ID of the emoji to get a hash for. Defaults to None. Only used if `emoji` isn't present.
         emoji_name : str | None, optional
             The name of the emoji. Defaults to None, in which case the client will try to find an emoji with ID `emoji_id`. If it's included, it must start with the string "a:" if the emoji animated. Only used if `emoji` is not present.
-        session : :class:`~sqlalchemy.orm.Session` | None, optional
-            An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
+        session : :class:`~sqlalchemy.ext.asyncio.AsyncSession`, optional
+            An async SQLAlchemy Session connecting to the database. If it's not present, a new one will be created.
 
         Returns
         -------
@@ -1297,7 +1306,7 @@ class EmojiHashMap:
         emoji: discord.Emoji | discord.PartialEmoji | None = None,
         emoji_id: int | str | None = None,
         emoji_name: str | None = None,
-        session: SQLSession | None = None,
+        session: SQLSession = _MISSING_SESSION,
     ) -> str:
         """Check that the emoji is in the hash map and, if not, add it to the map and to the database, then return the hash.
 
@@ -1309,8 +1318,8 @@ class EmojiHashMap:
             The ID of the emoji to get a hash for. Defaults to None. Only used if `emoji` isn't present.
         emoji_name : str | None, optional
             The name of the emoji. Defaults to None, in which case the client will try to find an emoji with ID `emoji_id`. If it's included, it must start with the string "a:" if the emoji animated. Only used if `emoji` is not present.
-        session : :class:`~sqlalchemy.orm.Session` | None, optional
-            An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
+        session : :class:`~sqlalchemy.ext.asyncio.AsyncSession`, optional
+            An async SQLAlchemy Session connecting to the database. If it's not present, a new one will be created.
 
         Returns
         -------
@@ -1363,7 +1372,7 @@ class EmojiHashMap:
     async def get_mapped_emoji_id(
         self,
         emoji: discord.PartialEmoji | discord.Emoji | str,
-        session: SQLSession | None = None,
+        session: SQLSession = _MISSING_SESSION,
     ) -> str:
         """Return a string containing the ID of the accessible version of an emoji, if one exists:
         - non-custom/default emoji will have their names returned;
@@ -1377,8 +1386,8 @@ class EmojiHashMap:
         ----------
         emoji : :class:`~discord.PartialEmoji` | :class:`~discord.Emoji` | str
             The emoji to get the ID of.
-        session : :class:`~sqlalchemy.orm.Session` | None, optional
-            An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
+        session : :class:`~sqlalchemy.ext.asyncio.AsyncSession`, optional
+            An async SQLAlchemy Session connecting to the database. If it's not present, a new one will be created.
 
         Returns
         -------

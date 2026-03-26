@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession as SQLSession
 
 import common
 from database import (
+    _MISSING_SESSION,
     AsyncDataFrame,
     DBBridge,
     DBWebhook,
@@ -139,16 +140,14 @@ class Bridges:
         self.webhooks = Webhooks()
 
     @sql_command
-    async def load_from_database(self, *, session: SQLSession | None = None):
+    async def load_from_database(self, *, session: SQLSession = _MISSING_SESSION):
         """Load all bridges saved in the bot's connected database.
 
         Parameters
         ----------
-        session : :class:`~sqlalchemy.orm.Session` | None, optional
-            An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
+        session : :class:`~sqlalchemy.ext.asyncio.AsyncSession`, optional
+            An async SQLAlchemy Session connecting to the database. If it's not present, a new one will be created.
         """
-        assert session is not None
-
         self._outbound_bridges: dict[int, dict[int, Bridge]] = {}
         self._inbound_bridges: dict[int, dict[int, Bridge]] = {}
         self.webhooks = Webhooks()
@@ -327,7 +326,7 @@ class Bridges:
         target: TextChannelOrThread | int,
         webhook: discord.Webhook | None = None,
         update_db: bool = True,
-        session: SQLSession | None = None,
+        session: SQLSession = _MISSING_SESSION,
     ) -> Bridge:
         """Create a new Bridge from source channel to target channel (and a new webhook if necessary).
 
@@ -341,8 +340,8 @@ class Bridges:
             An already-existing webhook connecting these channels. Defaults to None, in which case a new one will be created.
         update_db : bool, optional
             Whether to update the database when creating the Bridge. Defaults to True.
-        session : :class:`~sqlalchemy.orm.Session` | None, optional
-            An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
+        session : :class:`~sqlalchemy.ext.asyncio.AsyncSession`, optional
+            An async SQLAlchemy Session connecting to the database. If it's not present, a new one will be created.
 
         Returns
         -------
@@ -357,8 +356,6 @@ class Bridges:
         Forbidden
             You do not have permissions to create or delete webhooks.
         """
-        assert session is not None
-
         validated_channels = validate_channels(
             source=await common.get_channel_from_id(source),
             target=await common.get_channel_from_id(target),
@@ -516,11 +513,9 @@ class Bridges:
         target_channel: TextChannelOrThread,
         target_id: int,
         bridge: Bridge,
-        session: SQLSession | None = None,
+        session: SQLSession = _MISSING_SESSION,
     ) -> Bridge:
         """Add the bridge from source channel to target channel to the database."""
-        assert session is not None
-
         logger.debug(
             "Inserting bridge from #%s to #%s into database...",
             source_channel.name,
@@ -559,7 +554,7 @@ class Bridges:
         source_channel: TextChannelOrThread | int | None = None,
         target_channel: TextChannelOrThread | int | None = None,
         update_db: bool = True,
-        session: SQLSession | None = None,
+        session: SQLSession = _MISSING_SESSION,
         one_sided: bool = False,
     ):
         """Destroy Bridges from source and/or to target channel.
@@ -572,8 +567,8 @@ class Bridges:
             Target channel or ID of same. Defaults to None, in which case will demolish all outbound bridges from `source_channel`.
         update_db : bool, optional
             Whether to update the database when creating the Bridge. Defaults to True.
-        session : :class:`~sqlalchemy.orm.Session` | None, optional
-            An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created. Only used if `update_db` is True.
+        session : :class:`~sqlalchemy.ext.asyncio.AsyncSession`, optional
+            An async SQLAlchemy Session connecting to the database. If it's not present, a new one will be created. Only used if `update_db` is True.
         one_sided : bool, optional
             Whether to demolish only the bridge going from `source_channel` to `target_channel`, rather than both. Defaults to False. Only used if both `source_channel` and `target_channel` are present.
 
@@ -754,11 +749,9 @@ class Bridges:
         *,
         bridges_to_demolish: list[tuple[int, int]],
         webhooks_deleted: set[str],
-        session: SQLSession | None = None,
+        session: SQLSession = _MISSING_SESSION,
     ):
         """Remove bridges from database."""
-        assert session is not None
-
         logger.debug("Removing bridge(s) from database...")
 
         for sid, tid in bridges_to_demolish:

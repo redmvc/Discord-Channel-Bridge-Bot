@@ -10,6 +10,7 @@ import common
 import emoji_hash_map
 from bridge import Bridge, bridges
 from database import (
+    _MISSING_SESSION,
     AsyncDataFrame,
     DBAppWhitelist,
     DBAutoBridgeThreadChannels,
@@ -275,7 +276,7 @@ async def create_bridges(
     target_channel: TextChannelOrThread,
     direction: Literal["outbound", "inbound"] | None,
     *,
-    session: SQLSession | None = None,
+    session: SQLSession = _MISSING_SESSION,
 ):
     """Create bridges between `source_channel` and `target_channel`.
 
@@ -287,11 +288,9 @@ async def create_bridges(
         The channel to which to create bridges.
     direction : Literal["outbound", "inbound"] | None
         If this equals "outbound", only a bridge from `source_channel` to `target_channel` will be created; if it equals "inbound", only a bridge from `target_channel` to `source_channel` will be created; if it equals None, both will be created.
-    session : :class:`~sqlalchemy.orm.Session` | None, optional
-        An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
+    session : :class:`~sqlalchemy.ext.asyncio.AsyncSession`, optional
+        An async SQLAlchemy Session connecting to the database. If it's not present, a new one will be created.
     """
-    assert session is not None
-
     if direction != "inbound":
         await bridges.create_bridge(
             source=source_channel,
@@ -489,7 +488,7 @@ async def auto_bridge_threads(interaction: discord.Interaction):
 async def toggle_auto_bridge_threads(
     channel_id: int,
     *,
-    session: SQLSession | None = None,
+    session: SQLSession = _MISSING_SESSION,
 ) -> bool:
     """Toggle thread auto-bridging for the channel identified by `channel_id` and return True if auto-bridging was enabled and False otherwise.
 
@@ -497,15 +496,13 @@ async def toggle_auto_bridge_threads(
     ----------
     channel_id : int
         The ID of the channel to toggle thread auto-bridging for.
-    session : :class:`~sqlalchemy.ext.asyncio.AsyncSession` | None, optional
-        An SQLAlchemy AsyncSession connecting to the database. Defaults to None, in which case a new one will be created.
+    session : :class:`~sqlalchemy.ext.asyncio.AsyncSession`, optional
+        An async SQLAlchemy Session connecting to the database. If it's not present, a new one will be created.
 
     Returns
     -------
     bool
     """
-    assert session is not None
-
     if channel_id not in common.auto_bridge_thread_channels:
         session.add(DBAutoBridgeThreadChannels(channel=str(channel_id)))
         common.auto_bridge_thread_channels.add(channel_id)
@@ -523,7 +520,7 @@ async def bridge_thread_helper(
     user_id: int,
     interaction: discord.Interaction | None = None,
     *,
-    session: SQLSession | None = None,
+    session: SQLSession = _MISSING_SESSION,
 ):
     """Create threads matching the current one across bridges.
 
@@ -535,11 +532,9 @@ async def bridge_thread_helper(
         The ID of the user that created the thread.
     interaction : :class:`~discord.Interaction` | None, optional
         The interaction that called this function, if any. Defaults to None.
-    session : :class:`~sqlalchemy.orm.Session` | None, optional
-        An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
+    session : :class:`~sqlalchemy.ext.asyncio.AsyncSession`, optional
+        An async SQLAlchemy Session connecting to the database. If it's not present, a new one will be created.
     """
-    assert session is not None
-
     thread_parent = await common.get_channel_parent(thread_to_bridge)
 
     outbound_bridges = bridges.get_outbound_bridges(thread_parent.id)
@@ -716,7 +711,7 @@ async def bridge_thread_helper(
 async def stop_auto_bridging_threads_helper(
     channel_ids_to_remove: int | Iterable[int],
     *,
-    session: SQLSession | None = None,
+    session: SQLSession = _MISSING_SESSION,
 ):
     """Remove a group of channels from the auto_bridge_thread_channels table and list.
 
@@ -724,16 +719,14 @@ async def stop_auto_bridging_threads_helper(
     ----------
     channel_ids_to_remove : int | Iterable[int]
         The IDs of the channels to remove.
-    session : :class:`~sqlalchemy.ext.asyncio.AsyncSession` | None, optional
-        An SQLAlchemy AsyncSession connecting to the database. Defaults to None, in which case a new one will be created.
+    session : :class:`~sqlalchemy.ext.asyncio.AsyncSession`, optional
+        An async SQLAlchemy Session connecting to the database. If it's not present, a new one will be created.
 
     Raises
     ------
     `sqlalchemy.exc.StatementError`
         Something went wrong accessing or modifying the database.
     """
-    assert session is not None
-
     if not isinstance(channel_ids_to_remove, set):
         if isinstance(channel_ids_to_remove, int):
             channel_ids_to_remove = {channel_ids_to_remove}
@@ -751,7 +744,7 @@ async def stop_auto_bridging_threads_helper(
 
 async def validate_auto_bridge_thread_channels(
     channel_ids_to_check: int | Iterable[int],
-    session: SQLSession | None = None,
+    session: SQLSession = _MISSING_SESSION,
 ):
     """Check whether each one of a list of channels are in auto_bridge_thread_channels and, if so, whether they should be and, if not, remove them from there.
 
@@ -759,8 +752,8 @@ async def validate_auto_bridge_thread_channels(
     ----------
     channel_ids_to_check : int | Iterable[int]
         The IDs of the channels to check.
-    session : :class:`~sqlalchemy.orm.Session` | None, optional
-        An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
+    session : :class:`~sqlalchemy.ext.asyncio.AsyncSession`, optional
+        An async SQLAlchemy Session connecting to the database. If it's not present, a new one will be created.
 
     Raises
     ------
@@ -920,11 +913,11 @@ async def demolish(interaction: discord.Interaction, target: str):
 
 
 @sql_command
-async def demolish_bridges(  # pyright: ignore[reportInconsistentOverload]
+async def demolish_bridges(
     source_channel: TextChannelOrThread,
     target_channel: TextChannelOrThread,
     *,
-    session: SQLSession | None = None,
+    session: SQLSession = _MISSING_SESSION,
 ):
     """Demolish bridges between `source_channel` and `target_channel`.
 
@@ -934,11 +927,9 @@ async def demolish_bridges(  # pyright: ignore[reportInconsistentOverload]
         A Discord text channel or a thread off one.
     target_channel : :class:`~discord.TextChannel` | :class:`~discord.Thread`
         A Discord text channel or a thread off one.
-    session : :class:`~sqlalchemy.orm.Session` | None, optional
-        An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
+    session : :class:`~sqlalchemy.ext.asyncio.AsyncSession`, optional
+        An async SQLAlchemy Session connecting to the database. If it's not present, a new one will be created.
     """
-    assert session is not None
-
     await bridges.demolish_bridges(
         source_channel=source_channel,
         target_channel=target_channel,
@@ -1078,7 +1069,7 @@ async def demolish_all(
 
 
 @sql_command
-async def demolish_all_bridges(  # pyright: ignore[reportInconsistentOverload]
+async def demolish_all_bridges(
     user_id: int,
     lists_of_bridges: dict[
         int,
@@ -1086,7 +1077,7 @@ async def demolish_all_bridges(  # pyright: ignore[reportInconsistentOverload]
     ],
     channels_affected: set[int],
     *,
-    session: SQLSession | None = None,
+    session: SQLSession = _MISSING_SESSION,
 ) -> bool:
     """Try to demolish all bridges listed, then return True if all were demolished or False if some failed to be demolished for some reason.
 
@@ -1098,15 +1089,13 @@ async def demolish_all_bridges(  # pyright: ignore[reportInconsistentOverload]
         A dictionary whose keys are the IDs of channels and whose keys are a tuple with all inbound and all outbound bridges associated with that channel.
     channels_affected : set[int]
         A set of channels that were or will be affected by the demolition.
-    session : :class:`~sqlalchemy.orm.Session` | None, optional
-        An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
+    session : :class:`~sqlalchemy.ext.asyncio.AsyncSession`, optional
+        An async SQLAlchemy Session connecting to the database. If it's not present, a new one will be created.
 
     Returns
     -------
     bool
     """
-    assert session is not None
-
     demolished_all = True
 
     for channel_to_demolish_id, (
@@ -1243,9 +1232,7 @@ async def whitelist(interaction: discord.Interaction, apps: str):
         channel_id_str = str(channel.id)
 
         @sql_command
-        async def _toggle_whitelist(*, session: SQLSession | None = None):
-            assert session is not None
-
+        async def _toggle_whitelist(*, session: SQLSession = _MISSING_SESSION):
             if len(apps_to_add) > 0:
                 session.add_all(
                     [
@@ -1386,8 +1373,10 @@ async def map_emoji(
         image_hash = await emoji_hash_map.map.get_hash(emoji=internal_emoji)
 
         @sql_command
-        async def _map_all_emoji(*, session: SQLSession | None = None) -> list[bool]:
-            assert session is not None
+        async def _map_all_emoji(
+            *,
+            session: SQLSession = _MISSING_SESSION,
+        ) -> list[bool]:
             emoji_mapped = []
             for name, id in external_emojis_set:
                 emoji_mapped.append(
@@ -1643,7 +1632,7 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
     async def get_reacting_users_coro(
         message: discord.Message,
         reacting_users_coro: dict[str, list["Coroutine[Any, Any, set[int]]"]] = {},
-        session: SQLSession | None = None,
+        session: SQLSession = _MISSING_SESSION,
     ) -> dict[str, list["Coroutine[Any, Any, set[int]]"]]:
         """Return a dictionary whose keys are emoji IDs used as reactions to a message and whose values are a list of Coroutines that return a set of user IDs that reacted to a message with that reaction.
 
@@ -1653,8 +1642,8 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
             The message to get reactions for.
         reacting_users_coro : dict[str, list[Coroutine[Any, Any, set[int]]]], optional
             A dictionary of already-mapped reaction coroutines to append any new ones to. Defaults to {}.
-        session : :class:`~sqlalchemy.orm.Session` | None, optional
-            An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
+        session : :class:`~sqlalchemy.ext.asyncio.AsyncSession`, optional
+            An async SQLAlchemy Session connecting to the database. If it's not present, a new one will be created.
 
         Returns
         -------
@@ -1693,10 +1682,8 @@ async def list_reactions(interaction: discord.Interaction, message: discord.Mess
             all_reactions_async: dict[str, list["Coroutine[Any, Any, set[int]]"]],
             at_least_one_inaccessible_bridge: bool,
             *,
-            session: SQLSession | None = None,
+            session: SQLSession = _MISSING_SESSION,
         ) -> tuple[dict[str, list["Coroutine[Any, Any, set[int]]"]], bool]:
-            assert session is not None
-
             # We need to see whether this message is a bridged message and, if so, find its source
             source_message_map = await (
                 AsyncDataFrame(session, DBMessageMap)

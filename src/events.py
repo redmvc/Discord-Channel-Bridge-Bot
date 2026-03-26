@@ -17,6 +17,7 @@ import common
 import emoji_hash_map
 from bridge import Bridge, bridges
 from database import (
+    _MISSING_SESSION,
     AsyncDataFrame,
     DBAppWhitelist,
     DBAutoBridgeThreadChannels,
@@ -81,13 +82,13 @@ async def on_ready():
 
 
 @sql_command
-async def setup_bot(*, session: SQLSession | None = None):
+async def setup_bot(*, session: SQLSession = _MISSING_SESSION):
     """Load the data registered in the database into memory.
 
     Parameters
     ----------
-    session : :class:`~sqlalchemy.orm.Session` | None, optional
-        An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
+    session : :class:`~sqlalchemy.ext.asyncio.AsyncSession`, optional
+        An async SQLAlchemy Session connecting to the database. If it's not present, a new one will be created.
 
     Raises
     ------
@@ -100,8 +101,6 @@ async def setup_bot(*, session: SQLSession | None = None):
     :class:`~discord.Forbidden`
         You do not have permissions to create or delete webhooks for some of the channels in existing Bridges.
     """
-    assert session is not None
-
     await create_tables()
 
     try:
@@ -390,7 +389,7 @@ async def bridge_message_helper(
     message: discord.Message,
     message_channel_id: int,
     *,
-    session: SQLSession | None = None,
+    session: SQLSession = _MISSING_SESSION,
 ):
     """Mirror a message to all of its outbound bridge targets.
 
@@ -400,8 +399,8 @@ async def bridge_message_helper(
         The message to bridge.
     message_channel_id : int
         The ID of the channel the message is in.
-    session : :class:`~sqlalchemy.orm.Session` | None, optional
-        An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
+    session : :class:`~sqlalchemy.ext.asyncio.AsyncSession`, optional
+        An async SQLAlchemy Session connecting to the database. If it's not present, a new one will be created.
 
     Raises
     ------
@@ -414,8 +413,6 @@ async def bridge_message_helper(
     ValueError
         The length of embeds was invalid, there was no token associated with one of the webhooks or ephemeral was passed with the improper webhook type or there was no state attached with one of the webhooks when giving it a view.
     """
-    assert session is not None
-
     logger.debug(
         "Bridging message with ID %s from channel with ID %s.",
         message.id,
@@ -829,8 +826,8 @@ async def bridge_message_to_target_channel(
         Whether the origin channel of the message being forwarded from is NSFW.
     thread_splat : ThreadSplat
         A splat with the thread this message is being bridged to, if any.
-    session : :class:`~sqlalchemy.orm.Session`
-        An SQLAlchemy ORM Session connecting to the database.
+    session : :class:`~sqlalchemy.ext.asyncio.AsyncSession`
+            An async SQLAlchemy Session connecting to the database.
 
     Returns
     -------
@@ -1200,7 +1197,7 @@ async def edit_message_helper(
     message_id: int,
     channel_id: int,
     message_is_reply: bool,
-    session: SQLSession | None = None,
+    session: SQLSession = _MISSING_SESSION,
 ) -> bool:
     """Edit bridged versions of a message, if possible, and return True if at least one edit was performed.
 
@@ -1216,8 +1213,8 @@ async def edit_message_helper(
         The ID of the channel the message being edited is in.
     message_is_reply : bool
         Whether the message being edited is a reply.
-    session : :class:`~sqlalchemy.orm.Session` | None, optional
-        An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
+    session : :class:`~sqlalchemy.ext.asyncio.AsyncSession`, optional
+        An async SQLAlchemy Session connecting to the database. If it's not present, a new one will be created.
 
     Returns
     -------
@@ -1232,8 +1229,6 @@ async def edit_message_helper(
     ValueError
         The length of embeds was invalid, there was no token associated with a webhook or a webhook had no state.
     """
-    assert session is not None
-
     logger.debug("Bridging edit to message with ID %s.", message_id)
 
     # Get all channels reachable from this one via an unbroken sequence of outbound bridges as well as their webhooks
@@ -1428,7 +1423,7 @@ async def edit_message_helper(
 async def replace_missing_emoji(
     message_content: str,
     *,
-    session: SQLSession | None = None,
+    session: SQLSession = _MISSING_SESSION,
 ) -> str:
     """Return a version of the contents of a message that replaces any instances of an emoji that the bot can't find with matching ones, if possible.
 
@@ -1436,8 +1431,8 @@ async def replace_missing_emoji(
     ----------
     message_content : str
         The content of the message to process.
-    session : :class:`~sqlalchemy.orm.Session` | None, optional
-        An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
+    session : :class:`~sqlalchemy.ext.asyncio.AsyncSession`, optional
+        An async SQLAlchemy Session connecting to the database. If it's not present, a new one will be created.
 
     Returns
     -------
@@ -1454,8 +1449,6 @@ async def replace_missing_emoji(
     :class:`~discord.ServerTimeoutError`
         Connection to server timed out.
     """
-    assert session is not None
-
     if not common.emoji_server:
         # If we don't have an emoji server to store our own versions of emoji in then there's nothing we can do
         return message_content
@@ -1540,8 +1533,8 @@ async def replace_discord_links(
         The string to process. If set to None, this function returns None.
     channel : :class:`~discord.TextChannel` | :class:`~discord.Thread`
         The channel this message is being processed for.
-    session : :class:`~sqlalchemy.orm.Session`
-        An SQLAlchemy ORM Session connecting to the database.
+    session : :class:`~sqlalchemy.ext.asyncio.AsyncSession`
+            An async SQLAlchemy Session connecting to the database.
 
     Returns
     -------
@@ -1687,7 +1680,7 @@ async def delete_message_helper(
     message_id: int,
     channel_id: int,
     *,
-    session: SQLSession | None = None,
+    session: SQLSession = _MISSING_SESSION,
 ) -> bool:
     """Delete bridged versions of a message, if possible, and return True if at least one deletion was performed.
 
@@ -1697,8 +1690,8 @@ async def delete_message_helper(
         The message ID.
     channel_id : int
         The ID of the channel the message being deleted is in.
-    session : :class:`~sqlalchemy.orm.Session` | None, optional
-        An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
+    session : :class:`~sqlalchemy.ext.asyncio.AsyncSession`, optional
+        An async SQLAlchemy Session connecting to the database. If it's not present, a new one will be created.
 
     Returns
     -------
@@ -1713,8 +1706,6 @@ async def delete_message_helper(
     ValueError
         A webhook does not have a token associated with it.
     """
-    assert session is not None
-
     logger.debug("Bridging deletion of message with ID %s.", message_id)
 
     # Get all channels reachable from this one via an unbroken sequence of outbound bridges as well as their webhooks
@@ -1937,7 +1928,7 @@ async def bridge_reaction_add(
     message_id: int,
     channel_id: int,
     emoji: discord.PartialEmoji,
-    session: SQLSession | None = None,
+    session: SQLSession = _MISSING_SESSION,
 ):
     """Bridge reactions added to a message, if possible.
 
@@ -1949,8 +1940,8 @@ async def bridge_reaction_add(
         The ID of the channel the message is in.
     emoji : :class:`~discord.PartialEmoji`
         The emoji being added to the message.
-    session : :class:`~sqlalchemy.orm.Session` | None, optional
-        An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
+    session : :class:`~sqlalchemy.ext.asyncio.AsyncSession`, optional
+        An async SQLAlchemy Session connecting to the database. If it's not present, a new one will be created.
 
     Raises
     ------
@@ -1963,8 +1954,6 @@ async def bridge_reaction_add(
     :class:`~discord.ServerTimeoutError`
         Connection to server timed out.
     """
-    assert session is not None
-
     logger.debug(
         "Bridging reaction add of %s to message with ID %s.",
         emoji,
@@ -2391,19 +2380,26 @@ async def on_raw_reaction_clear(payload: discord.RawReactionClearEvent):
 
 
 @overload
-async def unreact(*, message_id: int):
+async def unreact(*, message_id: int, session: SQLSession = _MISSING_SESSION):
     """Remove all reactions by the bot from messages bridged from a given message (but not from the message itself).
 
     Parameters
     ----------
     message_id : int
         The ID of the message a reaction is being removed from.
+    session : :class:`~sqlalchemy.ext.asyncio.AsyncSession`, optional
+        An async SQLAlchemy Session connecting to the database. If it's not present, a new one will be created.
     """
     pass
 
 
 @overload
-async def unreact(*, message_id: int, emoji_to_remove: discord.PartialEmoji):
+async def unreact(
+    *,
+    message_id: int,
+    emoji_to_remove: discord.PartialEmoji,
+    session: SQLSession = _MISSING_SESSION,
+):
     """Remove all reactions by the bot using a given emoji from messages bridged from a given message (but not from the message itself).
 
     Parameters
@@ -2412,6 +2408,8 @@ async def unreact(*, message_id: int, emoji_to_remove: discord.PartialEmoji):
         The ID of the message a reaction is being removed from.
     emoji : :class:`~discord.PartialEmoji`
         The emoji being removed.
+    session : :class:`~sqlalchemy.ext.asyncio.AsyncSession`, optional
+        An async SQLAlchemy Session connecting to the database. If it's not present, a new one will be created.
     """
     pass
 
@@ -2421,7 +2419,7 @@ async def unreact(
     *,
     message_id: int,
     emoji_to_remove: discord.PartialEmoji | None,
-    session: SQLSession | None = None,
+    session: SQLSession = _MISSING_SESSION,
 ):
     pass
 
@@ -2431,7 +2429,7 @@ async def unreact(
     *,
     message_id: int,
     emoji_to_remove: discord.PartialEmoji | None = None,
-    session: SQLSession,
+    session: SQLSession = _MISSING_SESSION,
 ):
     """Remove all reactions by the bot using a given emoji (or all emoji) from messages bridged from a given message (but not from the message itself).
 
@@ -2441,8 +2439,8 @@ async def unreact(
         The ID of the message a reaction is being removed from.
     emoji : :class:`~discord.PartialEmoji` | None, optional
         The emoji being removed. Defaults to None, in which case all of them will be.
-    session : :class:`~sqlalchemy.orm.Session` | None, optional
-        An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
+    session : :class:`~sqlalchemy.ext.asyncio.AsyncSession`, optional
+        An async SQLAlchemy Session connecting to the database. If it's not present, a new one will be created.
     """
     if emoji_to_remove:
         removed_emoji_id = (
@@ -2641,7 +2639,7 @@ async def on_thread_create(thread: discord.Thread):
 async def auto_bridge_thread(
     thread: discord.Thread,
     *,
-    session: SQLSession | None = None,
+    session: SQLSession = _MISSING_SESSION,
 ):
     """Create matching threads across a bridge if the created thread's parent channel has auto-bridge-threads enabled.
 
@@ -2649,8 +2647,8 @@ async def auto_bridge_thread(
     ----------
     thread : :class:`~discord.Thread`
         The thread that was created.
-    session : :class:`~sqlalchemy.orm.Session` | None, optional
-        An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
+    session : :class:`~sqlalchemy.ext.asyncio.AsyncSession`, optional
+        An async SQLAlchemy Session connecting to the database. If it's not present, a new one will be created.
     """
     logger.debug("Automatically bridging thread with ID %s.", thread.id)
 
@@ -2735,16 +2733,14 @@ async def reconnect():
 
 
 @sql_command
-async def bridge_unbridged_messages(*, session: SQLSession | None = None):
+async def bridge_unbridged_messages(*, session: SQLSession = _MISSING_SESSION):
     """Find all messages that were meant to be bridged while the bot was disconnected and bridge them.
 
     Parameters
     ----------
-    session : :class:`~sqlalchemy.orm.Session` | None, optional
-        An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
+    session : :class:`~sqlalchemy.ext.asyncio.AsyncSession`, optional
+        An async SQLAlchemy Session connecting to the database. If it's not present, a new one will be created.
     """
-    assert session is not None
-
     # Find the latest bridged messages from each channel
     logger.debug("Looking for latest event in each channel.")
 

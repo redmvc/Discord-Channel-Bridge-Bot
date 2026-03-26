@@ -8,6 +8,7 @@ from typing import (
     Iterable,
     ParamSpec,
     TypeVar,
+    cast,
     overload,
 )
 
@@ -40,6 +41,8 @@ if TYPE_CHECKING:
 
 T = TypeVar("T", bound=Any)
 P = ParamSpec("P")
+
+_MISSING_SESSION: SQLSession = cast("SQLSession", None)
 
 
 class DBBase(DeclarativeBase):
@@ -790,24 +793,13 @@ async def create_tables(target_engine: AsyncEngine | None = None):
     logger.info("All necessary tables are available.")
 
 
-@overload
-async def register_observed_event(  # pyright: ignore[reportInconsistentOverload]
-    channel_id: int,
-    message_id: int | None = None,
-    observed_at: datetime | None = None,
-    *,
-    session: SQLSession | None = None,
-):
-    pass
-
-
 @sql_command
 async def register_observed_event(
     channel_id: int,
     message_id: int | None = None,
     observed_at: "datetime | GenericFunction[datetime] | None" = None,
     *,
-    session: SQLSession,
+    session: SQLSession = _MISSING_SESSION,
 ):
     """Register an event (such as a message send or bridge creation) in the `most_recent_event_in_channel` table.
 
@@ -819,8 +811,8 @@ async def register_observed_event(
         The ID of a message that triggered the event, if it was a message. Defaults to None.
     observed_at : :class:`~datetime.tatetime` | None, optional
         The UTC datetime when the event occurred. Defaults to None, in which case the current time will be used.
-    session : :class:`~sqlalchemy.orm.Session` | None, optional
-        An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
+    session : :class:`~sqlalchemy.ext.asyncio.AsyncSession`, optional
+        An async SQLAlchemy Session connecting to the database. If it's not present, a new one will be created.
     """
     if observed_at is None:
         observed_at = func.now()
