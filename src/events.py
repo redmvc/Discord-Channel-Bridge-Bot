@@ -3025,27 +3025,27 @@ async def bridge_unbridged_messages(*, session: SQLSession = _MISSING_SESSION):
 @tasks.loop(hours=1)
 async def clear_locks():
     """Clear the lock lists hourly."""
-    for channel_id, lock in common.channel_lock.items():
-        if not lock.locked():
-            try:
-                del common.channel_lock[channel_id]
-                del lock
-            except Exception:
-                pass
+    for channel_id, lock in list(common.channel_lock.items()):
+        if lock.locked():
+            continue
 
-    for message_id, lock in common.message_lock.items():
-        if not lock.locked():
-            try:
-                del common.message_lock[message_id]
-                del lock
-            except Exception:
-                pass
+        try:
+            del common.channel_lock[channel_id]
+        except Exception:
+            pass
 
-    common.messages_to_delete = {
-        message_id
-        for message_id in common.messages_to_delete
-        if message_id in common.message_lock
-    }
+    for message_id, lock in list(common.message_lock.items()):
+        if lock.locked():
+            continue
+
+        try:
+            del common.message_lock[message_id]
+        except Exception:
+            pass
+
+    common.messages_to_delete = common.messages_to_delete.intersection(
+        set(common.message_lock.keys())
+    )
     common.messages_to_edit = {
         message_id: payload
         for message_id, payload in common.messages_to_edit.items()
