@@ -39,6 +39,7 @@ async def requires_valid_channel(
         to={
             "be_a_reply_to": message_sent,
             "contain": "Unsupported argument passed. Please pass a channel reference, ID, or link.",
+            "be_ephemeral": True,
         },
     )
     return failure_messages
@@ -64,6 +65,7 @@ async def requires_target_channel_to_be_different(
         to={
             "be_a_reply_to": message_sent,
             "contain": "You can't bridge a channel to itself.",
+            "be_ephemeral": True,
         },
     )
 
@@ -94,6 +96,7 @@ async def requires_manage_webhook_permissions(
         to={
             "be_a_reply_to": message_sent,
             "contain": "Please make sure both you and the bot have 'Manage Webhooks' permission in both this and target channels.",
+            "be_ephemeral": True,
         },
     )
 
@@ -127,6 +130,7 @@ async def works(
         to={
             "be_a_reply_to": message_sent,
             "contain": "Interaction was deferred with thinking = True.",
+            "be_ephemeral": True,
         },
     )
     _, f = await expect(
@@ -135,6 +139,7 @@ async def works(
         to={
             "be_a_reply_to": message_sent,
             "contain": "Bridge created! Try sending a message from either channel",
+            "be_ephemeral": True,
         },
     )
     failure_messages += f
@@ -154,6 +159,7 @@ async def works(
         to={
             "be_a_reply_to": message_sent,
             "contain": "Interaction was deferred with thinking = True.",
+            "be_ephemeral": True,
         },
     )
     failure_messages += f
@@ -163,6 +169,7 @@ async def works(
         to={
             "be_a_reply_to": message_sent,
             "contain": "Bridge created! Try sending a message from this channel",
+            "be_ephemeral": True,
         },
     )
     failure_messages += f
@@ -182,6 +189,7 @@ async def works(
         to={
             "be_a_reply_to": message_sent,
             "contain": "Interaction was deferred with thinking = True.",
+            "be_ephemeral": True,
         },
     )
     failure_messages += f
@@ -191,6 +199,7 @@ async def works(
         to={
             "be_a_reply_to": message_sent,
             "contain": "Bridge created! Try sending a message from the other channel",
+            "be_ephemeral": True,
         },
     )
     failure_messages += f

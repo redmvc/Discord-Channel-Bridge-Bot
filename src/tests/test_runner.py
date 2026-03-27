@@ -7,8 +7,6 @@ from typing import (
     TYPE_CHECKING,
     Any,
     Callable,
-    Coroutine,
-    Literal,
     Required,
     Sequence,
     TypedDict,
@@ -24,10 +22,14 @@ from tester_bot import logger
 
 import common
 
+if TYPE_CHECKING:
+    from typing import Coroutine, Literal
+
 # Helper to prevent us from being rate limited
 rate_limiter = AsyncLimiter(1, 10)
 
 webhook_permissions_role: discord.Role | None = None
+pin_permissions_role: discord.Role | None = None
 
 test_function_type = Callable[
     [
@@ -41,7 +43,7 @@ test_function_type = Callable[
             discord.TextChannel,
         ],
     ],
-    Coroutine[Any, Any, list[str]],
+    "Coroutine[Any, Any, list[str]]",
 ]
 T = TypeVar("T", bound=Any)
 CoroT = TypeVar("CoroT", bound=test_function_type)
@@ -105,7 +107,7 @@ def camel_case_split(
 
 def log_expectation(
     message: str,
-    result: Literal["success", "failure"],
+    result: "Literal['success', 'failure']",
     *,
     print_success_to_console: bool = False,
     print_failure_to_console: bool = True,
@@ -153,26 +155,6 @@ async def give_manage_webhook_perms(
     await _give_or_remove_manage_webhook_perms(tester_bot, testing_server, give=True)
 
 
-async def set_nsfw(channels_to_set: dict[discord.TextChannel | int, bool]):
-    """Set some channels to NSFW (or SFW).
-
-    Parameters
-    ----------
-    channels_to_set : dict[:class:`~discord.TextChannel`  |  int, bool]
-        A dictionary whose keys must be either channel IDs or text channels from the perspective of the bridge bot and whose values must be True if we want to set a channel to NSFW and False if we want to set it to SFW.
-    """
-    async_edits = []
-    for key, value in channels_to_set.items():
-        if isinstance(key, int):
-            channel = await common.get_channel_parent(key)
-        else:
-            channel = key
-
-        async_edits.append(channel.edit(nsfw=value))
-
-    await asyncio.gather(*async_edits)
-
-
 async def remove_manage_webhook_perms(
     tester_bot: discord.Client,
     testing_server: discord.Guild,
@@ -207,17 +189,110 @@ async def _give_or_remove_manage_webhook_perms(
         Whether to give or remove Manage Webhook permissions.
     """
     assert tester_bot.user
+
     tester_bot_member = await common.get_server_member(
         testing_server,
         tester_bot.user.id,
     )
+    if not tester_bot_member:
+        return
 
     global webhook_permissions_role
-    if tester_bot_member and webhook_permissions_role:
-        if give and (webhook_permissions_role not in tester_bot_member.roles):
-            await tester_bot_member.add_roles(webhook_permissions_role)
-        elif not give and (webhook_permissions_role in tester_bot_member.roles):
-            await tester_bot_member.remove_roles(webhook_permissions_role)
+    if not webhook_permissions_role:
+        return
+
+    if give and (webhook_permissions_role not in tester_bot_member.roles):
+        await tester_bot_member.add_roles(webhook_permissions_role)
+    elif not give and (webhook_permissions_role in tester_bot_member.roles):
+        await tester_bot_member.remove_roles(webhook_permissions_role)
+
+
+async def give_pin_perms(
+    bot: discord.Client,
+    testing_server: discord.Guild,
+):
+    """Give a bot Pin Messages permissions in a server.
+
+    Parameters
+    ----------
+    bot : :class:`~discord.Client`
+        The bot client to give pin permissions to.
+    testing_server : :class:`~discord.Guild`
+        The testing server from the perspective of the bridge bot client.
+    """
+    await _give_or_remove_pin_perms(bot, testing_server, give=True)
+
+
+async def remove_pin_perms(
+    bot: discord.Client,
+    testing_server: discord.Guild,
+):
+    """Remove Pin Messages permissions from a bot in a server.
+
+    Parameters
+    ----------
+    bot : :class:`~discord.Client`
+        The bot client to remove pin permissions from.
+    testing_server : :class:`~discord.Guild`
+        The testing server from the perspective of the bridge bot client.
+    """
+    await _give_or_remove_pin_perms(bot, testing_server, give=False)
+
+
+async def _give_or_remove_pin_perms(
+    bot: discord.Client,
+    testing_server: discord.Guild,
+    *,
+    give: bool,
+):
+    """Give or remove Pin Messages permissions for a bot in the testing server.
+
+    Parameters
+    ----------
+    bot : :class:`~discord.Client`
+        The bot client.
+    testing_server : :class:`~discord.Guild`
+        The testing server from the perspective of the bridge bot client.
+    give : bool
+        Whether to give or remove Pin Messages permissions.
+    """
+    assert bot.user
+
+    bot_member = await common.get_server_member(
+        testing_server,
+        bot.user.id,
+    )
+    if not bot_member:
+        return
+
+    global pin_permissions_role
+    if not pin_permissions_role:
+        return
+
+    if give and (pin_permissions_role not in bot_member.roles):
+        await bot_member.add_roles(pin_permissions_role)
+    elif not give and (pin_permissions_role in bot_member.roles):
+        await bot_member.remove_roles(pin_permissions_role)
+
+
+async def set_nsfw(channels_to_set: dict[discord.TextChannel | int, bool]):
+    """Set some channels to NSFW (or SFW).
+
+    Parameters
+    ----------
+    channels_to_set : dict[:class:`~discord.TextChannel`  |  int, bool]
+        A dictionary whose keys must be either channel IDs or text channels from the perspective of the bridge bot and whose values must be True if we want to set a channel to NSFW and False if we want to set it to SFW.
+    """
+    async_edits = []
+    for key, value in channels_to_set.items():
+        if isinstance(key, int):
+            channel = await common.get_channel_parent(key)
+        else:
+            channel = key
+
+        async_edits.append(channel.edit(nsfw=value))
+
+    await asyncio.gather(*async_edits)
 
 
 @overload
@@ -225,7 +300,7 @@ async def create_bridge(
     source_channel: discord.TextChannel | discord.Thread | int,
     target_channel: discord.TextChannel | discord.Thread | int,
     *,
-    direction: Literal["inbound", "outbound"] | None = None,
+    direction: "Literal['inbound', 'outbound'] | None" = None,
 ) -> None:
     """Create a bridge between `source_channel` and `target_channel` without sending a message in `source_channel` to do so.
 
@@ -235,10 +310,10 @@ async def create_bridge(
         The channel from which to create a bridge, or ID of same.
     target_channel : :class:`~discord.TextChannel` | :class:`~discord.Thread` | int
         The channel to which to create a bridge, or ID of same.
-    direction : Literal["inbound", "outbound"] | None, optional
+    direction : Literal['inbound', 'outbound'] | None, optional
         The direction of bridge to create. If set to "inbound", will create a bridge from `target_channel` to `source_channel`; if set to "outbound", will create a bridge from `source_channel` to `target_channel`; if set to None, will create both. Defaults to None.
     """
-    ...
+    pass
 
 
 @overload
@@ -246,8 +321,8 @@ async def create_bridge(
     source_channel: discord.TextChannel | discord.Thread | int,
     target_channel: discord.TextChannel | discord.Thread | int,
     *,
-    direction: Literal["inbound", "outbound"] | None = None,
-    send_message: Literal[True],
+    direction: "Literal['inbound', 'outbound'] | None" = None,
+    send_message: "Literal[True]",
 ) -> discord.Message:
     """Send a message in `source_channel` to create a bridge between it and `target_channel`, then return that message.
 
@@ -257,21 +332,21 @@ async def create_bridge(
         The channel from which to create a bridge, or ID of same.
     target_channel : :class:`~discord.TextChannel` | :class:`~discord.Thread` | int
         The channel to which to create a bridge, or ID of same.
-    direction : Literal["inbound", "outbound"] | None, optional
+    direction : Literal['inbound', 'outbound'] | None, optional
         The direction of bridge to create. If set to "inbound", will create a bridge from `target_channel` to `source_channel`; if set to "outbound", will create a bridge from `source_channel` to `target_channel`; if set to None, will create both. Defaults to None.
 
     Returns
     -------
     :class:`~discord.Message`
     """
-    ...
+    pass
 
 
 async def create_bridge(
     source_channel: discord.TextChannel | discord.Thread | int,
     target_channel: discord.TextChannel | discord.Thread | int,
     *,
-    direction: Literal["inbound", "outbound"] | None = None,
+    direction: "Literal['inbound', 'outbound'] | None" = None,
     send_message: bool = False,
 ) -> discord.Message | None:
     """Create a bridge between `source_channel` and `target_channel` and, if a message was sent in `source_channel` to do so, return it.
@@ -282,7 +357,7 @@ async def create_bridge(
         The channel from which to create a bridge, or ID of same.
     target_channel : :class:`~discord.TextChannel` | :class:`~discord.Thread` | int
         The channel to which to create a bridge, or ID of same.
-    direction : Literal["inbound", "outbound"] | None, optional
+    direction : Literal['inbound', 'outbound'] | None, optional
         The direction of bridge to create. If set to "inbound", will create a bridge from `target_channel` to `source_channel`; if set to "outbound", will create a bridge from `source_channel` to `target_channel`; if set to None, will create both. Defaults to None.
     send_message : bool, optional
         Whether to send an actual message in `source_channel` instead of faking it. Defaults to False.
@@ -326,14 +401,14 @@ async def demolish_bridges(
     source_channel : :class:`~discord.TextChannel` | :class:`~discord.Thread` | int
         The channel to and from which to demolish bridges, or ID of same.
     """
-    ...
+    pass
 
 
 @overload
 async def demolish_bridges(
     source_channel: discord.TextChannel | discord.Thread | int,
     *,
-    send_message: Literal[True],
+    send_message: "Literal[True]",
 ) -> discord.Message:
     """Send a message in `source_channel` to demolish all bridges to and from it, then return that message.
 
@@ -346,14 +421,14 @@ async def demolish_bridges(
     -------
     :class:`~discord.Message`
     """
-    ...
+    pass
 
 
 @overload
 async def demolish_bridges(
     source_channel: discord.TextChannel | discord.Thread | int,
     *,
-    channel_and_threads: Literal[True],
+    channel_and_threads: "Literal[True]",
 ) -> None:
     """Demolish all bridges to and from `source_channel`, as well as those to and from its threads (if it's a text channel) or to and from its parent channel and its parent channel's threads (if it's a thread), without sending a message in `source_channel` to do so.
 
@@ -362,15 +437,15 @@ async def demolish_bridges(
     source_channel : :class:`~discord.TextChannel` | :class:`~discord.Thread` | int
         The channel to and from which to demolish bridges, or ID of same.
     """
-    ...
+    pass
 
 
 @overload
 async def demolish_bridges(
     source_channel: discord.TextChannel | discord.Thread | int,
     *,
-    channel_and_threads: Literal[True],
-    send_message: Literal[True],
+    channel_and_threads: "Literal[True]",
+    send_message: "Literal[True]",
 ) -> discord.Message:
     """Send a message in `source_channel` to demolish all bridges to and from it, as well as those to and from its threads (if it's a text channel) or to and from its parent channel and its parent channel's threads (if it's a thread), then return that message.
 
@@ -383,7 +458,7 @@ async def demolish_bridges(
     -------
     :class:`~discord.Message`
     """
-    ...
+    pass
 
 
 @overload
@@ -400,7 +475,7 @@ async def demolish_bridges(
     target_channel : :class:`~discord.TextChannel` | :class:`~discord.Thread` | int
         The other channel to and from which to demolish bridges, or ID of same.
     """
-    ...
+    pass
 
 
 @overload
@@ -408,7 +483,7 @@ async def demolish_bridges(
     source_channel: discord.TextChannel | discord.Thread | int,
     target_channel: discord.TextChannel | discord.Thread | int,
     *,
-    send_message: Literal[True],
+    send_message: "Literal[True]",
 ) -> discord.Message:
     """Send a message in `source_channel` to demolish the bridge between it and `target_channel`, then return that message.
 
@@ -423,7 +498,7 @@ async def demolish_bridges(
     -------
     :class:`~discord.Message`
     """
-    ...
+    pass
 
 
 async def demolish_bridges(
@@ -559,20 +634,24 @@ class TestRunner:
 
             # Clean up any leftover roles from interrupted previous runs
             for role in testing_server.roles:
-                if role.name == "webhook_permissions_role":
+                if role.name in ("webhook_permissions_role", "pin_permissions_role"):
                     await role.delete()
 
-            # Create a role in the testing server with the necessary permissions
-            global webhook_permissions_role
+            # Create roles in the testing server with the necessary permissions
+            global webhook_permissions_role, pin_permissions_role
             webhook_permissions_role = await testing_server.create_role(
                 name="webhook_permissions_role",
                 permissions=discord.Permissions(manage_webhooks=True),
+            )
+            pin_permissions_role = await testing_server.create_role(
+                name="pin_permissions_role",
+                permissions=discord.Permissions(pin_messages=True),
             )
 
             # Delete all channels in the server
             logger.info("Deleting server channels...")
             server_channels = await testing_server.fetch_channels()
-            delete_channels: list[Coroutine[Any, Any, None]] = []
+            delete_channels: list["Coroutine[Any, Any, None]"] = []
             await give_manage_webhook_perms(self.tester_bot, testing_server)
             for channel in server_channels:
                 await demolish_bridges(channel.id, channel_and_threads=True)
@@ -582,7 +661,9 @@ class TestRunner:
 
             # Create four channels for testing
             logger.info("Creating test channels...")
-            create_testing_channels: list[Coroutine[Any, Any, discord.TextChannel]] = []
+            create_testing_channels: list[
+                "Coroutine[Any, Any, discord.TextChannel]"
+            ] = []
             for i in range(4):
                 create_testing_channels.append(
                     testing_server.create_text_channel(f"testing_channel_{i + 1}")
@@ -731,6 +812,9 @@ class TestRunner:
             if webhook_permissions_role:
                 await webhook_permissions_role.delete()
                 webhook_permissions_role = None
+            if pin_permissions_role:
+                await pin_permissions_role.delete()
+                pin_permissions_role = None
 
 
 class TestCase(ABC):
@@ -805,6 +889,8 @@ class MessageExpectation(Expectation, total=False):
     not_be_a_forward_of: discord.Message
     be_from: int | discord.User | discord.Member | discord.Client
     not_be_from: int | discord.User | discord.Member | discord.Client
+    be_ephemeral: bool
+    not_be_ephemeral: bool
     have_embed: "EmbedExpectation"
     have_embeds: "list[EmbedExpectation]"
     have_attachment: "AttachmentExpectation"
@@ -822,6 +908,8 @@ class ExistingMessageExpectation(MessageExpectation, total=False):
     not_be_edited: bool
     be_deleted: bool
     not_be_deleted: bool
+    be_pinned: bool
+    not_be_pinned: bool
 
 
 class EmbedExpectation(TypedDict, total=False):
@@ -913,7 +1001,7 @@ async def _poll_set(
 
 @overload
 async def expect(
-    obj: Literal["next_message"],
+    obj: "Literal['next_message']",
     *,
     in_channel: int | discord.TextChannel | discord.Thread,
     to: list[MessageExpectation] | MessageExpectation,
@@ -927,7 +1015,7 @@ async def expect(
     in_channel : int | :class:`~discord.TextChannel` | :class:`~discord.Thread`
         A channel in which a message should be expected, or ID of same.
     to : list[:class:`~MessageExpectation`] | :class:`~MessageExpectation`
-        A list of things to expect of that message. The valid expectations are: "contain", "not_contain", "equal", "not_equal", "be_a_reply_to", "not_be_a_reply_to", "be_a_forward_of", "not_be_a_forward_of", "be_from", "not_be_from", "have_embed", "have_embeds", "have_attachment", "have_attachments", and "not_have_attachment".
+        A list of things to expect of that message. The valid expectations are: "contain", "not_contain", "equal", "not_equal", "be_a_reply_to", "not_be_a_reply_to", "be_a_forward_of", "not_be_a_forward_of", "be_from", "not_be_from", "be_ephemeral", "not_be_ephemeral", "have_embed", "have_embeds", "have_attachment", "have_attachments", and "not_have_attachment".
     timeout : float | int, optional
         How long to wait, in seconds, for the message to arrive. If set to less than 1, will be set to 1. Defaults to 10.
 
@@ -935,7 +1023,7 @@ async def expect(
     -------
     tuple[:class:`~discord.Message` | None, list[str]]
     """
-    ...
+    pass
 
 
 @overload
@@ -943,7 +1031,11 @@ async def expect(
     obj: discord.Message,
     *,
     in_channel: int | discord.TextChannel | discord.Thread | None = None,
-    to: list[ExistingMessageExpectation] | ExistingMessageExpectation,
+    to: """(
+        list[ExistingMessageExpectation]
+        | ExistingMessageExpectation
+        | Literal['be_ephemeral', 'not_be_ephemeral']
+    )""",
     timeout: float | int = 10,
 ) -> tuple[discord.Message | None, list[str]]:
     """Check that a given list of expectations is true of a message, then return a tuple whose first element is the message and whose second element is a list of all the failing tests.
@@ -957,8 +1049,8 @@ async def expect(
     obj : :class:`~discord.Message`
     in_channel : int | :class:`~discord.TextChannel` | :class:`~discord.Thread` | None, optional
         A channel in which the message should be expected. Equivalent to setting the "be_in_channel" expectation in `to`.
-    to : list[:class:`~MessageExpectation`] | :class:`~MessageExpectation`
-        A list of things to expect of that message. The valid expectations are: "contain", "not_contain", "equal", "not_equal", "be_a_reply_to", "not_be_a_reply_to", "be_a_forward_of", "not_be_a_forward_of", "be_from", "not_be_from", "have_embed", "have_embeds", "have_attachment", "have_attachments", "not_have_attachment", "be_in_channel", "be_edited", "not_be_edited", "be_deleted", "not_be_deleted", "get_reaction", "still_have_reaction", "have_no_new_reaction", and "have_reaction_removed".
+    to : list[:class:`~MessageExpectation`] | :class:`~MessageExpectation` | Literal["be_ephemeral", "not_be_ephemeral"]
+        A list of things to expect of that message. The valid expectations are: "contain", "not_contain", "equal", "not_equal", "be_a_reply_to", "not_be_a_reply_to", "be_a_forward_of", "not_be_a_forward_of", "be_from", "not_be_from", "be_ephemeral", "not_be_ephemeral", "have_embed", "have_embeds", "have_attachment", "have_attachments", "not_have_attachment", "be_in_channel", "be_edited", "not_be_edited", "be_deleted", "not_be_deleted", "get_reaction", "still_have_reaction", "have_no_new_reaction", and "have_reaction_removed".
     timeout : float | int, optional
         How long to wait for an edit event when `be_edited`, `not_be_edited`, `be_deleted`, or `not_be_deleted` is set. Defaults to 10.
 
@@ -966,40 +1058,42 @@ async def expect(
     -------
     tuple[:class:`~discord.Message` | None, list[str]]
     """
-    ...
+    pass
 
 
 @overload
 async def expect(
     obj: discord.Message,
     *,
-    to: Literal[
-        "not_be_edited",
-        "be_deleted",
-        "not_be_deleted",
-        "have_no_new_reaction",
-    ],
+    to: """Literal[
+        'not_be_edited',
+        'be_deleted',
+        'not_be_deleted',
+        'have_no_new_reaction',
+        'be_pinned',
+        'not_be_pinned',
+    ]""",
     timeout: float | int = 10,
 ) -> tuple[None, list[str]]:
-    """Check that a given message was not edited, was deleted, was not deleted, or had no new reaction within `timeout` seconds.
+    """Check that a given message was not edited, was (not) deleted, had no new reaction, or was (not) pinned within `timeout` seconds.
 
     Parameters
     ----------
     obj : :class:`~discord.Message`
-    to : Literal["not_be_edited"]
+    to : Literal["not_be_edited", "be_deleted", "not_be_deleted", "have_no_new_reaction", "be_pinned", "not_be_pinned"]
     timeout : float | int, optional
-        How long to wait for an edit, deletion, or reaction add event to happen before declaring it hasn't happened. Defaults to 10.
+        How long to wait for an edit, deletion, reaction add, or pin event to happen before declaring it hasn't happened. Defaults to 10.
 
     Returns
     -------
     tuple[None, list[str]]
     """
-    ...
+    pass
 
 
 @overload
 async def expect(
-    obj: Literal["no_new_message"],
+    obj: "Literal['no_new_message']",
     *,
     in_channel: int | discord.TextChannel | discord.Thread,
     timeout: float | int = 10,
@@ -1018,51 +1112,57 @@ async def expect(
     -------
     tuple[None, list[str]]
     """
-    ...
+    pass
 
 
 @overload
 async def expect(
-    obj: Literal["thread"],
+    obj: "Literal['thread']",
     *,
     in_channel: int | discord.TextChannel,
     with_name: str,
-    to: Literal["exist"],
+    to: "Literal['exist']",
     timeout: float | int = 10,
     heartbeat: float | int = 0.5,
-) -> tuple[discord.Thread | None, list[str]]: ...
+) -> tuple[discord.Thread | None, list[str]]:
+    pass
 
 
 @overload
 async def expect(
-    obj: Literal["thread"],
+    obj: "Literal['thread']",
     *,
     in_channel: int | discord.TextChannel,
     with_name: str,
-    to: Literal["not_exist"],
+    to: "Literal['not_exist']",
     timeout: float | int = 10,
     heartbeat: float | int = 0.5,
-) -> tuple[None, list[str]]: ...
+) -> tuple[None, list[str]]:
+    pass
 
 
 async def expect(
-    obj: Literal["next_message", "no_new_message", "thread"] | discord.Message,
+    obj: "Literal['next_message', 'no_new_message', 'thread'] | discord.Message",
     *,
     in_channel: int | discord.TextChannel | discord.Thread | None = None,
     with_name: str | None = None,
-    to: (
+    to: """(
         Sequence[Expectation]
         | Expectation
         | Literal[
-            "exist",
-            "not_exist",
-            "not_be_edited",
-            "be_deleted",
-            "not_be_deleted",
-            "have_no_new_reaction",
+            'be_ephemeral',
+            'not_be_ephemeral',
+            'exist',
+            'not_exist',
+            'not_be_edited',
+            'be_deleted',
+            'not_be_deleted',
+            'have_no_new_reaction',
+            'be_pinned',
+            'not_be_pinned',
         ]
         | None
-    ) = None,
+    )""" = None,
     timeout: float | int = 10,
     heartbeat: float | int = 0.5,
 ) -> tuple[discord.Message | discord.Thread | None, list[str]]:
@@ -1076,7 +1176,7 @@ async def expect(
         A channel in which that object should be expected, or ID of same. Defaults to None.
     with_name : str | None, optional
         The name the object should have. Defaults to None.
-    to : Sequence[:class:`~Expectation`] | :class:`~Expectation` | Literal["exist", "not_exist", "not_be_edited", "be_deleted", "not_be_deleted", "have_no_new_reaction"] | None, optional
+    to : Sequence[:class:`~Expectation`] | :class:`~Expectation` | Literal["be_ephemeral", "not_be_ephemeral", "exist", "not_exist", "not_be_edited", "be_deleted", "not_be_deleted", "have_no_new_reaction", "be_pinned", "not_be_pinned"] | None, optional
         A list of things to expect of that object. Defaults to None.
     timeout : float | int, optional
         How long to wait, in seconds, for the expected event to occur. If set to less than 1, will be set to 1. Defaults to 10.
@@ -1095,10 +1195,14 @@ async def expect(
     elif isinstance(to, str) and (
         to
         in (
+            "be_ephemeral",
+            "not_be_ephemeral",
             "not_be_edited",
             "be_deleted",
             "not_be_deleted",
             "have_no_new_reaction",
+            "be_pinned",
+            "not_be_pinned",
         )
     ):
         to = [cast(ExistingMessageExpectation, {to: True})]
@@ -1301,7 +1405,7 @@ async def expect(
             if TYPE_CHECKING:
                 assert isinstance(value, int | discord.TextChannel | discord.Thread)
 
-            log_message = f"expected message to {' not' if negation else ''}be in channel <#{value}>"
+            log_message = f"expected message to{' not' if negation else ''} be in channel <#{value}>"
             if (message_channel_id == value) != negation:
                 log_expectation(log_message, "success")
             elif not negation:
@@ -1318,7 +1422,7 @@ async def expect(
             if TYPE_CHECKING:
                 assert isinstance(value, discord.Message)
 
-            log_message = f"expected message to {' not' if negation else ''}be a reply to message with ID {value.id}"
+            log_message = f"expected message to{' not' if negation else ''} be a reply to message with ID {value.id}"
             if not (message_reference := obj.reference):
                 message = f"{log_message} {'but' if not negation else 'and'} it was not a reply"
                 if not negation:
@@ -1344,7 +1448,7 @@ async def expect(
             if TYPE_CHECKING:
                 assert isinstance(value, discord.Message)
 
-            log_message = f"expected message to {' not' if negation else ''}be a forward of message with ID {value.id}"
+            log_message = f"expected message to{' not' if negation else ''} be a forward of message with ID {value.id}"
             if not (message_reference := obj.reference):
                 message = f"{log_message} {'but' if not negation else 'and'} it was not a forward"
                 if not negation:
@@ -1380,7 +1484,7 @@ async def expect(
             elif isinstance(value, discord.User | discord.Member):
                 value = value.id
 
-            log_message = f"expected message to {' not' if negation else ''}be from user with ID {value}"
+            log_message = f"expected message to{' not' if negation else ''} be from user with ID {value}"
             if value in [
                 (application_id := obj.application_id),
                 (author_id := obj.author.id),
@@ -1591,6 +1695,28 @@ async def expect(
                 log_message = f"{log_message} but reaction {f'with ID {payload.emoji.id}' if payload.emoji.id else payload.emoji} was added"
                 failure_messages.append(log_message)
                 log_expectation(log_message, "failure")
+        elif expectation == "be_pinned":
+            log_message = f"expected message {message_id} to{' not' if negation else ''} be pinned"
+
+            # Poll the message's .pinned attribute with a timeout
+            deadline = asyncio.get_event_loop().time() + timeout
+            expected_pinned = not negation
+            is_pinned = not expected_pinned  # opposite so the loop runs at least once
+            while asyncio.get_event_loop().time() < deadline:
+                fetched = await obj.channel.fetch_message(message_id)
+                is_pinned = fetched.pinned
+                if is_pinned == expected_pinned:
+                    break
+                await asyncio.sleep(0.5)
+
+            if is_pinned == expected_pinned:
+                log_expectation(log_message, "success")
+            else:
+                failure_msg = (
+                    f"{log_message} but it was{"n't" if expected_pinned else ''}"
+                )
+                failure_messages.append(failure_msg)
+                log_expectation(failure_msg, "failure")
         elif expectation in (
             "get_reaction",
             "have_reaction_removed",
@@ -1685,12 +1811,27 @@ async def expect(
                     failure_msg = f"{log_message} but it was not found (reactions present: {present})"
                     failure_messages.append(failure_msg)
                     log_expectation(failure_msg, "failure")
+        elif expectation == "be_ephemeral":
+            ephemeral_marker = "-# This interaction response was ephemeral."
+            has_marker = any(
+                embed.description and (ephemeral_marker in embed.description)
+                for embed in obj.embeds
+            )
+            log_message = (
+                f"expected message to{' not' if negation else ''} be ephemeral"
+            )
+            if has_marker != negation:
+                log_expectation(log_message, "success")
+            else:
+                log_message += f" but it was{'' if negation else "n't"}"
+                failure_messages.append(log_message)
+                log_expectation(log_message, "failure")
 
         if not isinstance(value, str):
             continue
 
         if expectation == "contain":
-            log_message = f"expected message to {' not' if negation else ''}contain text\n    {value}"
+            log_message = f"expected message to{' not' if negation else ''} contain text\n    {value}"
             if value in content:
                 message = f"{log_message}{' but it did' if negation else ''}"
                 if not negation:
@@ -1709,7 +1850,7 @@ async def expect(
                     log_expectation(message, "failure")
         elif expectation == "equal":
             log_message = (
-                f"expected message to {' not' if negation else ''}equal\n    {value}"
+                f"expected message to{' not' if negation else ''} equal\n    {value}"
             )
             if content == value:
                 message = f"{log_message}{'  \nbut it did' if negation else ''}"
@@ -1727,8 +1868,6 @@ async def expect(
                 else:
                     failure_messages.append(message)
                     log_expectation(message, "failure")
-
-        # TODO: be ephemeral
 
     return (obj, failure_messages)
 

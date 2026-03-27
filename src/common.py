@@ -4,7 +4,7 @@ import io
 import json
 from collections import defaultdict
 from hashlib import md5
-from typing import TYPE_CHECKING, Any, AsyncIterator, Callable, TypeVar, overload
+from typing import TYPE_CHECKING, Any, AsyncIterator, TypeVar, overload
 
 import aiohttp
 import discord
@@ -174,7 +174,7 @@ emoji_server: discord.Guild | None = None
 test_app: discord.User | None = None
 
 # Dictionary listing all apps whitelisted per channel
-per_channel_whitelist: dict[int, set[int]] = {}
+per_channel_whitelist: dict[int, set[int]] = defaultdict(set)
 
 # Helper to prevent us from being rate limited
 rate_limiter = AsyncLimiter(1, 10)
@@ -192,6 +192,12 @@ messages_to_edit: dict[int, discord.RawMessageUpdateEvent] = {}
 
 # Variable to keep track of channels that are being sent messages to to try to preserve ordering
 channel_lock: dict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
+
+# Cache of pinned message IDs per channel, for detecting what changed on pin update events
+pinned_messages_cache: dict[int, set[int]] = {}
+
+# Counter of self-triggered pin/unpin events to ignore per channel
+expected_pin_changes: dict[int, int] = defaultdict(int)
 
 # Type wildcard
 T = TypeVar("T", bound=Any)
@@ -235,7 +241,7 @@ async def get_channel_from_id(
     :class:`~discord.Forbidden`
         The client does not not have permission to fetch the channel with that ID.
     """
-    ...
+    pass
 
 
 @overload
@@ -271,7 +277,7 @@ async def get_channel_from_id(
     :class:`~discord.Forbidden`
         The client does not not have permission to fetch the channel with that ID.
     """
-    ...
+    pass
 
 
 @overload
@@ -309,7 +315,7 @@ async def get_channel_from_id(
     :class:`~discord.Forbidden`
         The client does not not have permission to fetch the channel with that ID.
     """
-    ...
+    pass
 
 
 @overload
@@ -331,7 +337,7 @@ async def get_channel_from_id(
     -------
     :class:`~discord.abc.GuildChannel` | :class:`~discord.abc.PrivateChannel` | :class:`~discord.Thread` | :class:`~discord.PartialMessageable`
     """
-    ...
+    pass
 
 
 @overload
@@ -356,7 +362,7 @@ async def get_channel_from_id(
     -------
     :class:`~discord.abc.GuildChannel` | :class:`~discord.abc.PrivateChannel` | :class:`~discord.Thread` | :class:`~discord.PartialMessageable`
     """
-    ...
+    pass
 
 
 @overload
@@ -386,7 +392,7 @@ async def get_channel_from_id(
     ChannelTypeError
         The channel passed as argument is not a Discord text channel or a Thread.
     """
-    ...
+    pass
 
 
 async def get_channel_from_id(
@@ -462,7 +468,7 @@ def get_id_from_channel(channel_or_id: int) -> int:
     -------
     int
     """
-    ...
+    pass
 
 
 @overload
@@ -478,7 +484,7 @@ def get_id_from_channel(channel_or_id: DiscordChannel) -> int:
     -------
     int
     """
-    ...
+    pass
 
 
 def get_id_from_channel(channel_or_id: DiscordChannel | int) -> int:
@@ -517,7 +523,7 @@ async def get_channel_parent(channel_or_id: int) -> discord.TextChannel:
     ChannelTypeError
         The ID passed as argument does not refer to a Discord text channel or a Thread.
     """
-    ...
+    pass
 
 
 @overload
@@ -538,7 +544,7 @@ async def get_channel_parent(channel_or_id: DiscordChannel) -> discord.TextChann
     ChannelTypeError
         The channel passed as argument is not a Discord text channel or a thread off one.
     """
-    ...
+    pass
 
 
 async def get_channel_parent(
@@ -571,6 +577,71 @@ async def get_channel_parent(
         )
 
     return channel
+
+
+async def get_channel_guild_id(
+    channel_or_id: DiscordChannel | int,
+    *,
+    bot_client: discord.Client | None = None,
+) -> int | None:
+    """Return the ID of the Discord server the channel given by `channel_or_id` is in, if any, or None if there isn't any.
+
+    Parameters
+    ----------
+    channel_or_id : :class:`~discord.abc.GuildChannel` | :class:`~discord.abc.PrivateChannel` | :class:`~discord.Thread` | :class:`~discord.PartialMessageable` | int
+        Either a Discord channel or an ID of same.
+    bot_client : :class:`~discord.Client` | None, optional
+        The client of the bot from whose perspective to fetch the channel. Defaults to None, in which case the Bridge Bot's client will be used. If this argument is not None and `channel_or_id` is a channel, will get the channel's ID and then try to fetch it from `bot_client`'s perspective.
+
+    Returns
+    -------
+    int | None
+    """
+    try:
+        channel = await get_channel_from_id(channel_or_id, bot_client=bot_client)
+    except Exception:
+        return None
+
+    return (
+        channel
+        and (not isinstance(channel, discord.abc.PrivateChannel))
+        and channel.guild
+        and channel.guild.id
+    ) or None
+
+
+async def channel_is_in_guild(
+    channel_or_id: DiscordChannel | int,
+    guild_or_id: discord.Guild | int,
+    *,
+    bot_client: discord.Client | None = None,
+) -> bool:
+    """Return True if `channel_or_id` is a channel (or an ID of same) in `guild_or_id` (or a server with it as ID) and False otherwise.
+
+    Parameters
+    ----------
+    channel_or_id : :class:`~discord.abc.GuildChannel` | :class:`~discord.abc.PrivateChannel` | :class:`~discord.Thread` | :class:`~discord.PartialMessageable` | int
+        Either a Discord channel or an ID of same.
+    guild_or_id : :class:`~discord.Guild` | int
+        Either a Discord server or an ID of same.
+    bot_client : :class:`~discord.Client` | None, optional
+        The client of the bot from whose perspective to fetch the channel. Defaults to None, in which case the Bridge Bot's client will be used. If this argument is not None and `channel_or_id` is a channel, will get the channel's ID and then try to fetch it from `bot_client`'s perspective.
+
+    Returns
+    -------
+    bool
+    """
+    try:
+        channel = await get_channel_from_id(channel_or_id, bot_client=bot_client)
+    except Exception:
+        return False
+
+    if not channel:
+        return False
+
+    guild_id = guild_or_id if isinstance(guild_or_id, int) else guild_or_id.id
+    channel_guild_id = await get_channel_guild_id(channel, bot_client=bot_client)
+    return guild_id == channel_guild_id
 
 
 async def get_channel_member(
@@ -691,7 +762,7 @@ async def get_emoji_information(
     ValueError
         `emoji` had type :class:`~discord.PartialEmoji` but it was not a custom emoji.
     """
-    ...
+    pass
 
 
 @overload
@@ -725,7 +796,7 @@ async def get_emoji_information(
     ValueError
         `emoji_id` argument had type `str` but it was not a valid numerical ID.
     """
-    ...
+    pass
 
 
 @overload
@@ -760,7 +831,7 @@ async def get_emoji_information(
     ValueError
         `emoji_id` had type `str` but it was not a valid numerical ID.
     """
-    ...
+    pass
 
 
 @overload
@@ -770,7 +841,8 @@ async def get_emoji_information(
     emoji_name: str | None = None,
     *,
     emoji_size: int | None = 96,
-) -> tuple[int, str, bool, str]: ...
+) -> tuple[int, str, bool, str]:
+    pass
 
 
 async def get_emoji_information(
@@ -895,7 +967,7 @@ async def get_emoji_image(
     ValueError
         `emoji` had type `PartialEmoji` but it was not a custom emoji.
     """
-    ...
+    pass
 
 
 @overload
@@ -924,7 +996,7 @@ async def get_emoji_image(
     ValueError
         `emoji_id` had type `str` but it was not a valid numerical ID.
     """
-    ...
+    pass
 
 
 async def get_emoji_image(  # pyright: ignore[reportInconsistentOverload]
@@ -979,7 +1051,7 @@ def get_emoji_url(
     ValueError
         `emoji` had type `PartialEmoji` but it was not a custom emoji.
     """
-    ...
+    pass
 
 
 @overload
@@ -1008,13 +1080,14 @@ def get_emoji_url(
     ValueError
         `emoji_id` had type `str` but it was not a valid numerical ID.
     """
-    ...
+    pass
 
 
 @overload
 def get_emoji_url(
     *args: discord.PartialEmoji | discord.Emoji | int | str | bool,
-) -> str: ...
+) -> str:
+    pass
 
 
 def get_emoji_url(  # pyright: ignore[reportInconsistentOverload]
@@ -1289,49 +1362,3 @@ async def wait_until_ready(
         logger.warning("Taking forever to get ready.")
         return False
     return True
-
-
-async def run_retries(
-    fun: Callable[..., T],
-    num_retries: int,
-    time_to_wait: float | int = 5,
-    exceptions_to_catch: type | tuple[type] | None = None,
-) -> T:
-    """Run a function and retry it every time an exception occurs up to a certain maximum number of tries. If it succeeds, return its result; otherwise, raise the error.
-
-    Parameters
-    ----------
-    fun : Callable[..., T]
-        The function to run.
-    num_retries : int, optional
-        The number of times to try the function again. If set to 0 or less, will be set to 1.
-    time_to_wait : float | int, optional
-        Time in seconds to wait between retries; only used if `num_retries` is greater than 1. If set to 0 or less, will set `num_retries` to 1. Defaults to 5.
-    exceptions_to_catch : type | tuple[type] | None, optional
-        An exception type or a list of exception types to catch. Defaults to None, in which case all types will be caught.
-
-    Returns
-    -------
-    T
-    """
-    if num_retries < 1:
-        num_retries = 1
-    elif num_retries > 1 and time_to_wait <= 0:
-        num_retries = 1
-
-    for retry in range(num_retries):
-        try:
-            return fun()
-        except Exception as e:
-            if (retry < num_retries - 1) and (
-                (not exceptions_to_catch) or isinstance(e, exceptions_to_catch)
-            ):
-                await asyncio.sleep(time_to_wait)
-            else:
-                raise e
-
-    err = ValueError(
-        f"Error in function {inspect.stack()[1][3]}(): couldn't run function {fun.__name__}() in {num_retries} retries."
-    )
-    logger.error(err)
-    raise err

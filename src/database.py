@@ -8,6 +8,7 @@ from typing import (
     Iterable,
     ParamSpec,
     TypeVar,
+    cast,
     overload,
 )
 
@@ -41,7 +42,11 @@ if TYPE_CHECKING:
 T = TypeVar("T", bound=Any)
 P = ParamSpec("P")
 
+_MISSING_SESSION: SQLSession = cast("SQLSession", None)
 
+
+# -----
+# SQL ORM classes
 class DBBase(DeclarativeBase):
     """
     This class serves as a base for all tables used by the bot. It should not be referenced directly, as its only purpose is running the create_all() command at the end of this file.
@@ -50,7 +55,7 @@ class DBBase(DeclarativeBase):
     pass
 
 
-class DBBridge(DBBase):
+class _DBBridge(DBBase):
     """
     An SQLAlchemy ORM class representing a database table tracking existing bridges between channels and/or threads.
 
@@ -80,7 +85,7 @@ class DBBridge(DBBase):
     target: Mapped[str] = mapped_column(String(32), nullable=False)
 
 
-class DBWebhook(DBBase):
+class _DBWebhook(DBBase):
     """
     An SQLAlchemy ORM class representing a database table tracking webhooks managed by the bot in each channel.
 
@@ -101,7 +106,7 @@ class DBWebhook(DBBase):
     )
 
 
-class DBMessageMap(DBBase):
+class _DBMessageMap(DBBase):
     """
     An SQLAlchemy ORM class representing a database table listing the mappings between bridged messages.
 
@@ -139,7 +144,7 @@ class DBMessageMap(DBBase):
     webhook: Mapped[str] = mapped_column(String(32), nullable=True)
 
 
-class DBMostRecentEventInChannel(DBBase):
+class _DBMostRecentEventInChannel(DBBase):
     """
     An SQLAlchemy ORM class representing a database table with the most recent event observed in a bridged channel.
 
@@ -162,7 +167,7 @@ class DBMostRecentEventInChannel(DBBase):
     )
 
 
-class DBReactionMap(DBBase):
+class _DBReactionMap(DBBase):
     """
     An SQLAlchemy ORM class representing a database table listing the mappings between bridged reactions.
 
@@ -207,7 +212,7 @@ class DBReactionMap(DBBase):
     target_emoji_name: Mapped[str] = mapped_column(String(32), nullable=True)
 
 
-class DBAutoBridgeThreadChannels(DBBase):
+class _DBAutoBridgeThreadChannels(DBBase):
     """
     An SQLAlchemy ORM class representing a database table listing all channels that will automatically bridge newly-created threads.
 
@@ -223,7 +228,7 @@ class DBAutoBridgeThreadChannels(DBBase):
     channel: Mapped[str] = mapped_column(String(32), nullable=False)
 
 
-class DBEmoji(DBBase):
+class _DBEmoji(DBBase):
     """
     An SQLAlchemy ORM class representing a database table storing information about emoji.
 
@@ -247,7 +252,7 @@ class DBEmoji(DBBase):
     accessible: Mapped[bool] = mapped_column(Boolean, nullable=False)
 
 
-class DBAppWhitelist(DBBase):
+class _DBAppWhitelist(DBBase):
     """
     An SQLAlchemy ORM class representing a database table storing IDs for applications/bots that are whitelisted for bridging messages in a given channel.
 
@@ -272,20 +277,81 @@ class DBAppWhitelist(DBBase):
     application: Mapped[str] = mapped_column(String(32), nullable=False)
 
 
-Table = (
-    DBBridge
-    | DBWebhook
-    | DBMessageMap
-    | DBMostRecentEventInChannel
-    | DBReactionMap
-    | DBAutoBridgeThreadChannels
-    | DBEmoji
-    | DBAppWhitelist
-)
+# -----
+# Async DataFrames
+class AsyncDFBase(AsyncDataFrame):
+    db_base: type[
+        _DBBridge
+        | _DBWebhook
+        | _DBMessageMap
+        | _DBMostRecentEventInChannel
+        | _DBReactionMap
+        | _DBAutoBridgeThreadChannels
+        | _DBEmoji
+        | _DBAppWhitelist
+    ]
 
 
+class DBBridge(AsyncDFBase):
+    db_base = _DBBridge
+
+    def __init__(self, session: SQLSession):
+        super().__init__(session, _DBBridge)
+
+
+class DBWebhook(AsyncDFBase):
+    db_base = _DBWebhook
+
+    def __init__(self, session: SQLSession):
+        super().__init__(session, _DBWebhook)
+
+
+class DBMessageMap(AsyncDFBase):
+    db_base = _DBMessageMap
+
+    def __init__(self, session: SQLSession):
+        super().__init__(session, _DBMessageMap)
+
+
+class DBMostRecentEventInChannel(AsyncDFBase):
+    db_base = _DBMostRecentEventInChannel
+
+    def __init__(self, session: SQLSession):
+        super().__init__(session, _DBMostRecentEventInChannel)
+
+
+class DBReactionMap(AsyncDFBase):
+    db_base = _DBReactionMap
+
+    def __init__(self, session: SQLSession):
+        super().__init__(session, _DBReactionMap)
+
+
+class DBAutoBridgeThreadChannels(AsyncDFBase):
+    db_base = _DBAutoBridgeThreadChannels
+
+    def __init__(self, session: SQLSession):
+        super().__init__(session, _DBAutoBridgeThreadChannels)
+
+
+class DBEmoji(AsyncDFBase):
+    db_base = _DBEmoji
+
+    def __init__(self, session: SQLSession):
+        super().__init__(session, _DBEmoji)
+
+
+class DBAppWhitelist(AsyncDFBase):
+    db_base = _DBAppWhitelist
+
+    def __init__(self, session: SQLSession):
+        super().__init__(session, _DBAppWhitelist)
+
+
+# -----
+# Functions
 async def get_sql_upsert_query(
-    table: type[Table],
+    table: type[AsyncDFBase],
     *,
     indices: Iterable[str],
     ignored_cols: Iterable[str] | None = None,
@@ -315,6 +381,8 @@ async def get_sql_upsert_query(
     :class:`~sqlalchemy.exc.StatementError`
         SQL statement inferred from arguments was invalid or database connection failed. This error can only be raised if the database dialect is not MySQL, PostgreSQL, nor SQLite.
     """
+    _table = table.db_base
+
     indices = set(indices)
     insert_values = kwargs
     insert_value_keys = set(insert_values.keys())
@@ -334,16 +402,16 @@ async def get_sql_upsert_query(
     db_dialect = engine.dialect.name
     if db_dialect == "mysql":
         return (
-            mysql.insert(table)
+            mysql.insert(_table)
             .values(**insert_values)
             .on_duplicate_key_update(**update_values)
         )
     elif db_dialect in {"postgresql", "sqlite"}:
         insert: postgresql.Insert | sqlite.Insert
         if db_dialect == "postgresql":
-            insert = postgresql.insert(table)
+            insert = postgresql.insert(_table)
         else:
-            insert = sqlite.insert(table)
+            insert = sqlite.insert(_table)
 
         return insert.values(**insert_values).on_conflict_do_update(
             index_elements=indices,
@@ -353,25 +421,25 @@ async def get_sql_upsert_query(
         # I'll do a manual update in this case
         async with Session() as session:
             index_values = [
-                getattr(table, idx) == insert_values[idx] for idx in indices
+                getattr(_table, idx) == insert_values[idx] for idx in indices
             ]
             upsert: UpdateBase
 
             existing = (
-                await session.execute(sql.select(table).where(*index_values))
+                await session.execute(sql.select(_table).where(*index_values))
             ).first()
 
             if existing:
                 # Values with those keys do exist, so I update
-                upsert = sql.Update(table).where(*index_values).values(**update_values)
+                upsert = sql.Update(_table).where(*index_values).values(**update_values)
             else:
-                upsert = sql.insert(table).values(**insert_values)
+                upsert = sql.insert(_table).values(**insert_values)
 
         return upsert
 
 
 async def get_sql_insert_ignore_duplicate_query(
-    table: type[Table],
+    table: type[AsyncDFBase],
     *,
     indices: Iterable[str],
     **kwargs: Any,
@@ -396,6 +464,8 @@ async def get_sql_insert_ignore_duplicate_query(
     :class:`~sqlalchemy.exc.StatementError`
         SQL statement inferred from arguments was invalid or database connection failed. This error can only be raised if the database dialect is not MySQL, PostgreSQL, nor SQLite.
     """
+    _table = table.db_base
+
     indices = set(indices)
     insert_values = kwargs
 
@@ -403,51 +473,51 @@ async def get_sql_insert_ignore_duplicate_query(
     if db_dialect == "mysql":
         random_index = indices.pop()
         return (
-            mysql.insert(table)
+            mysql.insert(_table)
             .values(**insert_values)
-            .on_duplicate_key_update(**{random_index: getattr(table, random_index)})
+            .on_duplicate_key_update(**{random_index: getattr(_table, random_index)})
         )
     elif db_dialect in {"postgresql", "sqlite"}:
         insert: postgresql.Insert | sqlite.Insert
         if db_dialect == "postgresql":
-            insert = postgresql.insert(table)
+            insert = postgresql.insert(_table)
         else:
-            insert = sqlite.insert(table)
+            insert = sqlite.insert(_table)
 
         return insert.values(**insert_values).on_conflict_do_nothing()
     else:
         # I'll do a manual update in this case
         async with Session() as session:
             index_values = [
-                getattr(table, idx) == insert_values[idx] for idx in indices
+                getattr(_table, idx) == insert_values[idx] for idx in indices
             ]
             insert_unknown: UpdateBase
 
             existing = (
-                await session.execute(sql.select(table).where(*index_values))
+                await session.execute(sql.select(_table).where(*index_values))
             ).first()
 
             if existing:
                 # Values with those keys do exist, so I do nothing
                 random_index = indices.pop()
-                insert_unknown = sql.Update(table).values(
-                    **{random_index: getattr(table, random_index)}
+                insert_unknown = sql.Update(_table).values(
+                    **{random_index: getattr(_table, random_index)}
                 )
             else:
-                insert_unknown = sql.insert(table).values(**insert_values)
+                insert_unknown = sql.insert(_table).values(**insert_values)
 
         return insert_unknown
 
 
 @overload
 def sql_command(
-    commit_results: Callable[P, Coroutine[Any, Any, T]],
+    calling_function: Callable[P, Coroutine[Any, Any, T]],
 ) -> Callable[P, Coroutine[Any, Any, T]]:
     """Decorator that wraps an async function with database session and transaction management.
 
     Using the decorator with no arguments will commit the results of running the function to the database and will assume that the name of the argument to the function that should contain the session is "session".
     """
-    ...
+    pass
 
 
 @overload
@@ -467,10 +537,10 @@ def sql_command(
     session_keyword : str, optional
         The name of the argument that is meant to store the session in the function. Defaults to "session".
     """
-    ...
+    pass
 
 
-def sql_command(
+def sql_command(  # pyright: ignore[reportInconsistentOverload]
     commit_results: Callable[P, Coroutine[Any, Any, T]] | bool = True,
     session_keyword: str = "session",
 ) -> (
@@ -518,6 +588,8 @@ def sql_command(
                             result = await func(*args, **kwargs)
                 else:
                     result = await func(*args, **kwargs)
+            except Exception:
+                raise
             except BaseException as e:
                 logger.error(
                     "An error occurred during database operation in %s: %s",
@@ -776,7 +848,7 @@ async def create_tables(target_engine: AsyncEngine | None = None):
     Parameters
     ----------
     target_engine : :class:`~sqlalchemy.ext.asyncio.AsyncEngine` | None, optional
-        The engine to create/update tables on. Defaults to the module-level engine.
+        The engine to create/update tables on. Defaults to None, in which case the module-level engine will be used.
     """
     _engine = target_engine or engine
     logger.info("Ensuring all necessary tables exist...")
@@ -790,43 +862,13 @@ async def create_tables(target_engine: AsyncEngine | None = None):
     logger.info("All necessary tables are available.")
 
 
-@overload
-async def register_observed_event(
-    channel_id: int,
-    message_id: int | None = None,
-    observed_at: datetime | None = None,
-):
-    """Register an event (such as a message send or bridge creation) in the `most_recent_event_in_channel` table.
-
-    Parameters
-    ----------
-    channel_id : int
-        The ID of the channel in which the event occurred.
-    message_id : int | None, optional
-        The ID of a message that triggered the event, if it was a message. Defaults to None.
-    observed_at : :class:`~datetime.tatetime` | None, optional
-        The UTC datetime when the event occurred. Defaults to None, in which case the current time will be used.
-    """
-    ...
-
-
-@overload
-async def register_observed_event(
-    channel_id: int,
-    message_id: int | None = None,
-    observed_at: datetime | None = None,
-    *,
-    session: SQLSession | None,
-): ...
-
-
 @sql_command
 async def register_observed_event(
     channel_id: int,
     message_id: int | None = None,
     observed_at: "datetime | GenericFunction[datetime] | None" = None,
     *,
-    session: SQLSession,
+    session: SQLSession = _MISSING_SESSION,
 ):
     """Register an event (such as a message send or bridge creation) in the `most_recent_event_in_channel` table.
 
@@ -838,8 +880,8 @@ async def register_observed_event(
         The ID of a message that triggered the event, if it was a message. Defaults to None.
     observed_at : :class:`~datetime.tatetime` | None, optional
         The UTC datetime when the event occurred. Defaults to None, in which case the current time will be used.
-    session : :class:`~sqlalchemy.orm.Session` | None, optional
-        An SQLAlchemy ORM Session connecting to the database. Defaults to None, in which case a new one will be created.
+    session : :class:`~sqlalchemy.ext.asyncio.AsyncSession`, optional
+        An async SQLAlchemy Session connecting to the database. If it's not present, a new one will be created.
     """
     if observed_at is None:
         observed_at = func.now()
