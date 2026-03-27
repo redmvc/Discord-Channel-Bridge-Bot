@@ -1,3 +1,4 @@
+import asyncio
 import inspect
 from copy import deepcopy
 from typing import TYPE_CHECKING, overload
@@ -156,6 +157,7 @@ class Bridges:
         # and also delete the ones that aren't valid or accessible
         invalid_channel_ids: set[str] = set()
         invalid_webhook_ids: set[str] = set()
+        fetched_webhooks: dict[int, discord.Webhook] = {}
 
         webhook_query_result = await DBWebhook(session).collect()
         for channel_webhook in webhook_query_result:
@@ -178,7 +180,11 @@ class Bridges:
                 continue
 
             try:
-                webhook = await common.client.fetch_webhook(webhook_id)
+                if webhook_id in fetched_webhooks:
+                    webhook = fetched_webhooks[webhook_id]
+                else:
+                    webhook = await common.client.fetch_webhook(webhook_id)
+                    fetched_webhooks[webhook_id] = webhook
             except Exception:
                 # If I have access to the channel but not the webhook I remove that channel from targets
                 invalid_channel_ids.add(channel_webhook.channel)
@@ -1287,8 +1293,29 @@ async def toggle_pins_helper(
     """
     channel_id = channel.id
 
-    # Fetch current pins and build set of IDs
-    current_pin_ids: set[int] = {msg.id async for msg in channel.pins()}
+    # Fetch current pins and build set of IDs, with retry for Cloudflare 429s
+    current_pin_ids: set[int] = set()
+    for attempt in range(4):
+        try:
+            current_pin_ids = {msg.id async for msg in channel.pins()}
+            break
+        except discord.HTTPException as e:
+            if (e.status == 429) and (attempt < 3):
+                delay = 5 * (2**attempt)
+                logger.warning(
+                    "Cloudflare rate limited when fetching pins for <#%s>. Retrying in %ss (attempt %s/3)...",
+                    channel_id,
+                    delay,
+                    attempt + 1,
+                )
+                await asyncio.sleep(delay)
+            else:
+                logger.error(
+                    "Failed to fetch pins for <#%s> after retries: %s",
+                    channel_id,
+                    e,
+                )
+                return
 
     # Get previous state from cache
     previous_pin_ids = common.pinned_messages_cache.get(channel_id)
