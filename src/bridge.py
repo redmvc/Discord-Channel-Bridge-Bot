@@ -483,7 +483,7 @@ class Bridges:
             logger.debug(
                 "Loading pinned messages from <#%s> into local cache...", source_id
             )
-            await toggle_pins_helper(source_channel, session=session)
+            await toggle_pins_helper(source_channel, max_attempts=1, session=session)
             logger.debug("<#%s>'s pinned messages loaded.", source_id)
 
         # If I don't need to update the database I end here
@@ -1280,6 +1280,7 @@ bridges = Bridges()
 async def toggle_pins_helper(
     channel: TextChannelOrThread,
     *,
+    max_attempts: int = 4,
     session: SQLSession = _MISSING_SESSION,
 ):
     """Bridge message pins and unpins.
@@ -1288,6 +1289,8 @@ async def toggle_pins_helper(
     ----------
     channel : :class:`~discord.abc.GuildChannel` | :class:`~discord.Thread`
         The guild channel that had its pins updated.
+    max_attempts : int, optional
+        The maximum number of attempts to fetch a channel's pins before giving up due to CloudFlare's rate limiting. Defaults to 4.
     session : :class:`~sqlalchemy.ext.asyncio.AsyncSession`, optional
         An async SQLAlchemy Session connecting to the database. If it's not present, a new one will be created.
     """
@@ -1295,13 +1298,13 @@ async def toggle_pins_helper(
 
     # Fetch current pins and build set of IDs, with retry for Cloudflare 429s
     current_pin_ids: set[int] = set()
-    max_attempts = 1
-    for attempt in range(max_attempts + 1):
+    max_attempts = max(max_attempts, 1)
+    for attempt in range(max_attempts):
         try:
             current_pin_ids = {msg.id async for msg in channel.pins()}
             break
         except discord.HTTPException as e:
-            if (e.status == 429) and (attempt < max_attempts):
+            if (e.status == 429) and (attempt < max_attempts - 1):
                 delay = 5 * (2**attempt)
                 logger.warning(
                     "Cloudflare rate limited when fetching pins for <#%s>. Retrying in %ss (attempt %s/%s)...",
@@ -1313,8 +1316,9 @@ async def toggle_pins_helper(
                 await asyncio.sleep(delay)
             else:
                 logger.error(
-                    "Failed to fetch pins for <#%s> after retries: %s",
+                    "Failed to fetch pins for <#%s> after %s retries: %s",
                     channel_id,
+                    max_attempts,
                     e,
                 )
                 return
