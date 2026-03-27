@@ -1295,18 +1295,20 @@ async def toggle_pins_helper(
 
     # Fetch current pins and build set of IDs, with retry for Cloudflare 429s
     current_pin_ids: set[int] = set()
-    for attempt in range(4):
+    max_attempts = 1
+    for attempt in range(max_attempts + 1):
         try:
             current_pin_ids = {msg.id async for msg in channel.pins()}
             break
         except discord.HTTPException as e:
-            if (e.status == 429) and (attempt < 3):
+            if (e.status == 429) and (attempt < max_attempts):
                 delay = 5 * (2**attempt)
                 logger.warning(
-                    "Cloudflare rate limited when fetching pins for <#%s>. Retrying in %ss (attempt %s/3)...",
+                    "Cloudflare rate limited when fetching pins for <#%s>. Retrying in %ss (attempt %s/%s)...",
                     channel_id,
                     delay,
                     attempt + 1,
+                    max_attempts,
                 )
                 await asyncio.sleep(delay)
             else:
