@@ -182,7 +182,8 @@ class Bridges:
                 if webhook_id in fetched_webhooks:
                     webhook = fetched_webhooks[webhook_id]
                 else:
-                    webhook = await common.client.fetch_webhook(webhook_id)
+                    async with common.startup_rate_limiter:
+                        webhook = await common.client.fetch_webhook(webhook_id)
                     fetched_webhooks[webhook_id] = webhook
             except Exception:
                 # If I have access to the channel but not the webhook I remove that channel from targets
@@ -249,12 +250,13 @@ class Bridges:
                 # so I can add this channel to my list of Bridges
                 targets_with_sources.add(target_id_str)
                 try:
-                    await self.create_bridge(
-                        source=source_id,
-                        target=target_id,
-                        webhook=target_webhook,
-                        update_db=False,
-                    )
+                    async with common.startup_rate_limiter:
+                        await self.create_bridge(
+                            source=source_id,
+                            target=target_id,
+                            webhook=target_webhook,
+                            update_db=False,
+                        )
                 except Exception as e:
                     logger.error(
                         "Exception occurred when calling create_bridge() from load_from_database() with arguments (source=%s, target=%s, webhook=%s): %s",
