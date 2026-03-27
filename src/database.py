@@ -1,3 +1,4 @@
+import re
 from datetime import datetime, timezone
 from functools import wraps
 from typing import (
@@ -743,6 +744,59 @@ def _get_modify_column_ddl(
         return f"ALTER TABLE {qt} {', '.join(parts)}"
 
 
+_CURRENT_TIMESTAMP_ALIASES = {"NOW()", "CURRENT_TIMESTAMP", "CURRENT_TIMESTAMP()"}
+
+
+def _normalize_default(value: str | None) -> str | None:
+    """Normalise a server default value for comparison purposes.
+
+    Strips outer parentheses, uppercases, and maps known equivalent expressions (e.g. `NOW()`, `CURRENT_TIMESTAMP`, `CURRENT_TIMESTAMP()`) to a single canonical form so that inspector-reported defaults match ORM-compiled defaults.
+
+    Parameters
+    ----------
+    value : str | None
+        The raw default string from the ORM or inspector.
+
+    Returns
+    -------
+    str | None
+    """
+    if value is None:
+        return None
+
+    value = value.strip()
+    # Strip outer parens that MySQL sometimes wraps around defaults
+    value = re.sub(r"^\((.+)\)$", r"\1", value)
+    value = value.upper().strip()
+    if value in _CURRENT_TIMESTAMP_ALIASES:
+        return "CURRENT_TIMESTAMP"
+    return value
+
+
+def _normalize_type(compiled_type: str) -> str:
+    """Normalise a compiled column type string for comparison purposes.
+
+    Uppercases and collapses whitespace so that minor formatting differences
+    between the ORM-compiled type and the inspector-reported type don't cause
+    false positives.
+
+    Parameters
+    ----------
+    compiled_type : str
+        The compiled type string from `column.type.compile()` or the inspector.
+
+    Returns
+    -------
+    str
+        The normalised type string.
+    """
+    normalized = re.sub(r"\s+", " ", compiled_type.upper().strip())
+    # MySQL stores BOOL/BOOLEAN as TINYINT(1) — treat them as equivalent
+    if normalized in ("BOOL", "BOOLEAN", "TINYINT(1)"):
+        return "TINYINT(1)"
+    return normalized
+
+
 def _sync_columns(connection: Connection):
     """Inspect the database for each ORM table and synchronise the schema to match the ORM metadata.
 
@@ -792,14 +846,18 @@ def _sync_columns(connection: Connection):
                 needs_modify = True
 
             # Compare type (compile both to dialect-native strings and compare)
-            expected_type = column.type.compile(dialect=connection.dialect)
-            existing_type = existing["type"].compile(dialect=connection.dialect)
-            if str(expected_type).upper() != str(existing_type).upper():
+            expected_type = _normalize_type(
+                column.type.compile(dialect=connection.dialect)
+            )
+            existing_type = _normalize_type(
+                existing["type"].compile(dialect=connection.dialect)
+            )
+            if expected_type != existing_type:
                 needs_modify = True
 
             # Compare server default
-            expected_default = _compile_server_default(column)
-            existing_default = (
+            expected_default = _normalize_default(_compile_server_default(column))
+            existing_default = _normalize_default(
                 str(existing["default"])
                 if existing.get("default") is not None
                 else None
