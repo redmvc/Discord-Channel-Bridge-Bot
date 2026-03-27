@@ -3044,7 +3044,7 @@ async def clear_locks():
     }
 
 
-@tasks.loop(seconds=60)
+@tasks.loop(minutes=5)
 async def retry_failed_pin_cache():
     """Periodically retry loading pins for channels that failed during startup."""
     source_channels = bridges.get_channels_with_outbound_bridges()
