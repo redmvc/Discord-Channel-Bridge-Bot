@@ -1312,6 +1312,17 @@ async def toggle_pins_helper(
     if not reachable_channels:
         return
 
+    # Identify who pinned by looking for the pins_add system message
+    pinner: discord.Member | discord.User | None = None
+    if newly_pinned:
+        try:
+            async for msg in channel.history(limit=5):
+                if msg.type == discord.MessageType.pins_add:
+                    pinner = msg.author
+                    break
+        except discord.HTTPException:
+            pass
+
     for pin_toggled_msg_id, pin in [
         *((msg_id, True) for msg_id in newly_pinned),
         *((msg_id, False) for msg_id in newly_unpinned),
@@ -1348,6 +1359,7 @@ async def toggle_pins_helper(
                 int(bridged_messages[0].source_channel),
                 int(bridged_messages[0].source_message),
                 pin,
+                pinner=pinner if pin else None,
             )
 
         for message_row in bridged_messages:
@@ -1368,11 +1380,18 @@ async def toggle_pins_helper(
                 target_channel_id,
                 target_message_id,
                 pin,
+                pinner=pinner if pin else None,
             )
 
 
-async def _toggle_pin_message(channel_id: int, target_msg_id: int, pin: bool):
-    """Pin or unpin a message in a channel."""
+async def _toggle_pin_message(
+    channel_id: int,
+    target_msg_id: int,
+    pin: bool,
+    *,
+    pinner: "discord.Member | discord.User | None" = None,
+):
+    """Pin or unpin a message in a channel, and send a notification embed on pin."""
     target_channel = await common.get_channel_from_id(channel_id)
     if not isinstance(target_channel, TextChannelOrThread):
         return
@@ -1384,9 +1403,11 @@ async def _toggle_pin_message(channel_id: int, target_msg_id: int, pin: bool):
     try:
         common.expected_pin_changes[channel_id] += 1
         if pin:
-            await partial_message.pin()
+            await partial_message.pin(
+                reason=f"Bridging pin{f' by user with ID {pinner.id}' if pinner else ''}."
+            )
         else:
-            await partial_message.unpin()
+            await partial_message.unpin(reason="Bridging unpin.")
     except discord.HTTPException as e:
         common.expected_pin_changes[channel_id] -= 1
         if common.expected_pin_changes[channel_id] == 0:
@@ -1395,6 +1416,27 @@ async def _toggle_pin_message(channel_id: int, target_msg_id: int, pin: bool):
             "Failed to %s message %s in channel <#%s>: %s",
             "pin" if pin else "unpin",
             target_msg_id,
+            channel_id,
+            e,
+        )
+        return
+
+    if not (pin and pinner):
+        return
+
+    # Send a notification embed for pins
+    embed = discord.Embed.from_dict(
+        {
+            "description": f"-# \U0001f4cc The above message was pinned by <@{pinner.id}>.",
+            "type": "rich",
+        }
+    )
+
+    try:
+        await target_channel.send(embed=embed)
+    except discord.HTTPException as e:
+        logger.warning(
+            "Failed to send pin notification in channel <#%s>: %s",
             channel_id,
             e,
         )

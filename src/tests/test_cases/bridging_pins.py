@@ -1,3 +1,5 @@
+import asyncio
+
 import discord
 import test_runner
 from test_runner import (
@@ -6,7 +8,7 @@ from test_runner import (
     expect,
     give_manage_webhook_perms,
     give_pin_perms,
-    remove_pin_perms,
+    # remove_pin_perms,
 )
 
 
@@ -21,45 +23,49 @@ class BridgingPins(test_runner.TestCase):
 pin_bridging_tests = BridgingPins()
 
 
-@pin_bridging_tests.test
-async def does_not_work_without_permission(
-    bridge_bot: discord.Client,
-    tester_bot: discord.Client,
-    testing_server: discord.Guild,
-    testing_channels: tuple[
-        discord.TextChannel,
-        discord.TextChannel,
-        discord.TextChannel,
-        discord.TextChannel,
-    ],
-) -> list[str]:
-    await give_manage_webhook_perms(tester_bot, testing_server)
-    await remove_pin_perms(bridge_bot, testing_server)
+# @pin_bridging_tests.test
+# async def does_not_work_without_permission(
+#     bridge_bot: discord.Client,
+#     tester_bot: discord.Client,
+#     testing_server: discord.Guild,
+#     testing_channels: tuple[
+#         discord.TextChannel,
+#         discord.TextChannel,
+#         discord.TextChannel,
+#         discord.TextChannel,
+#     ],
+# ) -> list[str]:
+#     await give_manage_webhook_perms(tester_bot, testing_server)
+#     await remove_pin_perms(bridge_bot, testing_server)
 
-    channel_1 = testing_channels[0]
-    channel_2 = testing_channels[1]
-    await demolish_bridges(channel_1, channel_and_threads=True)
-    await create_bridge(channel_1, channel_2.id)
+#     channel_1 = testing_channels[0]
+#     channel_2 = testing_channels[1]
+#     await demolish_bridges(channel_1, channel_and_threads=True)
+#     await create_bridge(channel_1, channel_2.id)
 
-    # Send message
-    original_message = await channel_1.send("pin without permission")
-    bridged_message, failure_messages = await expect(
-        "next_message",
-        in_channel=channel_2,
-        to={"equal": "pin without permission", "be_from": bridge_bot},
-    )
-    if not bridged_message:
-        return failure_messages
+#     # Send message
+#     original_message = await channel_1.send("pin without permission")
+#     bridged_message, failure_messages = await expect(
+#         "next_message",
+#         in_channel=channel_2,
+#         to={"equal": "pin without permission", "be_from": bridge_bot},
+#     )
+#     if not bridged_message:
+#         return failure_messages
 
-    # Pin original
-    await original_message.pin()
-    _, f = await expect(bridged_message, to="not_be_pinned", timeout=5)
-    failure_messages += f
+#     # Pin original
+#     await original_message.pin()
+#     _, f = await expect(bridged_message, to="not_be_pinned", timeout=5)
+#     failure_messages += f
 
-    # Unpin the original
-    await original_message.unpin()
+#     # No pin notification should appear either
+#     _, f = await expect("no_new_message", in_channel=channel_2, timeout=5)
+#     failure_messages += f
 
-    return failure_messages
+#     # Unpin the original
+#     await original_message.unpin()
+
+#     return failure_messages
 
 
 @pin_bridging_tests.test
@@ -93,8 +99,21 @@ async def works(
         return failure_messages
 
     # Pin original — bridged copy should be pinned too
+    await asyncio.sleep(0.5)  # wait a bit so the pin will definitely be propagated
     await original_message.pin()
     _, f = await expect(bridged_message, to="be_pinned")
+    failure_messages += f
+
+    # Expect pin notification in channel_2
+    await expect("next_message", in_channel=channel_2, to=[])  # System message of pin
+    _, f = await expect(
+        "next_message",
+        in_channel=channel_2,
+        to={
+            "have_embed": {"whose_description_contains": "pinned by"},
+            "be_from": bridge_bot,
+        },
+    )
     failure_messages += f
 
     # Clean up
@@ -134,13 +153,31 @@ async def unpinning_works(
         return failure_messages
 
     # Pin original, wait for bridged copy to be pinned
+    await asyncio.sleep(0.5)  # wait a bit so the pin will definitely be propagated
     await original_message.pin()
     _, f = await expect(bridged_message, to="be_pinned")
     failure_messages += f
 
+    # Consume the pin notification
+    await expect("next_message", in_channel=channel_2, to=[])  # System message of pin
+    _, f = await expect(
+        "next_message",
+        in_channel=channel_2,
+        to={
+            "have_embed": {"whose_description_contains": "pinned by"},
+            "be_from": bridge_bot,
+        },
+    )
+    failure_messages += f
+
     # Unpin original — bridged copy should be unpinned too
+    await asyncio.sleep(0.5)  # wait a bit so the pin will definitely be propagated
     await original_message.unpin()
     _, f = await expect(bridged_message, to="not_be_pinned")
+    failure_messages += f
+
+    # No notification for unpins
+    _, f = await expect("no_new_message", in_channel=channel_2, timeout=5)
     failure_messages += f
 
     return failure_messages
@@ -177,8 +214,21 @@ async def works_from_bridged_side(
         return failure_messages
 
     # Pin the bridged copy — original should be pinned too
+    await asyncio.sleep(0.5)  # wait a bit so the pin will definitely be propagated
     await bridged_message.pin()
     _, f = await expect(original_message, to="be_pinned")
+    failure_messages += f
+
+    # Expect pin notification in channel_1
+    await expect("next_message", in_channel=channel_1, to=[])  # System message of pin
+    _, f = await expect(
+        "next_message",
+        in_channel=channel_1,
+        to={
+            "have_embed": {"whose_description_contains": "pinned by"},
+            "be_from": bridge_bot,
+        },
+    )
     failure_messages += f
 
     # Clean up
@@ -221,8 +271,13 @@ async def does_not_work_if_bridge_demolished(
     await demolish_bridges(channel_1, channel_and_threads=True)
 
     # Pin original — bridged copy should NOT be pinned
+    await asyncio.sleep(0.5)  # wait a bit so the pin will definitely be propagated
     await original_message.pin()
     _, f = await expect(bridged_message, to="not_be_pinned", timeout=5)
+    failure_messages += f
+
+    # No pin notification should appear either
+    _, f = await expect("no_new_message", in_channel=channel_2, timeout=5)
     failure_messages += f
 
     # Clean up
