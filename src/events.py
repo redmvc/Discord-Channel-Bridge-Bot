@@ -3069,7 +3069,7 @@ async def retry_failed_pin_cache():
             missing.discard(channel_id)
             continue
 
-        await toggle_pins_helper(channel)
+        await toggle_pins_helper(channel, max_attempts=1)
 
     missing = missing - common.pinned_messages_cache.keys()
     if not missing:
