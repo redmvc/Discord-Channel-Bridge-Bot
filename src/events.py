@@ -3045,7 +3045,8 @@ async def clear_locks():
 
 
 @tasks.loop(seconds=60)
-async def retry_failed_pin_cache():
+@sql_command(commit_results=False)
+async def retry_failed_pin_cache(*, session: SQLSession = _MISSING_SESSION):
     """Periodically retry loading pins for channels that failed during startup."""
     source_channels = bridges.get_channels_with_outbound_bridges()
     missing = source_channels - common.pinned_messages_cache.keys()
@@ -3069,7 +3070,7 @@ async def retry_failed_pin_cache():
             missing.discard(channel_id)
             continue
 
-        await toggle_pins_helper(channel, max_attempts=1)
+        await toggle_pins_helper(channel, max_attempts=1, session=session)
 
     missing = missing - common.pinned_messages_cache.keys()
     if not missing:
