@@ -78,6 +78,7 @@ async def on_ready():
     common.is_connected = True
     common.is_ready = True
     retry_failed_pin_cache.start()
+    clear_locks.start()
     logger.info("Bot is ready.")
 
 
