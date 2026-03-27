@@ -1295,6 +1295,7 @@ async def toggle_pins_helper(
         An async SQLAlchemy Session connecting to the database. If it's not present, a new one will be created.
     """
     channel_id = channel.id
+    logger.debug("Processing pins in channel <#%s>.", channel_id)
 
     # Fetch current pins and build set of IDs, with retry for Cloudflare 429s
     current_pin_ids: set[int] = set()
@@ -1327,22 +1328,38 @@ async def toggle_pins_helper(
     previous_pin_ids = common.pinned_messages_cache.get(channel_id)
     if previous_pin_ids is None:
         # First event for a channel not in cache (e.g. bridge created after startup)
+        logger.debug(
+            "First initialisation of <#%s>'s pins complete. Pinned message IDs: %s",
+            channel_id,
+            current_pin_ids,
+        )
         common.pinned_messages_cache[channel_id] = current_pin_ids
         return
 
+    logger.debug(
+        "Processing change in <#%s>'s pins.\n  Previous pinned message IDs: %s\n  Current pinned message IDs: %s",
+        channel_id,
+        previous_pin_ids,
+        current_pin_ids,
+    )
     # Compute diff
     newly_pinned = current_pin_ids - previous_pin_ids
     newly_unpinned = previous_pin_ids - current_pin_ids
 
+    if not (newly_pinned | newly_unpinned):
+        logger.debug("No change in <#%s>'s pins.", channel_id)
+        return
+
     # Update cache
     common.pinned_messages_cache[channel_id] = current_pin_ids
-
-    if not (newly_pinned or newly_unpinned):
-        return
 
     # Get reachable destination channels
     reachable_channels = await bridges.get_reachable_channels(channel_id, "outbound")
     if not reachable_channels:
+        logger.warning(
+            "<#%s> somehow had no reachable channels through outbound bridges.",
+            channel_id,
+        )
         return
 
     # Identify who pinned by looking for the pins_add system message
@@ -1356,6 +1373,7 @@ async def toggle_pins_helper(
         except discord.HTTPException:
             pass
 
+    logger.debug("Pinning and unpinning messages.")
     for pin_toggled_msg_id, pin in [
         *((msg_id, True) for msg_id in newly_pinned),
         *((msg_id, False) for msg_id in newly_unpinned),
@@ -1370,6 +1388,10 @@ async def toggle_pins_helper(
             .collect()
         )
         if not pin_toggled_msg_src:
+            logger.debug(
+                "Message with ID %s was not bridged to any messages.",
+                pin_toggled_msg_id,
+            )
             continue
 
         source_msg_id = int(pin_toggled_msg_src[0].source_message)
@@ -1383,6 +1405,22 @@ async def toggle_pins_helper(
                 )
             )
             .collect()
+        )
+
+        logger.debug(
+            "%s messages bridged to message with ID %s: %s",
+            "Pinning" if pin else "Unpinning",
+            pin_toggled_msg_id,
+            (
+                {bridged_messages[0].source_message}
+                if int(bridged_messages[0].source_message) != pin_toggled_msg_id
+                else set()
+            )
+            | {
+                message_row.target_message
+                for message_row in bridged_messages
+                if int(message_row.target_message) != pin_toggled_msg_id
+            },
         )
 
         if (int(bridged_messages[0].source_message) != pin_toggled_msg_id) and (
@@ -1425,11 +1463,26 @@ async def _toggle_pin_message(
     pinner: "discord.Member | discord.User | None" = None,
 ):
     """Pin or unpin a message in a channel, and send a notification embed on pin."""
+    logger.debug(
+        "%s message with ID %s.",
+        "Pinning" if pin else "Unpinning",
+        target_msg_id,
+    )
+
     target_channel = await common.get_channel_from_id(channel_id)
     if not isinstance(target_channel, TextChannelOrThread):
+        logger.debug(
+            "Channel <#%s> where message was to be %s is not a text channel or a thread off one.",
+            channel_id,
+            "pinned" if pin else "unpinned",
+        )
         return
 
     if not target_channel.permissions_for(target_channel.guild.me).pin_messages:
+        logger.debug(
+            "Bridge bot did not have permission to pin/unpin messages in channel <#%s>.",
+            channel_id,
+        )
         return
 
     partial_message = target_channel.get_partial_message(target_msg_id)
@@ -1454,10 +1507,13 @@ async def _toggle_pin_message(
         )
         return
 
+    logger.debug("Message %s.", "pinned" if pin else "unpinned")
+
     if not (pin and pinner):
         return
 
     # Send a notification embed for pins
+    logger.debug("Sending pin message notification to <#%s>.", channel_id)
     embed = discord.Embed.from_dict(
         {
             "description": f"-# \U0001f4cc The above message was pinned by <@{pinner.id}>.",
@@ -1473,3 +1529,4 @@ async def _toggle_pin_message(
             channel_id,
             e,
         )
+    logger.debug("Message sent.")
