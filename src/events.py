@@ -77,8 +77,6 @@ async def on_ready():
 
     common.is_connected = True
     common.is_ready = True
-    retry_failed_pin_cache.start()
-    clear_locks.start()
     logger.info("Bot is ready.")
 
 
@@ -232,6 +230,17 @@ async def setup_bot(*, session: SQLSession = _MISSING_SESSION):
     else:
         print("Bot is not connected to any servers.")
         logger.info("Bot is not connected to any servers.")
+
+    # Start clear_locks timer
+    clear_locks.start()
+
+    # Start retry_failed_pin_cache timer if necessary and not otherwise
+    missing = (
+        bridges.get_channels_with_outbound_bridges()
+        - common.pinned_messages_cache.keys()
+    )
+    if missing:
+        retry_failed_pin_cache.start()
 
 
 @common.client.event
