@@ -1,3 +1,4 @@
+import asyncio
 import inspect
 from copy import deepcopy
 from typing import TYPE_CHECKING, overload
@@ -182,8 +183,7 @@ class Bridges:
                 if webhook_id in fetched_webhooks:
                     webhook = fetched_webhooks[webhook_id]
                 else:
-                    async with common.startup_rate_limiter:
-                        webhook = await common.client.fetch_webhook(webhook_id)
+                    webhook = await common.client.fetch_webhook(webhook_id)
                     fetched_webhooks[webhook_id] = webhook
             except Exception:
                 # If I have access to the channel but not the webhook I remove that channel from targets
@@ -250,13 +250,12 @@ class Bridges:
                 # so I can add this channel to my list of Bridges
                 targets_with_sources.add(target_id_str)
                 try:
-                    async with common.startup_rate_limiter:
-                        await self.create_bridge(
-                            source=source_id,
-                            target=target_id,
-                            webhook=target_webhook,
-                            update_db=False,
-                        )
+                    await self.create_bridge(
+                        source=source_id,
+                        target=target_id,
+                        webhook=target_webhook,
+                        update_db=False,
+                    )
                 except Exception as e:
                     logger.error(
                         "Exception occurred when calling create_bridge() from load_from_database() with arguments (source=%s, target=%s, webhook=%s): %s",
@@ -1294,8 +1293,29 @@ async def toggle_pins_helper(
     """
     channel_id = channel.id
 
-    # Fetch current pins and build set of IDs
-    current_pin_ids: set[int] = {msg.id async for msg in channel.pins()}
+    # Fetch current pins and build set of IDs, with retry for Cloudflare 429s
+    current_pin_ids: set[int] = set()
+    for attempt in range(4):
+        try:
+            current_pin_ids = {msg.id async for msg in channel.pins()}
+            break
+        except discord.HTTPException as e:
+            if (e.status == 429) and (attempt < 3):
+                delay = 5 * (2**attempt)
+                logger.warning(
+                    "Cloudflare rate limited when fetching pins for <#%s>. Retrying in %ss (attempt %s/3)...",
+                    channel_id,
+                    delay,
+                    attempt + 1,
+                )
+                await asyncio.sleep(delay)
+            else:
+                logger.error(
+                    "Failed to fetch pins for <#%s> after retries: %s",
+                    channel_id,
+                    e,
+                )
+                return
 
     # Get previous state from cache
     previous_pin_ids = common.pinned_messages_cache.get(channel_id)
