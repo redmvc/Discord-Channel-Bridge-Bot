@@ -156,6 +156,7 @@ class Bridges:
         # and also delete the ones that aren't valid or accessible
         invalid_channel_ids: set[str] = set()
         invalid_webhook_ids: set[str] = set()
+        fetched_webhooks: dict[int, discord.Webhook] = {}
 
         webhook_query_result = await DBWebhook(session).collect()
         for channel_webhook in webhook_query_result:
@@ -178,7 +179,11 @@ class Bridges:
                 continue
 
             try:
-                webhook = await common.client.fetch_webhook(webhook_id)
+                if webhook_id in fetched_webhooks:
+                    webhook = fetched_webhooks[webhook_id]
+                else:
+                    webhook = await common.client.fetch_webhook(webhook_id)
+                    fetched_webhooks[webhook_id] = webhook
             except Exception:
                 # If I have access to the channel but not the webhook I remove that channel from targets
                 invalid_channel_ids.add(channel_webhook.channel)
