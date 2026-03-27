@@ -77,6 +77,8 @@ async def on_ready():
 
     common.is_connected = True
     common.is_ready = True
+    retry_failed_pin_cache.start()
+    clear_locks.start()
     logger.info("Bot is ready.")
 
 
@@ -3040,6 +3042,39 @@ async def clear_locks():
         for message_id, payload in common.messages_to_edit.items()
         if message_id in common.message_lock
     }
+
+
+@tasks.loop(minutes=5)
+async def retry_failed_pin_cache():
+    """Periodically retry loading pins for channels that failed during startup."""
+    source_channels = bridges.get_channels_with_outbound_bridges()
+    missing = source_channels - common.pinned_messages_cache.keys()
+    if not missing:
+        logger.info("All pin caches populated. Stopping retry task.")
+        retry_failed_pin_cache.stop()  # pyright: ignore[reportFunctionMemberAccess]
+        return
+
+    logger.info(
+        "Retrying pin cache loading for %s channel(s)...",
+        len(missing),
+    )
+
+    for channel_id in missing:
+        channel = await common.get_channel_from_id(channel_id)
+        if not (channel and isinstance(channel, TextChannelOrThread)):
+            logger.debug(
+                "Channel <#%s> not found when retrying pin cache. Skipping and removing from queue.",
+                channel_id,
+            )
+            missing.discard(channel_id)
+            continue
+
+        await toggle_pins_helper(channel, max_attempts=1)
+
+    missing = missing - common.pinned_messages_cache.keys()
+    if not missing:
+        logger.info("All pin caches populated. Stopping retry task.")
+        retry_failed_pin_cache.stop()  # pyright: ignore[reportFunctionMemberAccess]
 
 
 @common.client.event
