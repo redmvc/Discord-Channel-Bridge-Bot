@@ -77,8 +77,6 @@ async def on_ready():
 
     common.is_connected = True
     common.is_ready = True
-    retry_failed_pin_cache.start()
-    clear_locks.start()
     logger.info("Bot is ready.")
 
 
@@ -232,6 +230,17 @@ async def setup_bot(*, session: SQLSession = _MISSING_SESSION):
     else:
         print("Bot is not connected to any servers.")
         logger.info("Bot is not connected to any servers.")
+
+    # Start clear_locks timer
+    clear_locks.start()
+
+    # Start retry_failed_pin_cache timer if necessary and not otherwise
+    missing = (
+        bridges.get_channels_with_outbound_bridges()
+        - common.pinned_messages_cache.keys()
+    )
+    if missing:
+        retry_failed_pin_cache.start()
 
 
 @common.client.event
@@ -3016,27 +3025,27 @@ async def bridge_unbridged_messages(*, session: SQLSession = _MISSING_SESSION):
 @tasks.loop(hours=1)
 async def clear_locks():
     """Clear the lock lists hourly."""
-    for channel_id, lock in common.channel_lock.items():
-        if not lock.locked():
-            try:
-                del common.channel_lock[channel_id]
-                del lock
-            except Exception:
-                pass
+    for channel_id, lock in list(common.channel_lock.items()):
+        if lock.locked():
+            continue
 
-    for message_id, lock in common.message_lock.items():
-        if not lock.locked():
-            try:
-                del common.message_lock[message_id]
-                del lock
-            except Exception:
-                pass
+        try:
+            del common.channel_lock[channel_id]
+        except Exception:
+            pass
 
-    common.messages_to_delete = {
-        message_id
-        for message_id in common.messages_to_delete
-        if message_id in common.message_lock
-    }
+    for message_id, lock in list(common.message_lock.items()):
+        if lock.locked():
+            continue
+
+        try:
+            del common.message_lock[message_id]
+        except Exception:
+            pass
+
+    common.messages_to_delete = common.messages_to_delete.intersection(
+        set(common.message_lock.keys())
+    )
     common.messages_to_edit = {
         message_id: payload
         for message_id, payload in common.messages_to_edit.items()
@@ -3069,7 +3078,7 @@ async def retry_failed_pin_cache():
             missing.discard(channel_id)
             continue
 
-        await toggle_pins_helper(channel, max_attempts=1)
+        await toggle_pins_helper(channel, max_retries=0)
 
     missing = missing - common.pinned_messages_cache.keys()
     if not missing:
