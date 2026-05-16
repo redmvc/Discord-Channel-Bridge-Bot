@@ -969,7 +969,7 @@ async def bridge_message_to_target_channel(
     total_attachment_size = 0
     too_large_attachments: list["discord.Attachment"] = []
     extra_attachments_message = None
-    source_nsfw_target_not = source_channel_parent.is_nsfw() and (
+    source_nsfw_target_sfw = source_channel_parent.is_nsfw() and (
         not target_channel.is_nsfw()
     )
     for attachment in message_attachments:
@@ -985,7 +985,7 @@ async def bridge_message_to_target_channel(
 
         attachments.append(
             await attachment.to_file(
-                spoiler=source_nsfw_target_not or attachment.is_spoiler()
+                spoiler=source_nsfw_target_sfw or attachment.is_spoiler()
             )  # TODO: add tests for this
         )
 
