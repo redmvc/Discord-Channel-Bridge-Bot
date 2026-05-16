@@ -95,7 +95,7 @@ class Bots:
                 )
             else:
                 test_runner.log_expectation(
-                    f"All tests so far passed, but an uncaught exception occurred: {exc_type!r} ({exc_value!r})",
+                    "All tests so far passed, but an uncaught exception occurred.",
                     "failure",
                 )
         else:
