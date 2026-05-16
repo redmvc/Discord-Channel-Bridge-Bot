@@ -614,6 +614,9 @@ async def bridge_message_helper(
         # Send a message out to each target webhook
         bridged_messages: list[BridgedMessage] = []
         error_occurred = False
+        original_message_channel_parent = await common.get_channel_parent(
+            original_message_channel
+        )
         for target_id, webhook in reachable_channels.items():
             if not webhook:
                 continue
@@ -645,6 +648,7 @@ async def bridge_message_helper(
                 async with lock:
                     bridged_message_list = await bridge_message_to_target_channel(
                         message,
+                        original_message_channel_parent,
                         message_content,
                         message_attachments,
                         list(deepcopy(message_embeds)),
@@ -773,6 +777,7 @@ class ReplyEmbedThumbnailDict(TypedDict):
 
 async def bridge_message_to_target_channel(
     sent_message: discord.Message,
+    source_channel_parent: discord.TextChannel,
     message_content: str,
     message_attachments: list[discord.Attachment],
     message_embeds: list[discord.Embed],
@@ -964,16 +969,25 @@ async def bridge_message_to_target_channel(
     total_attachment_size = 0
     too_large_attachments: list["discord.Attachment"] = []
     extra_attachments_message = None
+    source_nsfw_target_not = source_channel_parent.is_nsfw() and (
+        not target_channel.is_nsfw()
+    )
     for attachment in message_attachments:
-        if ((attachment_size := attachment.size) >= server_max_message_size) or (
-            total_attachment_size + attachment_size >= server_max_message_size
+        if too_large_attachments or (
+            total_attachment_size + (attachment_size := attachment.size)
+            >= server_max_message_size
         ):
+            # If I run into any too-large attachments then all attachments after that are too large TODO: modify tests for this
             too_large_attachments.append(attachment)
             continue
 
         total_attachment_size += attachment_size
 
-        attachments.append(await attachment.to_file(spoiler=attachment.is_spoiler()))
+        attachments.append(
+            await attachment.to_file(
+                spoiler=source_nsfw_target_not or attachment.is_spoiler()
+            )  # TODO: add tests for this
+        )
 
     if too_large_attachments:
         # If there are attachments too large to be directly copied onto the bridged message,
