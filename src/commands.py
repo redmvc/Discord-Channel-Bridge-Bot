@@ -221,6 +221,58 @@ async def bridge(
         )
         return
 
+    # -----
+    channels_with_outbound_bridges_from_here = set(
+        bridges.get_outbound_bridges(message_channel) or []
+    )
+    channels_with_inbound_bridges_to_here = set(
+        bridges.get_inbound_bridges(message_channel) or []
+    )
+    channels_with_two_way_bridges_from_here = (
+        channels_with_outbound_bridges_from_here.intersection(
+            channels_with_inbound_bridges_to_here
+        )
+    )
+
+    if target_channel.id in channels_with_two_way_bridges_from_here:
+        await interaction.response.send_message(
+            "❕ A two-way bridge between this and target channels already exists.",
+            ephemeral=True,
+        )
+        return
+
+    if (direction != "inbound") and (
+        target_channel.id in channels_with_outbound_bridges_from_here
+    ):
+        if direction == "outbound":
+            await interaction.response.send_message(
+                "❕ An outbound bridge from this channel to target channel already exists.",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.send_message(
+            "❕ An outbound bridge from this channel to target channel already exists. Creating inbound bridge.",
+            ephemeral=True,
+        )
+        direction = "inbound"
+    elif (direction != "outbound") and (
+        target_channel.id in channels_with_inbound_bridges_to_here
+    ):
+        if direction == "inbound":
+            await interaction.response.send_message(
+                "❕ An inbound bridge to this channel from target channel already exists.",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.send_message(
+            "❕ An inbound bridge to this channel from target channel already exists. Creating outbound bridge.",
+            ephemeral=True,
+        )
+        direction = "outbound"
+
+    # -----
     await interaction.response.defer(thinking=True, ephemeral=True)
 
     if isinstance(message_channel, discord.Thread) and (not message_channel.me):
@@ -253,7 +305,7 @@ async def bridge(
                 e,
             )
 
-        raise
+        return
 
     if not direction:
         direction_str = "either"

@@ -19,6 +19,7 @@ from tester_bot import start_client as start_tester_bot
 
 import common
 from main import start_client as start_bridge_bot
+from validations import logger
 
 # Auto-discover and import all test case modules
 for _, module_name, _ in pkgutil.iter_modules(test_cases.__path__):
@@ -35,7 +36,18 @@ class Bots:
         self.running_tester_bot_client_task = asyncio.create_task(start_tester_bot())
         self.tester_bot_client = tester_bot.client
 
-        await asyncio.gather(common.wait_until_ready(), tester_bot.wait_until_ready())
+        try:
+            await asyncio.gather(
+                common.wait_until_ready(),
+                tester_bot.wait_until_ready(),
+            )
+        except BaseException:
+            await asyncio.gather(
+                asyncio.shield(self.bridge_bot_client.close()),
+                asyncio.shield(self.tester_bot_client.close()),
+                return_exceptions=True,
+            )
+            raise
         return self
 
     async def __aexit__(
@@ -44,14 +56,28 @@ class Bots:
         exc_value: Any | None,
         tb: TracebackType | None,
     ):
+        # Delete the role first (needs an open bot connection). Wrapped so a
+        # failure here doesn't skip the bot close below.
         if test_runner.webhook_permissions_role is not None:
-            await test_runner.webhook_permissions_role.delete()
+            try:
+                await test_runner.webhook_permissions_role.delete()
+            except Exception:
+                logger.exception(
+                    "Failed to delete webhook_permissions_role during shutdown"
+                )
+
+        # Shield close() from outer cancellation so Ctrl+C can't abort the
+        # websocket/aiohttp teardown mid-flight.
+        await asyncio.gather(
+            asyncio.shield(self.bridge_bot_client.close()),
+            asyncio.shield(self.tester_bot_client.close()),
+            return_exceptions=True,
+        )
 
         await asyncio.gather(
-            asyncio.create_task(self.bridge_bot_client.close()),
             self.running_bridge_bot_client_task,
-            asyncio.create_task(self.tester_bot_client.close()),
             self.running_tester_bot_client_task,
+            return_exceptions=True,
         )
 
         if test_runner.failures:
@@ -61,6 +87,17 @@ class Bots:
                 f"A total of {num_failures} failure{'s' if num_failures >= 2 else ''} happened in {num_tests} test{'s' if num_tests >= 2 else ''}:\n - {'\n - '.join(t + ' (' + str(len(f)) + ')' for t, f in test_runner.failures.items())}",
                 "failure",
             )
+        elif exc_type:
+            if (exc_type is KeyboardInterrupt) or (exc_type is asyncio.CancelledError):
+                test_runner.log_expectation(
+                    "All tests so far passed, but execution was interrupted.",
+                    "failure",
+                )
+            else:
+                test_runner.log_expectation(
+                    "All tests so far passed, but an uncaught exception occurred.",
+                    "failure",
+                )
         else:
             test_runner.log_expectation(
                 "All tests passed!",
@@ -68,11 +105,13 @@ class Bots:
                 print_success_to_console=True,
             )
 
-        if exc_value:
+        if (
+            exc_value
+            and (exc_type is not KeyboardInterrupt)
+            and (exc_type is not asyncio.CancelledError)
+        ):
             traceback.print_tb(tb)
             raise exc_value.with_traceback(tb)
-
-        return True
 
 
 async def run_tests():
@@ -86,4 +125,7 @@ async def run_tests():
 
 
 if __name__ == "__main__":
-    asyncio.run(run_tests())
+    try:
+        asyncio.run(run_tests())
+    except KeyboardInterrupt:
+        pass
