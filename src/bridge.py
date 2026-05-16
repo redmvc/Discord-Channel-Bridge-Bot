@@ -837,6 +837,15 @@ class Bridges:
             self.get_one_way_bridge(target, source),
         )
 
+    def get_channels_with_outbound_bridges(self) -> set[int]:
+        """Return a set with the IDs of all channels that have outbound bridges coming from them.
+
+        Returns
+        -------
+        set[int]
+        """
+        return set(self._outbound_bridges.keys())
+
     def get_outbound_bridges(
         self,
         source: TextChannelOrThread | int,
@@ -854,15 +863,6 @@ class Bridges:
         """
         logger.debug("Fetching outbound bridges from %s.", source)
         return self._outbound_bridges.get(common.get_id_from_channel(source))
-
-    def get_channels_with_outbound_bridges(self) -> set[int]:
-        """Return a set with the IDs of all channels that have outbound bridges coming from them.
-
-        Returns
-        -------
-        set[int]
-        """
-        return set(self._outbound_bridges.keys())
 
     def get_inbound_bridges(
         self,
