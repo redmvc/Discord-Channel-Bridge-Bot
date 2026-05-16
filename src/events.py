@@ -968,9 +968,8 @@ async def bridge_message_to_target_channel(
     server_max_message_size = webhook_channel.guild.filesize_limit
     total_attachment_size = 0
     too_large_attachments: list["discord.Attachment"] = []
-    extra_attachments_message = None
     source_nsfw_target_sfw = source_channel_parent.is_nsfw() and (
-        not target_channel.is_nsfw()
+        not webhook_channel.is_nsfw()
     )
     for attachment in message_attachments:
         if too_large_attachments or (
@@ -989,6 +988,7 @@ async def bridge_message_to_target_channel(
             )  # TODO: add tests for this
         )
 
+    extra_attachments_message = None
     if too_large_attachments:
         # If there are attachments too large to be directly copied onto the bridged message,
         # the Bridge Bot itself sends an extra message afterwards with them
